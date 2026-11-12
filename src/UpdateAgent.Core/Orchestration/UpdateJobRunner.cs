@@ -1,0 +1,1154 @@
+using Microsoft.Extensions.Logging;
+using UpdateAgent.Core.Maestro;
+using UpdateAgent.Core.Policy;
+using UpdateAgent.Core.Preflight;
+using UpdateAgent.Core.Reboot;
+using UpdateAgent.Core.Sessions;
+using UpdateAgent.Core.Storage;
+using UpdateAgent.Core.Windows;
+using UpdateAgent.Core.Windows.Update;
+using UpdateAgent.Shared.Models;
+
+namespace UpdateAgent.Core.Orchestration;
+
+public sealed class UpdateJobRunnerOptions
+{
+    public string AgentId { get; init; } = AgentIdentity.GetAgentId();
+    public string AgentName { get; init; } = Environment.MachineName;
+    public bool DryRun { get; init; }
+    public OsInfo? OsOverride { get; init; }
+}
+
+public sealed record StartJobResult
+{
+    public bool Started { get; init; }
+    public required PreflightResult Preflight { get; init; }
+    public JobSummary? Job { get; init; }
+    public string Message { get; init; } = "";
+}
+
+/// <summary>
+/// 업데이트 작업 상태 머신.
+/// 검색 → 다운로드 → 설치 → 재부팅 → 재개를 반복하며, 최대 재부팅 횟수와 실패 격리를 적용한다.
+/// </summary>
+public sealed class UpdateJobRunner : IAsyncDisposable
+{
+    private readonly IWuaClient _wua;
+    private readonly IJobStore _store;
+    private readonly IPreflightChecker _preflight;
+    private readonly IRestorationProvider _maestro;
+    private readonly IRebootManager _reboot;
+    private readonly IUserSessionProbe _sessions;
+    private readonly IJobProgressSink _sink;
+    private readonly UpdateJobRunnerOptions _options;
+    private readonly ILogger<UpdateJobRunner> _logger;
+    private readonly SemaphoreSlim _control = new(1, 1);
+    private readonly SemaphoreSlim _persistLock = new(1, 1);
+
+    private CancellationTokenSource? _runCts;
+    private Task? _runTask;
+    private JobContext? _activeContext;
+    private JobDetail? _current;
+    private OsInfo? _os;
+    private volatile bool _isRunning;
+    private volatile bool _manualPause;
+    private volatile bool _cancelRequested;
+    private volatile PauseReason _pauseReason;    private DateTimeOffset? _pausedSince;
+
+    public UpdateJobRunner(
+        IWuaClient wua,
+        IJobStore store,
+        IPreflightChecker preflight,
+        IRestorationProvider maestro,
+        IRebootManager reboot,
+        IUserSessionProbe sessions,
+        IJobProgressSink sink,
+        ILogger<UpdateJobRunner> logger,
+        UpdateJobRunnerOptions? options = null)
+    {
+        _wua = wua;
+        _store = store;
+        _preflight = preflight;
+        _maestro = maestro;
+        _reboot = reboot;
+        _sessions = sessions;
+        _sink = sink;
+        _logger = logger;
+        _options = options ?? new UpdateJobRunnerOptions();
+    }
+
+    public bool IsRunning => _isRunning;
+    public JobDetail? Current => _current;
+    public OsInfo? Os => _os;
+
+    public event EventHandler<JobDetail>? ProgressChanged;
+    public event EventHandler<JobSummary>? RebootScheduled;
+
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        await _store.InitializeAsync(cancellationToken);
+        _os = _options.OsOverride ?? WindowsOsInfoProvider.GetCurrent();
+        _logger.LogInformation(
+            "UpdateAgent 초기화: {Os}, agent={AgentId}, dryRun={DryRun}",
+            _os.SupportSummary,
+            _options.AgentId,
+            _options.DryRun);
+    }
+
+    public async Task<PreflightResult> RunPreflightAsync(
+        UpdatePolicy policy,
+        bool maestroConfirmed,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+        var maestro = await _maestro.DetectAsync(cancellationToken);
+        return await _preflight.CheckAsync(policy, _os!, maestro, maestroConfirmed, cancellationToken);
+    }
+
+    public async Task<ScanReport> ScanAsync(UpdatePolicy policy, CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+        var scanner = new UpdateScanner(_wua, _os);
+        return await scanner.ScanAsync(policy, cancellationToken);
+    }
+
+    public async Task<StartJobResult> StartAsync(
+        UpdatePolicy policy,
+        bool maestroConfirmed,
+        string confirmedBy = "teacher",
+        string? jobIdOverride = null,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+        await _control.WaitAsync(cancellationToken);
+        try
+        {
+            if (_isRunning && _current is { Summary.IsTerminal: false })
+            {
+                return new StartJobResult
+                {
+                    Started = false,
+                    Preflight = new PreflightResult(),
+                    Job = _current.Summary,
+                    Message = "이미 업데이트 작업이 진행 중입니다.",
+                };
+            }
+
+            var detection = await _maestro.DetectAsync(cancellationToken);
+
+            if (policy.RequireMaestroManualConfirmation && !maestroConfirmed)
+            {
+                return new StartJobResult
+                {
+                    Started = false,
+                    Preflight = new PreflightResult
+                    {
+                        Checks =
+                        [
+                            PreflightCheck.Block(
+                                "Maestro 복원 확인",
+                                "Maestro 복원을 '매 부팅 자동 복구'에서 '수동 복구/해제'로 전환한 뒤 확인해야 합니다."),
+                        ],
+                    },
+                    Message = "Maestro 수동 확인이 필요합니다.",
+                };
+            }
+
+            var preflight = await _preflight.CheckAsync(
+                policy, _os!, detection, maestroConfirmed, cancellationToken);
+
+            if (!preflight.CanStart)
+            {
+                var reason = string.Join(" / ", preflight.BlockingChecks.Select(c => c.Message));
+                _logger.LogWarning("사전 점검 차단: {Reason}", reason);
+                return new StartJobResult
+                {
+                    Started = false,
+                    Preflight = preflight,
+                    Message = $"사전 점검 실패: {reason}",
+                };
+            }
+
+            var jobId = string.IsNullOrWhiteSpace(jobIdOverride)
+                ? $"job-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}"[..24]
+                : jobIdOverride;
+            if (policy.RequireMaestroManualConfirmation)
+            {
+                await _maestro.ConfirmProtectionSuspendedAsync(jobId, confirmedBy, cancellationToken);
+            }
+
+            var context = new JobContext
+            {
+                JobId = jobId,
+                AgentId = _options.AgentId,
+                AgentName = _options.AgentName,
+                Policy = policy,
+                PreflightChecks = preflight.Checks.ToList(),
+                MaxRebootCount = policy.MaxRebootCount,
+                State = UpdateJobState.Pending,
+                Phase = "작업 준비",
+                Message = "업데이트 작업을 시작합니다.",
+                RequiresMaestroAttention = detection.Installed && policy.RequireMaestroManualConfirmation,
+            };
+
+            await PersistAsync(context, cancellationToken);
+            StartRunLoop(context);
+            _logger.LogInformation("작업 시작: {JobId}", jobId);
+
+            return new StartJobResult
+            {
+                Started = true,
+                Preflight = preflight,
+                Job = context.ToSummary(),
+                Message = "업데이트 작업을 시작했습니다.",
+            };
+        }
+        finally
+        {
+            _control.Release();
+        }
+    }
+
+    /// <summary>서비스 시작 시 호출. 재부팅/크래시 후 남은 작업을 재개한다.</summary>
+    public async Task<JobSummary?> ResumeIfNeededAsync(CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+        await _control.WaitAsync(cancellationToken);
+        try
+        {
+            if (_isRunning) return _current?.Summary;
+
+            var detail = await _store.GetActiveJobAsync(_options.AgentId, cancellationToken);
+            if (detail is null) return null;
+
+            if (detail.Summary.IsTerminal) return detail.Summary;
+
+            var context = JobContext.FromDetail(detail);
+            _current = detail;
+
+            if (context.RebootCount > 0
+                && !context.RestoreVerified
+                && context.Policy.VerifyRestoreMarkerAfterReboot
+                && context.State is UpdateJobState.Rebooting
+                    or UpdateJobState.PendingReboot
+                    or UpdateJobState.Downloading
+                    or UpdateJobState.Installing
+                    or UpdateJobState.Scanning
+                    or UpdateJobState.Paused)
+            {
+                var verification = await _maestro.VerifyAfterRebootAsync(context.JobId, cancellationToken);
+                context.MarkerVerification = verification;
+
+                if (!verification.Verified)
+                {
+                    _logger.LogError("복원 마커 검증 실패: {Message}", verification.Message);
+                    context.State = UpdateJobState.Failed;
+                    context.Phase = "복원 위험";
+                    context.PauseReason = PauseReason.RestoreRisk;
+                    context.LastError = verification.Message;
+                    context.Message = verification.Message;
+                    context.RequiresMaestroAttention = true;
+                    context.CompletedAt = DateTimeOffset.Now;
+                    await PersistAsync(context, CancellationToken.None);
+                    return context.ToSummary();
+                }
+
+                context.RestoreVerified = true;
+                context.Message = verification.Message;
+                _logger.LogInformation("복원 마커 검증 통과: {Message}", verification.Message);
+            }
+
+            context.State = context.State == UpdateJobState.Paused ? UpdateJobState.Paused : UpdateJobState.Pending;
+            context.Phase = context.State == UpdateJobState.Paused ? "일시중지" : "재개 준비";
+            context.Message = "중단된 업데이트 작업을 재개합니다.";
+            await PersistAsync(context, cancellationToken);
+
+            StartRunLoop(context);
+            return context.ToSummary();
+        }
+        finally
+        {
+            _control.Release();
+        }
+    }
+
+    public async Task<JobSummary?> PauseAsync(
+        PauseReason reason = PauseReason.Manual,
+        CancellationToken cancellationToken = default)
+    {
+        await _control.WaitAsync(cancellationToken);
+        try
+        {
+            _pauseReason = reason;
+            _manualPause = reason == PauseReason.Manual;
+            _pausedSince ??= DateTimeOffset.Now;
+
+            if (_activeContext is not null && !_activeContext.IsTerminal)
+            {
+                _activeContext.PauseReason = reason;
+                _activeContext.Message = reason == PauseReason.Manual
+                    ? "교사가 작업을 일시중지했습니다."
+                    : "일시중지 중입니다.";
+                // 실행 중이면 현재 항목이 끝난 뒤 러너가 상태를 갱신한다.
+                if (!_isRunning)
+                {
+                    _activeContext.State = UpdateJobState.Paused;
+                    _activeContext.Phase = "일시중지";
+                    await PersistAsync(_activeContext, cancellationToken);
+                }
+            }
+            else
+            {
+                var detail = await _store.GetActiveJobAsync(_options.AgentId, cancellationToken);
+                if (detail is not null)
+                {
+                    var context = JobContext.FromDetail(detail);
+                    context.State = UpdateJobState.Paused;
+                    context.Phase = "일시중지";
+                    context.PauseReason = reason;
+                    context.Message = "교사가 작업을 일시중지했습니다.";
+                    await PersistAsync(context, cancellationToken);
+                    _current = context.ToDetail();
+                }
+            }
+
+            return _current?.Summary;
+        }
+        finally
+        {
+            _control.Release();
+        }
+    }
+
+    public async Task<JobSummary?> ResumeFromPauseAsync(CancellationToken cancellationToken = default)
+    {
+        await _control.WaitAsync(cancellationToken);
+        try
+        {
+            _manualPause = false;
+            _pauseReason = PauseReason.None;
+            _pausedSince = null;
+
+            if (_isRunning)
+            {
+                if (_activeContext is not null && _activeContext.State == UpdateJobState.Paused)
+                {
+                    _activeContext.State = UpdateJobState.Pending;
+                    _activeContext.Phase = "재개 준비";
+                    _activeContext.PauseReason = PauseReason.None;
+                    _activeContext.Message = "작업을 재개합니다.";
+                    await PersistAsync(_activeContext, cancellationToken);
+                }
+
+                return _current?.Summary;
+            }
+        }
+        finally
+        {
+            _control.Release();
+        }
+
+        return await ResumeIfNeededAsync(cancellationToken);
+    }
+
+    public async Task<JobSummary?> CancelAsync(CancellationToken cancellationToken = default)
+    {
+        _cancelRequested = true;
+        _manualPause = false;
+        _pauseReason = PauseReason.None;
+
+        try
+        {
+            await _reboot.CancelRebootAsync(CancellationToken.None);
+        }
+        catch
+        {
+            // 예약된 재부팅이 없으면 실패한다. 무시한다.
+        }
+
+        try
+        {
+            _runCts?.Cancel();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        await _control.WaitAsync(cancellationToken);
+        try
+        {
+            if (_activeContext is not null && !_activeContext.IsTerminal)
+            {
+                if (!_isRunning)
+                {
+                    _activeContext.State = UpdateJobState.Cancelled;
+                    _activeContext.Phase = "취소됨";
+                    _activeContext.Message = "교사가 작업을 취소했습니다.";
+                    _activeContext.CompletedAt = DateTimeOffset.Now;
+                    await PersistAsync(_activeContext, cancellationToken);
+                }
+            }
+            else
+            {
+                var detail = await _store.GetActiveJobAsync(_options.AgentId, cancellationToken);
+                if (detail is not null)
+                {
+                    var context = JobContext.FromDetail(detail);
+                    context.State = UpdateJobState.Cancelled;
+                    context.Phase = "취소됨";
+                    context.Message = "교사가 작업을 취소했습니다.";
+                    context.CompletedAt = DateTimeOffset.Now;
+                    await PersistAsync(context, cancellationToken);
+                    _current = context.ToDetail();
+                }
+            }
+
+            return _current?.Summary;
+        }
+        finally
+        {
+            _control.Release();
+        }
+    }
+
+    private void StartRunLoop(JobContext context)
+    {
+        _activeContext = context;
+        _current = context.ToDetail();
+        _isRunning = true;
+        _cancelRequested = false;
+        _pauseReason = PauseReason.None;
+        _pausedSince = null;
+        _manualPause = false;
+        _runCts = new CancellationTokenSource();
+        var token = _runCts.Token;
+        _runTask = Task.Run(() => RunJobAsync(context, token), CancellationToken.None);
+    }
+
+    private async Task RunJobAsync(JobContext context, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await WaitForResumeAsync(context, cancellationToken);
+                CheckRuntimeLimit(context);
+
+                if (context.RebootCount > context.MaxRebootCount)
+                {
+                    throw new JobFailureException(
+                        $"최대 재부팅 횟수({context.MaxRebootCount}회)를 초과했습니다. 남은 업데이트를 수동으로 확인하세요.");
+                }
+
+                context.State = UpdateJobState.Scanning;
+                context.Phase = "업데이트 검색 중";
+                context.CurrentKb = null;
+                context.Message = "Windows Update에서 설치 가능한 업데이트를 검색합니다.";
+                await PersistAsync(context, cancellationToken);
+
+                WuaScanResult scan;
+                try
+                {
+                    scan = await _wua.ScanAsync(context.Policy.IncludeDrivers, cancellationToken);
+                }
+                catch (WuaException ex)
+                {
+                    throw new JobFailureException($"업데이트 검색 실패: {ex.Message}");
+                }
+
+                var evaluation = UpdatePolicyEvaluator.Filter(scan.Updates, context.Policy, _os!);
+                var selected = evaluation.Selected;
+                MergeItems(context, selected.Select(u => u.Info).ToList());
+                await PersistAsync(context, cancellationToken);
+
+                var pending = context.Items
+                    .Where(i => i.State is UpdateItemState.Pending or UpdateItemState.Downloaded)
+                    .ToList();
+
+                if (pending.Count == 0)
+                {
+                    var status = await _wua.GetSystemStatusAsync(cancellationToken);
+                    if ((status.RebootRequired || scan.Status.RebootRequired)
+                        && context.RebootCount < context.MaxRebootCount)
+                    {
+                        await RebootAndStopAsync(context, "업데이트 적용을 위해 재부팅합니다.", cancellationToken);
+                        return;
+                    }
+
+                    await CompleteAsync(context, cancellationToken);
+                    return;
+                }
+
+                var nativeById = selected.ToDictionary(u => u.Info.UpdateId, u => u, StringComparer.OrdinalIgnoreCase);
+
+                // 다운로드
+                context.State = UpdateJobState.Downloading;
+                foreach (var item in pending.ToList())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await WaitForResumeAsync(context, cancellationToken);
+
+                    if (!nativeById.TryGetValue(item.UpdateId, out var native))
+                    {
+                        MarkFailure(context, item, "검색 결과에서 업데이트를 찾을 수 없습니다.");
+                        await PersistAsync(context, cancellationToken);
+                        continue;
+                    }
+
+                    context.CurrentKb = item.KbArticleIds;
+                    context.Phase = "업데이트 다운로드 중";
+                    context.Message = $"{item.KbArticleIds} 다운로드 중";
+                    SetItemState(context, item.UpdateId, UpdateItemState.Downloading);
+                    await PersistAsync(context, cancellationToken);
+
+                    WuaOperationResult result;
+                    if (_options.DryRun)
+                    {
+                        result = WuaOperationResult.Ok("DRY RUN");
+                    }
+                    else
+                    {
+                        result = await _wua.DownloadAsync(native, cancellationToken);
+                    }
+
+                    if (result.Success)
+                    {
+                        SetItemState(context, item.UpdateId, UpdateItemState.Downloaded);
+                    }
+                    else
+                    {
+                        MarkFailure(context, FindItem(context, item.UpdateId), result.Message);
+                    }
+
+                    await PersistAsync(context, cancellationToken);
+                }
+
+                // 설치
+                context.State = UpdateJobState.Installing;
+                var rebootRequired = false;
+                var installedThisPass = 0;
+                var itemsToInstall = context.Items
+                    .Where(i => i.State == UpdateItemState.Downloaded)
+                    .ToList();
+
+                foreach (var item in itemsToInstall)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await WaitForResumeAsync(context, cancellationToken);
+
+                    if (!nativeById.TryGetValue(item.UpdateId, out var native))
+                    {
+                        continue;
+                    }
+
+                    context.CurrentKb = item.KbArticleIds;
+                    context.Phase = "업데이트 설치 중";
+                    context.Message = $"{item.KbArticleIds} 설치 중";
+                    SetItemState(context, item.UpdateId, UpdateItemState.Installing);
+                    await PersistAsync(context, cancellationToken);
+
+                    WuaInstallResult result;
+                    if (_options.DryRun)
+                    {
+                        result = WuaInstallResult.Ok(false, "DRY RUN");
+                    }
+                    else
+                    {
+                        result = await InstallWithBusyRetryAsync(native, cancellationToken);
+                    }
+
+                    if (result.Success)
+                    {
+                        installedThisPass++;
+                        rebootRequired |= result.RebootRequired;
+                        SetItemState(context, item.UpdateId, UpdateItemState.Installed);
+                    }
+                    else
+                    {
+                        MarkFailure(context, FindItem(context, item.UpdateId), result.Message);
+                    }
+
+                    context.CurrentKb = null;
+                    await PersistAsync(context, cancellationToken);
+                }
+
+                var systemStatus = await _wua.GetSystemStatusAsync(cancellationToken);
+                rebootRequired |= systemStatus.RebootRequired;
+
+                if (rebootRequired)
+                {
+                    if (context.Policy.RebootPolicy != RebootPolicy.Auto)
+                    {
+                        context.State = UpdateJobState.Paused;
+                        context.Phase = "재부팅 필요";
+                        context.PauseReason = PauseReason.Manual;
+                        context.Message = "업데이트 적용을 위해 재부팅이 필요합니다. 교사가 재부팅한 뒤 재개하세요.";
+                        await PersistAsync(context, cancellationToken);
+                        return;
+                    }
+
+                    if (context.RebootCount >= context.MaxRebootCount)
+                    {
+                        throw new JobFailureException(
+                            $"최대 재부팅 횟수({context.MaxRebootCount}회)에 도달했습니다. 일부 업데이트가 남아 있을 수 있습니다.");
+                    }
+
+                    await RebootAndStopAsync(context, "Windows Update 적용을 위해 자동 재부팅합니다.", cancellationToken);
+                    return;
+                }
+
+                if (installedThisPass == 0)
+                {
+                    context.PassesWithoutProgress++;
+                    if (context.PassesWithoutProgress >= 2)
+                    {
+                        throw new JobFailureException(
+                            "업데이트 설치가 진행되지 않았습니다. 실패한 업데이트 로그를 확인하세요.");
+                    }
+                }
+                else
+                {
+                    context.PassesWithoutProgress = 0;
+                }
+
+                // 재부팅 없이 추가 업데이트가 있을 수 있으므로 다시 검색한다.
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            context.State = UpdateJobState.Cancelled;
+            context.Phase = "취소됨";
+            context.Message = "교사가 작업을 취소했습니다.";
+            context.CompletedAt = DateTimeOffset.Now;
+            await PersistSafeAsync(context);
+        }
+        catch (JobFailureException ex)
+        {
+            context.State = UpdateJobState.Failed;
+            context.Phase = "실패";
+            context.LastError = ex.Message;
+            context.Message = ex.Message;
+            context.CompletedAt = DateTimeOffset.Now;
+            context.RequiresMaestroAttention = context.RequiresMaestroAttention || context.RebootCount > 0;
+            await PersistSafeAsync(context);
+            _logger.LogError(ex, "작업 실패: {JobId}", context.JobId);
+        }
+        catch (Exception ex)
+        {
+            context.State = UpdateJobState.Failed;
+            context.Phase = "실패";
+            context.LastError = ex.Message;
+            context.Message = $"예기치 않은 오류: {ex.Message}";
+            context.CompletedAt = DateTimeOffset.Now;
+            await PersistSafeAsync(context);
+            _logger.LogError(ex, "작업 중 예외: {JobId}", context.JobId);
+        }
+        finally
+        {
+            _isRunning = false;
+            _activeContext = null;
+        }
+    }
+
+    private async Task<WuaInstallResult> InstallWithBusyRetryAsync(
+        WuaUpdate update,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var result = await _wua.InstallAsync(update, cancellationToken);
+            if (result.Success) return result;
+
+            var busy = result.Message.Contains("진행 중", StringComparison.Ordinal)
+                       || result.ResultCode == 5
+                       || await _wua.IsBusyAsync(cancellationToken);
+
+            if (!busy) return result;
+
+            _logger.LogWarning(
+                "Windows Update가 사용 중입니다. 30초 후 재시도 ({Attempt}/3): {Message}",
+                attempt + 1,
+                result.Message);
+            await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+        }
+
+        return WuaInstallResult.Failed(
+            5,
+            0,
+            "Windows Update가 계속 사용 중입니다. Maestro/Windows Update 작업이 끝난 뒤 재개하세요.");
+    }
+
+    private async Task WaitForResumeAsync(JobContext context, CancellationToken cancellationToken)
+    {
+        var policy = context.Policy;
+
+        if (!_manualPause && policy.PauseOnUserLogon && _sessions.HasInteractiveUser())
+        {
+            _pauseReason = PauseReason.UserLoggedOn;
+            _pausedSince ??= DateTimeOffset.Now;
+        }
+
+        if (!_manualPause && _pauseReason == PauseReason.None)
+        {
+            if (context.State == UpdateJobState.Paused)
+            {
+                context.State = UpdateJobState.Pending;
+                context.PauseReason = PauseReason.None;
+                context.PauseUntil = null;
+                await PersistAsync(context, cancellationToken);
+            }
+
+            return;
+        }
+
+        context.State = UpdateJobState.Paused;
+        context.Phase = _pauseReason == PauseReason.UserLoggedOn
+            ? "사용자 로그온으로 일시중지"
+            : "교사 일시중지";
+        context.PauseReason = _pauseReason;
+        context.PauseUntil = policy.MaxPauseHours > 0 && _pausedSince.HasValue
+            ? _pausedSince.Value.AddHours(policy.MaxPauseHours)
+            : null;
+        context.Message = _pauseReason == PauseReason.UserLoggedOn
+            ? "사용자가 로그온하여 업데이트를 일시중지했습니다. 로그오프하면 자동 재개됩니다."
+            : "교사가 작업을 일시중지했습니다.";
+        await PersistAsync(context, cancellationToken);
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_cancelRequested) throw new OperationCanceledException(cancellationToken);
+
+            if (_manualPause)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+                continue;
+            }
+
+            if (_pauseReason == PauseReason.UserLoggedOn)
+            {
+                if (!_sessions.HasInteractiveUser())
+                {
+                    break;
+                }
+
+                if (policy.MaxPauseHours > 0
+                    && _pausedSince.HasValue
+                    && DateTimeOffset.Now - _pausedSince.Value > TimeSpan.FromHours(policy.MaxPauseHours))
+                {
+                    _logger.LogWarning(
+                        "사용자 로그온 일시중지가 최대 시간({Hours}시간)을 초과하여 작업을 재개합니다.",
+                        policy.MaxPauseHours);
+                    break;
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                continue;
+            }
+
+            break;
+        }
+
+        _pauseReason = PauseReason.None;
+        _pausedSince = null;
+        context.State = UpdateJobState.Pending;
+        context.Phase = "재개 준비";
+        context.PauseReason = PauseReason.None;
+        context.PauseUntil = null;
+        context.Message = "업데이트 작업을 재개합니다.";
+        await PersistAsync(context, cancellationToken);
+    }
+
+    private async Task RebootAndStopAsync(JobContext context, string reason, CancellationToken cancellationToken)
+    {
+        context.RebootCount++;
+        context.RestoreVerified = false;
+        context.State = UpdateJobState.PendingReboot;
+        context.Phase = "재부팅 준비";
+        context.Message = $"{context.Policy.RebootDelaySeconds}초 후 자동으로 재부팅합니다. ({context.RebootCount}/{context.MaxRebootCount})";
+        context.CurrentKb = null;
+
+        await _maestro.WriteResumeMarkerAsync(
+            context.JobId,
+            context.AgentId,
+            context.RebootCount,
+            "before-reboot",
+            cancellationToken);
+
+        await PersistAsync(context, cancellationToken);
+
+        context.State = UpdateJobState.Rebooting;
+        context.Phase = "재부팅 중";
+        await PersistAsync(context, cancellationToken);
+        RebootScheduled?.Invoke(this, context.ToSummary());
+
+        _logger.LogInformation(
+            "재부팅 예약: job={JobId}, count={Count}, delay={Delay}s",
+            context.JobId,
+            context.RebootCount,
+            context.Policy.RebootDelaySeconds);
+
+        await _reboot.ScheduleRebootAsync(context.Policy.RebootDelaySeconds, reason, cancellationToken);
+
+        // shutdown.exe가 예약되면 서비스는 곧 종료된다. 상태는 이미 저장되어 있다.
+    }
+
+    private async Task CompleteAsync(JobContext context, CancellationToken cancellationToken)
+    {
+        context.State = UpdateJobState.Completed;
+        context.Phase = "완료";
+        context.Message = BuildCompletionMessage(context);
+        context.CompletedAt = DateTimeOffset.Now;
+        context.CurrentKb = null;
+        context.PauseReason = PauseReason.None;
+        context.RequiresMaestroAttention =
+            context.RequiresMaestroAttention && context.Policy.RequireMaestroManualConfirmation;
+        await PersistAsync(context, cancellationToken);
+
+        _logger.LogInformation(
+            "작업 완료: {JobId}, installed={Installed}, failed={Failed}, reboots={Reboots}",
+            context.JobId,
+            context.InstalledItems,
+            context.FailedItems,
+            context.RebootCount);
+
+        if (context.Policy.ShutdownAfterComplete && !context.RequiresMaestroAttention)
+        {
+            try
+            {
+                await _reboot.ScheduleShutdownAsync(120, "UpdateAgent: 업데이트 완료 후 자동 종료", cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "자동 종료 예약에 실패했습니다.");
+            }
+        }
+    }
+
+    private static string BuildCompletionMessage(JobContext context)
+    {
+        var baseMessage =
+            $"업데이트 완료: 설치 {context.InstalledItems}건, 실패/제외 {context.FailedItems}건, 재부팅 {context.RebootCount}회.";
+
+        if (context.RequiresMaestroAttention)
+        {
+            baseMessage += " Maestro에서 '현재 상태 저장' 후 '자동 복구'를 다시 활성화하세요.";
+        }
+
+        return baseMessage;
+    }
+
+    private void MergeItems(JobContext context, IReadOnlyList<UpdateItemInfo> selected)
+    {
+        var now = DateTimeOffset.Now;
+        var selectedIds = selected.Select(u => u.UpdateId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var update in selected)
+        {
+            var existing = FindItem(context, update.UpdateId);
+            if (existing is null)
+            {
+                context.Items.Add(new JobItem
+                {
+                    UpdateId = update.UpdateId,
+                    KbArticleIds = update.KbLabel,
+                    Title = update.Title,
+                    Category = update.Category,
+                    State = UpdateItemState.Pending,
+                });
+                continue;
+            }
+
+            if (existing.State is UpdateItemState.Installed
+                or UpdateItemState.Skipped
+                or UpdateItemState.Cancelled)
+            {
+                continue;
+            }
+
+            var index = context.Items.FindIndex(i =>
+                string.Equals(i.UpdateId, existing.UpdateId, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0)
+            {
+                context.Items[index] = existing with
+                {
+                    KbArticleIds = string.IsNullOrWhiteSpace(existing.KbArticleIds) ? update.KbLabel : existing.KbArticleIds,
+                    Title = string.IsNullOrWhiteSpace(existing.Title) ? update.Title : existing.Title,
+                    Category = update.Category,
+                };
+            }
+        }
+
+        // 더 이상 WUA가 제공하지 않는 항목은 설치된 것으로 간주한다.
+        for (var i = 0; i < context.Items.Count; i++)
+        {
+            var item = context.Items[i];
+            if (item.State is not (UpdateItemState.Pending or UpdateItemState.Downloaded)) continue;
+            if (selectedIds.Contains(item.UpdateId)) continue;
+
+            context.Items[i] = item with
+            {
+                State = UpdateItemState.Installed,
+                CompletedAt = now,
+                Error = null,
+            };
+        }
+    }
+
+    private static JobItem? FindItem(JobContext context, string updateId) =>
+        context.Items.FirstOrDefault(i =>
+            string.Equals(i.UpdateId, updateId, StringComparison.OrdinalIgnoreCase));
+
+    private static void SetItemState(JobContext context, string updateId, UpdateItemState state)
+    {
+        var index = context.Items.FindIndex(i =>
+            string.Equals(i.UpdateId, updateId, StringComparison.OrdinalIgnoreCase));
+        if (index < 0) return;
+
+        context.Items[index] = context.Items[index] with
+        {
+            State = state,
+            CompletedAt = state is UpdateItemState.Installed or UpdateItemState.Failed or UpdateItemState.Skipped
+                ? DateTimeOffset.Now
+                : context.Items[index].CompletedAt,
+        };
+    }
+
+    private static void MarkFailure(JobContext context, JobItem? item, string error)
+    {
+        if (item is null) return;
+
+        var index = context.Items.FindIndex(i =>
+            string.Equals(i.UpdateId, item.UpdateId, StringComparison.OrdinalIgnoreCase));
+        if (index < 0) return;
+
+        var failureCount = item.FailureCount + 1;
+        var state = failureCount >= context.Policy.MaxItemFailureCount
+            ? UpdateItemState.Skipped
+            : UpdateItemState.Pending;
+
+        context.Items[index] = item with
+        {
+            FailureCount = failureCount,
+            State = state,
+            Error = error,
+            CompletedAt = state == UpdateItemState.Skipped ? DateTimeOffset.Now : null,
+        };
+
+        if (state == UpdateItemState.Skipped)
+        {
+            context.Message = $"{item.KbArticleIds}은(는) {failureCount}회 실패하여 제외했습니다.";
+        }
+    }
+
+    private void CheckRuntimeLimit(JobContext context)
+    {
+        if (context.Policy.MaxRuntimeHours <= 0) return;
+        var elapsed = DateTimeOffset.Now - context.StartedAt;
+        if (elapsed > TimeSpan.FromHours(context.Policy.MaxRuntimeHours))
+        {
+            throw new JobFailureException(
+                $"작업 제한 시간({context.Policy.MaxRuntimeHours}시간)을 초과했습니다.");
+        }
+    }
+
+    private async Task PersistAsync(JobContext context, CancellationToken cancellationToken)
+    {
+        context.UpdatedAt = DateTimeOffset.Now;
+        var detail = context.ToDetail();
+
+        await _persistLock.WaitAsync(CancellationToken.None);
+        try
+        {
+            await _store.SaveJobAsync(detail, cancellationToken);
+            _current = detail;
+        }
+        catch (OperationCanceledException)
+        {
+            // 취소 중에도 최종 상태는 저장한다.
+            await _store.SaveJobAsync(detail, CancellationToken.None);
+            _current = detail;
+        }
+        finally
+        {
+            _persistLock.Release();
+        }
+
+        try
+        {
+            await _sink.OnProgressAsync(detail, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "진행 상황 전송 실패");
+        }
+
+        ProgressChanged?.Invoke(this, detail);
+    }
+
+    private async Task PersistSafeAsync(JobContext context)
+    {
+        try
+        {
+            await PersistAsync(context, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "최종 상태 저장 실패");
+        }
+    }
+
+    private void EnsureInitialized()
+    {
+        if (_os is null)
+        {
+            throw new InvalidOperationException("UpdateJobRunner.InitializeAsync를 먼저 호출하세요.");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            _runCts?.Cancel();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        if (_runTask is not null)
+        {
+            try
+            {
+                await Task.WhenAny(_runTask, Task.Delay(TimeSpan.FromSeconds(5)));
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        _runCts?.Dispose();
+        _control.Dispose();
+        _persistLock.Dispose();
+    }
+
+    private sealed class JobFailureException : Exception
+    {
+        public JobFailureException(string message) : base(message)
+        {
+        }
+    }
+
+    private sealed class JobContext
+    {
+        public required string JobId { get; init; }
+        public required string AgentId { get; init; }
+        public required string AgentName { get; init; }
+        public required UpdatePolicy Policy { get; init; }
+        public List<PreflightCheck> PreflightChecks { get; init; } = [];
+        public List<JobItem> Items { get; init; } = [];
+
+        public UpdateJobState State { get; set; } = UpdateJobState.Pending;
+        public string Phase { get; set; } = "대기";
+        public string Message { get; set; } = "";
+        public string? CurrentKb { get; set; }
+        public PauseReason PauseReason { get; set; }
+        public DateTimeOffset? PauseUntil { get; set; }
+        public int RebootCount { get; set; }
+        public int MaxRebootCount { get; set; } = 5;
+        public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.Now;
+        public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
+        public DateTimeOffset? CompletedAt { get; set; }
+        public string? LastError { get; set; }
+        public bool RestoreVerified { get; set; }
+        public bool RequiresMaestroAttention { get; set; }
+        public int PassesWithoutProgress { get; set; }
+        public MarkerVerificationResult? MarkerVerification { get; set; }
+
+        public bool IsTerminal => State is UpdateJobState.Completed
+            or UpdateJobState.Failed
+            or UpdateJobState.Cancelled;
+
+        public int TotalItems => Items.Count;
+        public int InstalledItems => Items.Count(i => i.State == UpdateItemState.Installed);
+        public int FailedItems => Items.Count(i =>
+            i.State == UpdateItemState.Skipped || i.State == UpdateItemState.Failed);
+        public int CompletedItems => Items.Count(i =>
+            i.State is UpdateItemState.Installed or UpdateItemState.Skipped or UpdateItemState.Failed);
+
+        public int ProgressPercent
+        {
+            get
+            {
+                if (State == UpdateJobState.Completed) return 100;
+                if (TotalItems == 0) return 0;
+                var percent = (int)Math.Round(CompletedItems * 100d / TotalItems);
+                return Math.Clamp(percent, 0, 99);
+            }
+        }
+
+        public JobSummary ToSummary() => new()
+        {
+            JobId = JobId,
+            AgentId = AgentId,
+            AgentName = AgentName,
+            State = State,
+            Phase = Phase,
+            ProgressPercent = ProgressPercent,
+            TotalItems = TotalItems,
+            CompletedItems = CompletedItems,
+            InstalledItems = InstalledItems,
+            FailedItems = FailedItems,
+            RebootCount = RebootCount,
+            MaxRebootCount = MaxRebootCount,
+            CurrentKb = CurrentKb,
+            Message = Message,
+            PauseReason = PauseReason,
+            PauseUntil = PauseUntil,
+            StartedAt = StartedAt,
+            UpdatedAt = UpdatedAt,
+            CompletedAt = CompletedAt,
+            LastError = LastError,
+            RestoreVerified = RestoreVerified,
+            RequiresMaestroAttention = RequiresMaestroAttention,
+        };
+
+        public JobDetail ToDetail() => new()
+        {
+            Summary = ToSummary(),
+            Items = Items.ToList(),
+            Policy = Policy,
+            PreflightChecks = PreflightChecks.ToList(),
+            MarkerVerification = MarkerVerification,
+        };
+
+        public static JobContext FromDetail(JobDetail detail) => new()
+        {
+            JobId = detail.Summary.JobId,
+            AgentId = detail.Summary.AgentId,
+            AgentName = detail.Summary.AgentName,
+            Policy = detail.Policy,
+            PreflightChecks = detail.PreflightChecks.ToList(),
+            Items = detail.Items.ToList(),
+            State = detail.Summary.State,
+            Phase = detail.Summary.Phase,
+            Message = detail.Summary.Message,
+            CurrentKb = detail.Summary.CurrentKb,
+            PauseReason = detail.Summary.PauseReason,
+            PauseUntil = detail.Summary.PauseUntil,
+            RebootCount = detail.Summary.RebootCount,
+            MaxRebootCount = detail.Summary.MaxRebootCount,
+            StartedAt = detail.Summary.StartedAt,
+            UpdatedAt = detail.Summary.UpdatedAt,
+            CompletedAt = detail.Summary.CompletedAt,
+            LastError = detail.Summary.LastError,
+            RestoreVerified = detail.Summary.RestoreVerified,
+            RequiresMaestroAttention = detail.Summary.RequiresMaestroAttention,
+            MarkerVerification = detail.MarkerVerification,
+        };
+    }
+}

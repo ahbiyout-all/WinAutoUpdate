@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Version>0.1.0</Version>
+    <Authors>UpdateAgent</Authors>
+    <Product>UpdateAgent</Product>
+    <Company>UpdateAgent</Company>
+    <NeutralLanguage>ko-KR</NeutralLanguage>
+  </PropertyGroup>
+</Project>
