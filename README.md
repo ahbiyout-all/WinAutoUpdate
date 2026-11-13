@@ -21,7 +21,7 @@ UpdateAgent.LabManager  <── HTTP 체크인 ──  UpdateAgent.Service (SYST
                                                     전체화면 오버레이 + 진행률
 ```
 
-| 프로젝트 | 설명 |
+| 경로 | 설명 |
 |---|---|
 | `src/UpdateAgent.Shared` | DTO, 정책, 작업 상태, Maestro/오버레이 모델 |
 | `src/UpdateAgent.Core` | WUA 연동, 정책 평가, 사전 점검, SQLite 저장소, 재부팅/재개, Maestro 수동 검증, 오버레이 파이프 |
@@ -30,6 +30,8 @@ UpdateAgent.LabManager  <── HTTP 체크인 ──  UpdateAgent.Service (SYST
 | `src/UpdateAgent.LabManager` | 교사 PC 관리 서버 + 웹 대시보드 + WoL |
 | `src/UpdateAgent.Cli` | 로컬 CLI (scan/preflight/run/status/maestro/pause/cancel) |
 | `tests/UpdateAgent.Tests` | xUnit 단위 테스트 |
+| `scripts/` | 파일럿 게시/설정/서비스 설치·제거/방화벽 스크립트 |
+| `docs/PILOT.md` | Phase 0 실 PC 파일럿 런북 |
 
 ## 지원 범위
 
@@ -67,6 +69,49 @@ dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj
 
 현재 기준: 빌드 경고 0 / 오류 0, 테스트 40개 통과.
 
+## 파일럿 키트
+
+실 PC 파일럿에 필요한 스크립트와 런북이 포함되어 있습니다. 상세 절차는 [`docs/PILOT.md`](docs/PILOT.md)를 참고하세요.
+
+| 스크립트 | 실행 위치 | 설명 |
+|---|---|---|
+| `scripts/publish.ps1` | 개발 PC | LabManager/Service/SessionHelper/CLI 게시 |
+| `scripts/configure-labmanager.ps1` | 교사 PC | 관리자/에이전트 토큰, 수신 URL 설정 |
+| `scripts/allow-labmanager.ps1` | 교사 PC | TCP 5080 인바운드 방화벽 규칙 (Private/Domain) |
+| `scripts/install-service.ps1` | 학생 PC | 서비스+오버레이 설치, 설정, ACL, 자동 시작 등록 |
+| `scripts/configure-agent.ps1` | 학생 PC | 설치 후 URL/토큰/오버레이/DRY RUN 변경 |
+| `scripts/uninstall-service.ps1` | 학생 PC | 서비스 제거, 필요 시 파일/데이터 삭제 |
+
+```powershell
+# 개발 PC
+.\scripts\publish.ps1
+
+# 교사 PC (관리자 PowerShell)
+.\scripts\configure-labmanager.ps1 -AdminTokenFile <파일> -AgentTokenFile <파일>
+.\scripts\allow-labmanager.ps1
+
+# 학생 PC (관리자 PowerShell)
+$env:UPDATEAGENT_AGENT_TOKEN = Get-Content <에이전트-토큰-파일> -Raw
+.\scripts\install-service.ps1 -LabManagerUrl "http://<교사-PC-IP>:5080"
+```
+
+> `publish.ps1`은 기본적으로 self-contained(`win-x64`)로 게시합니다. .NET 런타임이 설치된 환경에서는 `-FrameworkDependent`로 크기를 줄일 수 있습니다.
+> 토큰은 명령줄 기록에 남지 않도록 환경 변수(`UPDATEAGENT_AGENT_TOKEN`, `UPDATEAGENT_ADMIN_TOKEN`) 또는 파일/프롬프트 입력을 사용하세요.
+> **게시를 다시 실행하면 `appsettings.json`이 기본값으로 돌아갑니다.** 게시 후 configure/install 스크립트를 다시 실행하세요.
+
+게시 결과:
+
+```text
+publish\labmanager
+publish\agent\service
+publish\agent\sessionhelper
+publish\cli
+```
+
+학생 PC에서는 `publish\cli\UpdateAgent.Cli.exe`로 사전 점검과 상태 확인을 할 수 있습니다.
+서비스가 실행 중일 때는 `scan`, `preflight`, `status`, `maestro`만 사용하고,
+작업 제어(`run`/`resume`/`pause`/`cancel`)는 대시보드를 사용하세요.
+
 ## 실행
 
 ### 1. 교사 PC — LabManager
@@ -81,11 +126,15 @@ dotnet run --project src/UpdateAgent.LabManager
 - 로그: 같은 폴더의 `logs\`
 - 관리자 토큰을 대시보드 우측 상단에 입력하면 localStorage에 저장됩니다.
 
-실제 배포용으로는 게시 후 실행합니다.
+실제 배포용으로는 파일럿 키트를 사용합니다.
 
 ```powershell
-dotnet publish src/UpdateAgent.LabManager -c Release -o publish/labmanager
-publish/labmanager/UpdateAgent.LabManager.exe
+.\scripts\publish.ps1
+# publish\labmanager\appsettings.json 토큰 설정
+.\scripts\configure-labmanager.ps1 -AdminTokenFile <파일> -AgentTokenFile <파일>
+
+Set-Location .\publish\labmanager
+.\UpdateAgent.LabManager.exe
 ```
 
 ### 2. 학생 PC — Service
@@ -99,19 +148,17 @@ $env:Agent__OverlayEnabled = "false"
 dotnet run --project src/UpdateAgent.Service
 ```
 
-운영용 게시 + 서비스 등록 (관리자 PowerShell):
+운영용 설치는 관리자 PowerShell에서:
 
 ```powershell
-dotnet publish src/UpdateAgent.Service -c Release -r win-x64 --self-contained true -o C:\ProgramData\UpdateAgent\app
-dotnet publish src/UpdateAgent.SessionHelper -c Release -r win-x64 --self-contained true -o C:\ProgramData\UpdateAgent\app
-
-sc.exe create UpdateAgentService binPath= "C:\ProgramData\UpdateAgent\app\UpdateAgent.Service.exe" start= auto DisplayName= "UpdateAgent Service"
-sc.exe description UpdateAgentService "Windows Update automation agent for computer labs"
-sc.exe start UpdateAgentService
+$env:UPDATEAGENT_AGENT_TOKEN = Get-Content <에이전트-토큰-파일> -Raw
+.\scripts\install-service.ps1 -LabManagerUrl "http://<교사-PC-IP>:5080"
 ```
 
-> `UpdateAgent.SessionHelper.exe`는 서비스 실행 파일과 같은 폴더에 두는 것이 기본값입니다.
-> 다른 경로에 두려면 `Agent:SessionHelperPath`를 지정하세요.
+설치 스크립트가 서비스(`C:\ProgramData\UpdateAgent\app\service`)와 오버레이 헬퍼
+(`...\app\sessionhelper`)를 분리 배치하고, `appsettings.json`에
+`Agent:SessionHelperPath`를 자동으로 기록합니다. 수동으로 경로를 바꾸려면
+`scripts\configure-agent.ps1 -SessionHelperPath <경로>`를 사용하세요.
 
 ### 3. 로컬 CLI
 
@@ -123,6 +170,14 @@ dotnet run --project src/UpdateAgent.Cli -- preflight --confirm-maestro
 dotnet run --project src/UpdateAgent.Cli -- run --confirm-maestro
 dotnet run --project src/UpdateAgent.Cli -- status
 dotnet run --project src/UpdateAgent.Cli -- maestro
+```
+
+게시된 CLI를 사용하면 .NET SDK 없이도 실행할 수 있습니다.
+
+```powershell
+.\publish\cli\UpdateAgent.Cli.exe preflight --confirm-maestro
+.\publish\cli\UpdateAgent.Cli.exe scan
+.\publish\cli\UpdateAgent.Cli.exe status
 ```
 
 | 명령 | 설명 |
@@ -196,26 +251,26 @@ $env:Agent__AgentToken = "<강력한-토큰>"
 이 앱은 Maestro의 설정/서비스/Windows Update 기능을 변경하지 않습니다.
 
 1. 작업 전: Maestro에서 **매 부팅 자동 복구 → 수동 복구/해제**로 전환합니다.
-2. 대시보드에서 “Maestro 보호 중지 확인” 후 작업을 시작합니다.
+2. 대시보드 작업 시작 창에서 **Maestro 복원 보호 해제 확인**을 체크하고 작업을 시작합니다.
 3. 업데이트/재부팅이 끝나면 Maestro에서 **현재 상태 저장 → 자동 복구 재설정**을 수행합니다.
-4. 대시보드에서 “상태 저장/보호 복원 확인”을 기록합니다.
+4. 대시보드 작업 상세에서 **보호 해제 확인**, **상태 저장 + 보호 재활성화 확인**을 기록합니다.
 
 앱은 체크리스트와 마커 파일(`resume-marker.json` + 보조 마커)로 재부팅 후 상태를 검증합니다.
 Maestro UI/API 자동화는 2단계로 미뤄져 있습니다.
 
 ## Phase 0 PoC 체크리스트
 
-배포 전에 아래 항목을 순서대로 확인합니다.
+배포 전에 아래 항목을 순서대로 확인합니다. 상세 절차와 롤백 방법은 [`docs/PILOT.md`](docs/PILOT.md)에 있습니다.
 
 - [ ] `dotnet build UpdateAgent.sln` 경고 0/오류 0, `dotnet test` 전체 통과
 - [ ] 대표 PC 1대에서 `Cli scan`: 보안/품질 업데이트가 선택되고 드라이버/정의 업데이트는 제외되는지 확인
 - [ ] `Cli preflight --confirm-maestro`: 관리자 권한, 디스크, 전원, 네트워크, WSUS, Maestro, WU 사용 여부 점검 결과 확인
 - [ ] `Cli run --dry-run`: 스캔 → 설치(모의) → 완료 전이가 정상인지 확인
 - [ ] LabManager + Service(DRY RUN) 연동: 에이전트 온라인 등록, 작업 시작, 항목별 진행/감사 로그 확인
-- [ ] 시작 명령이 거부되었을 때 서버 작업이 `Pending`에 남지 않고 `Failed`로 정리되는지 확인
+- [ ] 시작 명령이 거부되었을 때 서버 작업이 `pending`에 남지 않고 `failed`로 정리되는지 확인
 - [ ] 실제 PC 1대 파일럿: Maestro 보호 중지 → 작업 → 재부팅/재개 → 마커 검증 → Maestro 복원
 - [ ] 최대 재부팅 횟수(기본 5회)와 사용자 로그온 시 일시중지 동작 확인
-- [ ] 오버레이: 전체화면 표시, 진행률 중앙 정렬, 커서 숨김, 단축키 억제, 해제(원격 unlock) 확인
+- [ ] 오버레이: 전체화면 표시, 진행률 중앙 정렬, 커서 숨김, 단축키 억제, 원격 해제 확인
 - [ ] Wake-on-LAN: 교사 PC에서 매직 패킷 전송 후 학생 PC 부팅 확인
 - [ ] 자동 종료(`--shutdown`/정책) 동작 확인
 - [ ] 학생 PC 2~3대에 서비스 배포, 재부팅 후 자동 시작 및 체크인 확인
