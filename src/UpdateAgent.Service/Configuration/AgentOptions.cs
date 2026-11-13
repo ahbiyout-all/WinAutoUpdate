@@ -48,6 +48,15 @@ public sealed class AgentOptions
             return SessionHelperPath;
         }
 
-        return Path.Combine(AppContext.BaseDirectory, "UpdateAgent.SessionHelper.exe");
+        // 기존 파일럿 배치: 서비스 폴더에 SessionHelper가 함께 있다.
+        var local = Path.Combine(AppContext.BaseDirectory, "UpdateAgent.SessionHelper.exe");
+        if (File.Exists(local))
+        {
+            return local;
+        }
+
+        // MSI 배치: Program Files\UpdateAgent\SessionHelper
+        return Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory, "..", "SessionHelper", "UpdateAgent.SessionHelper.exe"));
     }
 }

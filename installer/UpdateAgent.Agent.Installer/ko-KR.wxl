@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WixUI_Minimal 한국어 번역.
+
+  WiX 5.0.2의 UI 확장은 en-US 문자열만 포함하므로, MSI 다이얼로그를 한국어로
+  표시하려면 이 파일처럼 같은 String Id를 ko-KR 문화권으로 재정의해야 한다.
+  {\WixUI_Font_*} 접두사는 다이얼로그 서식이므로 반드시 유지한다.
+-->
+<WixLocalization Culture="ko-KR"
+                 Codepage="949"
+                 xmlns="http://wixtoolset.org/schemas/v4/wxl">
+
+  <!-- 공용 단추 -->
+  <String Id="WixUIBack" Overridable="yes" Value="뒤로(&amp;B)" />
+  <String Id="WixUINext" Overridable="yes" Value="다음(&amp;N)" />
+  <String Id="WixUICancel" Overridable="yes" Value="취소" />
+  <String Id="WixUIFinish" Overridable="yes" Value="마침(&amp;F)" />
+  <String Id="WixUIRetry" Overridable="yes" Value="다시 시도(&amp;R)" />
+  <String Id="WixUIIgnore" Overridable="yes" Value="무시(&amp;I)" />
+  <String Id="WixUIYes" Overridable="yes" Value="예(&amp;Y)" />
+  <String Id="WixUINo" Overridable="yes" Value="아니요(&amp;N)" />
+  <String Id="WixUIOK" Overridable="yes" Value="확인" />
+  <String Id="WixUIPrint" Overridable="yes" Value="인쇄(&amp;P)" />
+
+  <!-- 준비 -->
+  <String Id="PrepareDlg_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="PrepareDlgBitmap" Overridable="yes" Value="WixUI_Bmp_Dialog" />
+  <String Id="PrepareDlgDescription" Overridable="yes" Value="설치 마법사가 설치를 준비하는 동안 잠시 기다려 주세요." />
+  <String Id="PrepareDlgTitle" Overridable="yes" Value="{\WixUI_Font_Bigger}[ProductName] 설치 마법사에 오신 것을 환영합니다" />
+
+  <!-- 사용권 계약 -->
+  <String Id="WelcomeEulaDlg_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="WelcomeEulaDlgBitmap" Overridable="yes" Value="WixUI_Bmp_Dialog" />
+  <String Id="WelcomeEulaDlgLicenseAcceptedCheckBox" Overridable="yes" Value="사용권 계약에 동의합니다(&amp;A)" />
+  <String Id="WelcomeEulaDlgInstall" Overridable="yes" Value="설치(&amp;I)" />
+  <String Id="WelcomeEulaDlgUpdate" Overridable="yes" Value="업데이트(&amp;U)" />
+  <String Id="WelcomeEulaDlgTitle" Overridable="yes" Value="{\WixUI_Font_Title}[ProductName] 사용권 계약을 읽어 주세요" />
+
+  <!-- 진행 -->
+  <String Id="ProgressDlg_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="ProgressDlgBannerBitmap" Overridable="yes" Value="WixUI_Bmp_Banner" />
+  <String Id="ProgressDlgTextInstalling" Overridable="yes" Value="설치 마법사가 [ProductName]을(를) 설치하는 동안 잠시 기다려 주세요." />
+  <String Id="ProgressDlgTitleInstalling" Overridable="yes" Value="{\WixUI_Font_Title}[ProductName] 설치 중" />
+  <String Id="ProgressDlgTextChanging" Overridable="yes" Value="설치 마법사가 [ProductName] 구성을 변경하는 동안 잠시 기다려 주세요." />
+  <String Id="ProgressDlgTitleChanging" Overridable="yes" Value="{\WixUI_Font_Title}[ProductName] 구성 변경 중" />
+  <String Id="ProgressDlgTextRepairing" Overridable="yes" Value="설치 마법사가 [ProductName]을(를) 복구하는 동안 잠시 기다려 주세요." />
+  <String Id="ProgressDlgTitleRepairing" Overridable="yes" Value="{\WixUI_Font_Title}[ProductName] 복구 중" />
+  <String Id="ProgressDlgTextRemoving" Overridable="yes" Value="설치 마법사가 [ProductName]을(를) 제거하는 동안 잠시 기다려 주세요." />
+  <String Id="ProgressDlgTitleRemoving" Overridable="yes" Value="{\WixUI_Font_Title}[ProductName] 제거 중" />
+  <String Id="ProgressDlgTextUpdating" Overridable="yes" Value="설치 마법사가 [ProductName]을(를) 업데이트하는 동안 잠시 기다려 주세요." />
+  <String Id="ProgressDlgTitleUpdating" Overridable="yes" Value="{\WixUI_Font_Title}[ProductName] 업데이트 중" />
+  <String Id="ProgressDlgProgressBar" Overridable="yes" Value="진행률" />
+  <String Id="ProgressDlgStatusLabel" Overridable="yes" Value="상태:" />
+
+  <!-- 완료 -->
+  <String Id="ExitDialog_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="ExitDialogBitmap" Overridable="yes" Value="WixUI_Bmp_Dialog" />
+  <String Id="ExitDialogDescription" Overridable="yes" Value="마침 버튼을 눌러 설치 마법사를 종료합니다." />
+  <String Id="ExitDialogTitle" Overridable="yes" Value="{\WixUI_Font_Bigger}[ProductName] 설치 마법사를 완료했습니다" />
+
+  <!-- 취소/오류 -->
+  <String Id="CancelDlg_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="CancelDlgText" Overridable="yes" Value="[ProductName] 설치를 취소하시겠습니까?" />
+  <String Id="CancelDlgIcon" Overridable="yes" Value="WixUI_Ico_Info" />
+  <String Id="CancelDlgIconTooltip" Overridable="yes" Value="정보 아이콘" />
+
+  <String Id="ErrorDlg_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="ErrorDlgErrorText" Overridable="yes" Value="정보" />
+  <String Id="ErrorDlgErrorIcon" Overridable="yes" Value="WixUI_Ico_Info" />
+  <String Id="ErrorDlgErrorIconTooltip" Overridable="yes" Value="정보 아이콘" />
+
+  <String Id="UserExit_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="UserExitBitmap" Overridable="yes" Value="WixUI_Bmp_Dialog" />
+  <String Id="UserExitTitle" Overridable="yes" Value="{\WixUI_Font_Bigger}[ProductName] 설치 마법사가 중단되었습니다" />
+  <String Id="UserExitDescription1" Overridable="yes" Value="[ProductName] 설치가 중단되었습니다. 시스템은 변경되지 않았습니다. 나중에 이 프로그램을 설치하려면 설치를 다시 실행하세요." />
+  <String Id="UserExitDescription2" Overridable="yes" Value="마침 버튼을 눌러 설치 마법사를 종료합니다." />
+
+  <String Id="FatalError_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="FatalErrorBitmap" Overridable="yes" Value="WixUI_Bmp_Dialog" />
+  <String Id="FatalErrorTitle" Overridable="yes" Value="{\WixUI_Font_Bigger}[ProductName] 설치 마법사가 오류로 중단되었습니다" />
+  <String Id="FatalErrorDescription1" Overridable="yes" Value="오류 때문에 [ProductName] 설치 마법사가 중단되었습니다. 시스템은 변경되지 않았습니다. 나중에 이 프로그램을 설치하려면 설치 마법사를 다시 실행하세요." />
+  <String Id="FatalErrorDescription2" Overridable="yes" Value="마침 버튼을 눌러 설치 마법사를 종료합니다." />
+
+  <!-- 파일 사용 중 -->
+  <String Id="FilesInUse_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="FilesInUseExit" Overridable="yes" Value="종료(&amp;X)" />
+  <String Id="FilesInUseBannerBitmap" Overridable="yes" Value="WixUI_Bmp_Banner" />
+  <String Id="FilesInUseText" Overridable="yes" Value="다음 응용 프로그램이 이 설치에서 업데이트해야 하는 파일을 사용하고 있습니다. 해당 응용 프로그램을 닫은 다음 &quot;다시 시도&quot;를 눌러 설치를 계속하거나 &quot;종료&quot;를 눌러 설치를 끝내세요." />
+  <String Id="FilesInUseDescription" Overridable="yes" Value="업데이트해야 하는 일부 파일이 현재 사용 중입니다." />
+  <String Id="FilesInUseTitle" Overridable="yes" Value="{\WixUI_Font_Title}파일 사용 중" />
+
+  <String Id="MsiRMFilesInUse_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="MsiRMFilesInUseBannerBitmap" Overridable="yes" Value="WixUI_Bmp_Banner" />
+  <String Id="MsiRMFilesInUseText" Overridable="yes" Value="다음 응용 프로그램이 이 설치에서 업데이트해야 하는 파일을 사용하고 있습니다. 설치 마법사가 해당 응용 프로그램을 닫고 다시 시작하도록 하거나, 나중에 컴퓨터를 다시 부팅할 수 있습니다." />
+  <String Id="MsiRMFilesInUseDescription" Overridable="yes" Value="업데이트해야 하는 일부 파일이 현재 사용 중입니다." />
+  <String Id="MsiRMFilesInUseTitle" Overridable="yes" Value="{\WixUI_Font_Title}파일 사용 중" />
+  <String Id="MsiRMFilesInUseUseRM" Overridable="yes" Value="응용 프로그램을 닫고 다시 시작합니다(&amp;C)." />
+  <String Id="MsiRMFilesInUseDontUseRM" Overridable="yes" Value="응용 프로그램을 닫지 않습니다. 컴퓨터를 다시 부팅해야 합니다(&amp;D)." />
+
+  <!-- 디스크 공간 -->
+  <String Id="OutOfDiskDlg_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="OutOfDiskDlgBannerBitmap" Overridable="yes" Value="WixUI_Bmp_Banner" />
+  <String Id="OutOfDiskDlgText" Overridable="yes" Value="강조 표시된 볼륨에 현재 선택한 기능을 설치할 디스크 공간이 부족합니다. 해당 볼륨의 파일을 일부 삭제하거나, 설치할 기능 수를 줄이거나, 다른 대상 드라이브를 선택하세요." />
+  <String Id="OutOfDiskDlgDescription" Overridable="yes" Value="설치에 필요한 디스크 공간이 사용 가능한 공간을 초과합니다." />
+  <String Id="OutOfDiskDlgTitle" Overridable="yes" Value="{\WixUI_Font_Title}디스크 공간 부족" />
+  <String Id="OutOfDiskDlgVolumeList" Overridable="yes" Value="{120}{70}{70}{70}{70}" />
+
+  <String Id="OutOfRbDiskDlg_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="OutOfRbDiskDlgBannerBitmap" Overridable="yes" Value="WixUI_Bmp_Banner" />
+  <String Id="OutOfRbDiskDlgText" Overridable="yes" Value="강조 표시된 볼륨에 현재 선택한 기능을 설치할 디스크 공간이 부족합니다. 해당 볼륨의 파일을 일부 삭제하거나, 설치할 기능 수를 줄이거나, 다른 대상 드라이브를 선택하세요." />
+  <String Id="OutOfRbDiskDlgDescription" Overridable="yes" Value="설치에 필요한 디스크 공간이 사용 가능한 공간을 초과합니다." />
+  <String Id="OutOfRbDiskDlgTitle" Overridable="yes" Value="{\WixUI_Font_Title}디스크 공간 부족" />
+  <String Id="OutOfRbDiskDlgVolumeList" Overridable="yes" Value="{120}{70}{70}{70}{70}" />
+  <String Id="OutOfRbDiskDlgText2" Overridable="yes" Value="또는 설치 관리자의 롤백 기능을 사용하지 않도록 선택할 수 있습니다. 롤백을 사용하지 않으면 설치가 중단될 때 컴퓨터가 원래 상태로 복원되지 않습니다. 롤백을 사용하지 않을 위험을 감수하려면 &quot;예&quot;를 누르세요." />
+
+  <!-- 유지 관리 -->
+  <String Id="MaintenanceWelcomeDlg_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="MaintenanceWelcomeDlgBitmap" Overridable="yes" Value="WixUI_Bmp_Dialog" />
+  <String Id="MaintenanceWelcomeDlgDescription" Overridable="yes" Value="설치 마법사에서 컴퓨터에 설치된 [ProductName] 기능 구성을 변경하거나 제거할 수 있습니다. 계속하려면 &quot;다음&quot;을, 마법사를 끝내려면 &quot;취소&quot;를 누르세요." />
+  <String Id="MaintenanceWelcomeDlgTitle" Overridable="yes" Value="{\WixUI_Font_Bigger}[ProductName] 설치 마법사에 오신 것을 환영합니다" />
+
+  <String Id="MaintenanceTypeDlg_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="MaintenanceTypeDlgChangeButton" Overridable="yes" Value="변경(&amp;C)" />
+  <String Id="MaintenanceTypeDlgChangeButtonTooltip" Overridable="yes" Value="설치 변경" />
+  <String Id="MaintenanceTypeDlgRepairButton" Overridable="yes" Value="복구(&amp;P)" />
+  <String Id="MaintenanceTypeDlgRepairButtonTooltip" Overridable="yes" Value="설치 복구" />
+  <String Id="MaintenanceTypeDlgRemoveButton" Overridable="yes" Value="제거(&amp;R)" />
+  <String Id="MaintenanceTypeDlgRemoveButtonTooltip" Overridable="yes" Value="설치 제거" />
+  <String Id="MaintenanceTypeDlgBannerBitmap" Overridable="yes" Value="WixUI_Bmp_Banner" />
+  <String Id="MaintenanceTypeDlgDescription" Overridable="yes" Value="수행할 작업을 선택하세요." />
+  <String Id="MaintenanceTypeDlgTitle" Overridable="yes" Value="{\WixUI_Font_Title}설치 변경, 복구 또는 제거" />
+  <String Id="MaintenanceTypeDlgChangeText" Overridable="yes" Value="기능이 설치되는 방식을 변경합니다." />
+  <String Id="MaintenanceTypeDlgChangeDisabledText" Overridable="yes" Value="[ProductName]에는 개별적으로 선택할 수 있는 기능이 없습니다." />
+  <String Id="MaintenanceTypeDlgRemoveText" Overridable="yes" Value="컴퓨터에서 [ProductName]을(를) 제거합니다." />
+  <String Id="MaintenanceTypeDlgRemoveDisabledText" Overridable="yes" Value="[ProductName]은(는) 제거할 수 없습니다." />
+  <String Id="MaintenanceTypeDlgRepairText" Overridable="yes" Value="누락되거나 손상된 파일, 바로 가기, 레지스트리 항목을 수정하여 최근 설치의 오류를 복구합니다." />
+  <String Id="MaintenanceTypeDlgRepairDisabledText" Overridable="yes" Value="[ProductName]은(는) 복구할 수 없습니다." />
+
+  <!-- 확인 -->
+  <String Id="VerifyReadyDlg_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="VerifyReadyDlgBannerBitmap" Overridable="yes" Value="WixUI_Bmp_Banner" />
+  <String Id="VerifyReadyDlgInstall" Overridable="yes" Value="설치(&amp;I)" />
+  <String Id="VerifyReadyDlgInstallText" Overridable="yes" Value="&quot;설치&quot;를 눌러 설치를 시작합니다. &quot;뒤로&quot;를 눌러 설치 설정을 검토하거나 변경할 수 있습니다. &quot;취소&quot;를 눌러 마법사를 끝냅니다." />
+  <String Id="VerifyReadyDlgInstallTitle" Overridable="yes" Value="{\WixUI_Font_Title}[ProductName]을(를) 설치할 준비가 되었습니다" />
+  <String Id="VerifyReadyDlgChange" Overridable="yes" Value="변경(&amp;C)" />
+  <String Id="VerifyReadyDlgChangeText" Overridable="yes" Value="&quot;변경&quot;을 눌러 설치를 시작합니다. &quot;뒤로&quot;를 눌러 설치 설정을 검토하거나 변경할 수 있습니다. &quot;취소&quot;를 눌러 마법사를 끝냅니다." />
+  <String Id="VerifyReadyDlgChangeTitle" Overridable="yes" Value="{\WixUI_Font_Title}[ProductName] 구성을 변경할 준비가 되었습니다" />
+  <String Id="VerifyReadyDlgRepair" Overridable="yes" Value="복구(&amp;P)" />
+  <String Id="VerifyReadyDlgRepairText" Overridable="yes" Value="&quot;복구&quot;를 눌러 [ProductName] 설치를 복구합니다. &quot;뒤로&quot;를 눌러 설치 설정을 검토하거나 변경할 수 있습니다. &quot;취소&quot;를 눌러 마법사를 끝냅니다." />
+  <String Id="VerifyReadyDlgRepairTitle" Overridable="yes" Value="{\WixUI_Font_Title}[ProductName]을(를) 복구할 준비가 되었습니다" />
+  <String Id="VerifyReadyDlgRemove" Overridable="yes" Value="제거(&amp;R)" />
+  <String Id="VerifyReadyDlgRemoveText" Overridable="yes" Value="&quot;제거&quot;를 눌러 컴퓨터에서 [ProductName]을(를) 제거합니다. &quot;뒤로&quot;를 눌러 설치 설정을 검토하거나 변경할 수 있습니다. &quot;취소&quot;를 눌러 마법사를 끝냅니다." />
+  <String Id="VerifyReadyDlgRemoveTitle" Overridable="yes" Value="{\WixUI_Font_Title}[ProductName]을(를) 제거할 준비가 되었습니다" />
+  <String Id="VerifyReadyDlgUpdate" Overridable="yes" Value="업데이트(&amp;U)" />
+  <String Id="VerifyReadyDlgUpdateText" Overridable="yes" Value="&quot;업데이트&quot;를 눌러 [ProductName]을(를) 업데이트합니다. &quot;뒤로&quot;를 눌러 설치 설정을 검토하거나 변경할 수 있습니다. &quot;취소&quot;를 눌러 마법사를 끝냅니다." />
+  <String Id="VerifyReadyDlgUpdateTitle" Overridable="yes" Value="{\WixUI_Font_Title}[ProductName]을(를) 업데이트할 준비가 되었습니다" />
+
+  <!-- 다시 시작 / 대기 -->
+  <String Id="ResumeDlg_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="ResumeDlgInstall" Overridable="yes" Value="설치(&amp;I)" />
+  <String Id="ResumeDlgBitmap" Overridable="yes" Value="WixUI_Bmp_Dialog" />
+  <String Id="ResumeDlgDescription" Overridable="yes" Value="설치 마법사가 컴퓨터에 [ProductName] 설치를 완료합니다. 계속하려면 &quot;설치&quot;를, 마법사를 끝내려면 &quot;취소&quot;를 누르세요." />
+  <String Id="ResumeDlgTitle" Overridable="yes" Value="{\WixUI_Font_Bigger}[ProductName] 설치 마법사를 다시 시작합니다" />
+
+  <String Id="WaitForCostingDlg_Title" Overridable="yes" Value="[ProductName] 설치" />
+  <String Id="WaitForCostingDlgReturn" Overridable="yes" Value="돌아가기(&amp;R)" />
+  <String Id="WaitForCostingDlgText" Overridable="yes" Value="설치 관리자가 디스크 공간 요구 사항을 계산하는 동안 잠시 기다려 주세요." />
+  <String Id="WaitForCostingDlgIcon" Overridable="yes" Value="WixUI_Ico_Exclam" />
+  <String Id="WaitForCostingDlgIconTooltip" Overridable="yes" Value="경고 아이콘" />
+
+  <!-- 진행률 상태 텍스트 -->
+  <String Id="ProgressTextInstallValidate" Overridable="yes" Value="설치 확인 중" />
+  <String Id="ProgressTextInstallFiles" Overridable="yes" Value="새 파일 복사 중" />
+  <String Id="ProgressTextInstallFilesTemplate" Overridable="yes" Value="파일: [1], 폴더: [9], 크기: [6]" />
+  <String Id="ProgressTextInstallAdminPackage" Overridable="yes" Value="네트워크 설치 파일 복사 중" />
+  <String Id="ProgressTextInstallAdminPackageTemplate" Overridable="yes" Value="파일: [1], 폴더: [9], 크기: [6]" />
+  <String Id="ProgressTextFileCost" Overridable="yes" Value="필요한 공간 계산 중" />
+  <String Id="ProgressTextCostInitialize" Overridable="yes" Value="필요한 공간 계산 중" />
+  <String Id="ProgressTextCostFinalize" Overridable="yes" Value="필요한 공간 계산 중" />
+  <String Id="ProgressTextCreateShortcuts" Overridable="yes" Value="바로 가기 만드는 중" />
+  <String Id="ProgressTextCreateShortcutsTemplate" Overridable="yes" Value="바로 가기: [1]" />
+  <String Id="ProgressTextPublishComponents" Overridable="yes" Value="한정 구성 요소 게시 중" />
+  <String Id="ProgressTextPublishComponentsTemplate" Overridable="yes" Value="구성 요소 ID: [1], 한정자: [2]" />
+  <String Id="ProgressTextPublishFeatures" Overridable="yes" Value="제품 기능 게시 중" />
+  <String Id="ProgressTextPublishFeaturesTemplate" Overridable="yes" Value="기능: [1]" />
+  <String Id="ProgressTextPublishProduct" Overridable="yes" Value="제품 정보 게시 중" />
+  <String Id="ProgressTextInstallServices" Overridable="yes" Value="서비스 설치 중" />
+  <String Id="ProgressTextInstallServicesTemplate" Overridable="yes" Value="서비스: [1]" />
+  <String Id="ProgressTextStartServices" Overridable="yes" Value="서비스 시작 중" />
+  <String Id="ProgressTextStartServicesTemplate" Overridable="yes" Value="서비스: [1]" />
+  <String Id="ProgressTextStopServices" Overridable="yes" Value="서비스 중지 중" />
+  <String Id="ProgressTextStopServicesTemplate" Overridable="yes" Value="서비스: [1]" />
+  <String Id="ProgressTextDeleteServices" Overridable="yes" Value="서비스 삭제 중" />
+  <String Id="ProgressTextDeleteServicesTemplate" Overridable="yes" Value="서비스: [1]" />
+  <String Id="ProgressTextRegisterUser" Overridable="yes" Value="사용자 계정 만드는 중" />
+  <String Id="ProgressTextRegisterUserTemplate" Overridable="yes" Value="계정: [1]" />
+  <String Id="ProgressTextUnregisterUser" Overridable="yes" Value="사용자 계정 제거 중" />
+  <String Id="ProgressTextUnregisterUserTemplate" Overridable="yes" Value="계정: [1]" />
+  <String Id="ProgressTextRemoveFiles" Overridable="yes" Value="파일 제거 중" />
+  <String Id="ProgressTextRemoveFilesTemplate" Overridable="yes" Value="파일: [1], 폴더: [9], 크기: [6]" />
+  <String Id="ProgressTextRemoveFolders" Overridable="yes" Value="폴더 제거 중" />
+  <String Id="ProgressTextRemoveFoldersTemplate" Overridable="yes" Value="폴더: [9]" />
+  <String Id="ProgressTextRemoveShortcuts" Overridable="yes" Value="바로 가기 제거 중" />
+  <String Id="ProgressTextRemoveShortcutsTemplate" Overridable="yes" Value="바로 가기: [1]" />
+  <String Id="ProgressTextMoveFiles" Overridable="yes" Value="기존 파일 이동 중" />
+  <String Id="ProgressTextMoveFilesTemplate" Overridable="yes" Value="파일: [1], 폴더: [9], 크기: [6]" />
+  <String Id="ProgressTextInstallODBC" Overridable="yes" Value="ODBC 드라이버, 데이터 원본, 변환기 설치 중" />
+  <String Id="ProgressTextInstallODBCDriver" Overridable="yes" Value="드라이버: [1]" />
+  <String Id="ProgressTextInstallODBCTranslator" Overridable="yes" Value="변환기: [1]" />
+  <String Id="ProgressTextInstallODBCDataSource" Overridable="yes" Value="데이터 원본: [1]" />
+  <String Id="ProgressTextRegisterProduct" Overridable="yes" Value="제품 등록 중" />
+  <String Id="ProgressTextRegisterProductTemplate" Overridable="yes" Value="제품: [1]" />
+  <String Id="ProgressTextUnregisterProduct" Overridable="yes" Value="제품 등록 취소 중" />
+  <String Id="ProgressTextUnregisterProductTemplate" Overridable="yes" Value="제품: [1]" />
+  <String Id="ProgressTextWriteIniValues" Overridable="yes" Value="INI 파일 값 쓰는 중" />
+  <String Id="ProgressTextWriteIniValuesTemplate" Overridable="yes" Value="INI 파일: [1]" />
+  <String Id="ProgressTextRemoveIniValues" Overridable="yes" Value="INI 파일 값 제거 중" />
+  <String Id="ProgressTextRemoveIniValuesTemplate" Overridable="yes" Value="INI 파일: [1]" />
+  <String Id="ProgressTextWriteRegistryValues" Overridable="yes" Value="레지스트리 값 쓰는 중" />
+  <String Id="ProgressTextWriteRegistryValuesTemplate" Overridable="yes" Value="레지스트리: [1]" />
+  <String Id="ProgressTextRemoveRegistryValues" Overridable="yes" Value="레지스트리 값 제거 중" />
+  <String Id="ProgressTextRemoveRegistryValuesTemplate" Overridable="yes" Value="레지스트리: [1]" />
+  <String Id="ProgressTextRegisterTypeLibraries" Overridable="yes" Value="형식 라이브러리 등록 중" />
+  <String Id="ProgressTextRegisterTypeLibrariesTemplate" Overridable="yes" Value="파일: [1]" />
+  <String Id="ProgressTextUnregisterTypeLibraries" Overridable="yes" Value="형식 라이브러리 등록 취소 중" />
+  <String Id="ProgressTextUnregisterTypeLibrariesTemplate" Overridable="yes" Value="파일: [1]" />
+  <String Id="ProgressTextSelfUnregModules" Overridable="yes" Value="모듈 등록 취소 중" />
+  <String Id="ProgressTextSelfUnregModulesTemplate" Overridable="yes" Value="파일: [1]" />
+  <String Id="ProgressTextSelfRegModules" Overridable="yes" Value="모듈 등록 중" />
+  <String Id="ProgressTextSelfRegModulesTemplate" Overridable="yes" Value="파일: [1]" />
+  <String Id="ProgressTextMsiPublishAssemblies" Overridable="yes" Value="전역 어셈블리 캐시에 어셈블리 게시 중" />
+  <String Id="ProgressTextMsiPublishAssembliesTemplate" Overridable="yes" Value="응용 프로그램 컨텍스트: [1], 어셈블리 이름: [2]" />
+  <String Id="ProgressTextMsiUnpublishAssemblies" Overridable="yes" Value="전역 어셈블리 캐시에서 어셈블리 게시 취소 중" />
+  <String Id="ProgressTextMsiUnpublishAssembliesTemplate" Overridable="yes" Value="응용 프로그램 컨텍스트: [1], 어셈블리 이름: [2]" />
+  <String Id="ProgressTextInstallFinalize" Overridable="yes" Value="설치 마무리 중" />
+  <String Id="ProgressTextRemoveExistingProducts" Overridable="yes" Value="기존 제품 제거 중" />
+  <String Id="ProgressTextRemoveExistingProductsTemplate" Overridable="yes" Value="제품: [1]" />
+  <String Id="ProgressTextInstallInitialize" Overridable="yes" Value="설치 초기화 중" />
+  <String Id="ProgressTextInstallExecute" Overridable="yes" Value="설치 실행 중" />
+  <String Id="ProgressTextInstallExecuteAgain" Overridable="yes" Value="설치 다시 실행 중" />
+  <String Id="ProgressTextPublishProductTemplate" Overridable="yes" Value="제품: [1]" />
+  <String Id="ProgressTextRollback" Overridable="yes" Value="롤백 중" />
+  <String Id="ProgressTextRollbackTemplate" Overridable="yes" Value="롤백: [1]" />
+
+</WixLocalization>

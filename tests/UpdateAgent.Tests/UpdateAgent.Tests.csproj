@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\UpdateAgent.Shared\UpdateAgent.Shared.csproj" />
     <ProjectReference Include="..\..\src\UpdateAgent.Core\UpdateAgent.Core.csproj" />
+    <ProjectReference Include="..\..\src\UpdateAgent.Service\UpdateAgent.Service.csproj" />
   </ItemGroup>
 
 </Project>

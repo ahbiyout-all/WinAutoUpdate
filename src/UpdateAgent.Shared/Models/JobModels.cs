@@ -68,7 +68,7 @@ public sealed record AgentInfo
 {
     public required string AgentId { get; init; }
     public string MachineName { get; init; } = Environment.MachineName;
-    public string AgentVersion { get; init; } = "0.1.0";
+    public string AgentVersion { get; init; } = UpdateAgentConstants.AgentVersion;
     public string? IpAddress { get; init; }
     public IReadOnlyList<string> MacAddresses { get; init; } = [];
     public OsInfo? Os { get; init; }

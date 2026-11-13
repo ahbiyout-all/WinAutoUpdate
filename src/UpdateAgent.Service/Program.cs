@@ -41,6 +41,13 @@ try
 
     var builder = Host.CreateApplicationBuilder(args);
 
+    // MSI 배포용 머신 설정: %ProgramData%\UpdateAgent\agent.json
+    // appsettings.json보다 우선하고, 환경 변수/명령줄보다는 낮은 우선순위를 유지한다.
+    builder.Configuration
+        .AddJsonFile(UpdateAgentConstants.ConfigFilePath, optional: true, reloadOnChange: false)
+        .AddEnvironmentVariables()
+        .AddCommandLine(args);
+
     builder.Services.Configure<AgentOptions>(
         builder.Configuration.GetSection(AgentOptions.SectionName));
 

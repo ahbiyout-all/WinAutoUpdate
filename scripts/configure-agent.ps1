@@ -3,7 +3,10 @@
 Updates the UpdateAgent agent configuration on an installed student PC.
 
 .DESCRIPTION
-Edits C:\ProgramData\UpdateAgent\app\service\appsettings.json in place.
+Targets %ProgramData%\UpdateAgent\agent.json for MSI installations. Falls back to
+the legacy script installation (C:\ProgramData\UpdateAgent\app\service\appsettings.json)
+when that is what is present, or when -Legacy / -InstallRoot is specified.
+
 Only the values you pass are changed. Optionally restarts the service.
 
 Run from an elevated PowerShell prompt.
@@ -14,10 +17,16 @@ $env:UPDATEAGENT_AGENT_TOKEN = "<agent-token>"
 
 .EXAMPLE
 .\scripts\configure-agent.ps1 -DisableOverlay -RestartService
+
+.EXAMPLE
+.\scripts\configure-agent.ps1 -Legacy -InstallRoot "C:\ProgramData\UpdateAgent\app" -DisableDryRun
 #>
 [CmdletBinding()]
 param(
-    [string]$InstallRoot = "C:\ProgramData\UpdateAgent\app",
+    [string]$ConfigPath,
+    [string]$InstallRoot,
+    [switch]$Legacy,
+    [string]$DataRoot = "C:\ProgramData\UpdateAgent",
     [string]$ServiceName = "UpdateAgentService",
     [string]$LabManagerUrl,
     [string]$AgentToken,
@@ -68,6 +77,20 @@ function Set-JsonProperty {
     }
 }
 
+function Write-JsonAtomic {
+    param([string]$Path, $Object)
+
+    $directory = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $directory)) {
+        New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    }
+
+    $json = $Object | ConvertTo-Json -Depth 12
+    $temp = "$Path.tmp"
+    [IO.File]::WriteAllText($temp, $json, (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $temp -Destination $Path -Force
+}
+
 Assert-Administrator
 
 if ($EnableOverlay -and $DisableOverlay) {
@@ -77,14 +100,51 @@ if ($EnableDryRun -and $DisableDryRun) {
     throw "Specify only one of -EnableDryRun or -DisableDryRun."
 }
 
-$InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
-$configPath = Join-Path $InstallRoot "service\appsettings.json"
-if (-not (Test-Path -LiteralPath $configPath)) {
-    throw "Agent configuration not found: $configPath. Run install-service.ps1 first."
+$DataRoot = [IO.Path]::GetFullPath($DataRoot)
+$msiServiceExe = Join-Path $env:ProgramFiles "UpdateAgent\Service\UpdateAgent.Service.exe"
+$msiConfigPath = Join-Path $DataRoot "agent.json"
+
+$legacyRoot = "C:\ProgramData\UpdateAgent\app"
+if ($PSBoundParameters.ContainsKey('InstallRoot')) {
+    $legacyRoot = [IO.Path]::GetFullPath($InstallRoot)
+}
+$legacyConfigPath = Join-Path $legacyRoot "service\appsettings.json"
+
+$mode = $null
+if (-not [string]::IsNullOrWhiteSpace($ConfigPath)) {
+    $ConfigPath = [IO.Path]::GetFullPath($ConfigPath)
+    $mode = if ($ConfigPath -like "*\app\service\appsettings.json") { "legacy" } else { "msi" }
+}
+elseif ($Legacy -or $PSBoundParameters.ContainsKey('InstallRoot')) {
+    $ConfigPath = $legacyConfigPath
+    $mode = "legacy"
+}
+elseif (Test-Path -LiteralPath $msiServiceExe) {
+    $ConfigPath = $msiConfigPath
+    $mode = "msi"
+}
+elseif (Test-Path -LiteralPath $legacyConfigPath) {
+    $ConfigPath = $legacyConfigPath
+    $mode = "legacy"
+    Write-Warning "MSI installation not found. Using the legacy installation: $legacyConfigPath"
+}
+else {
+    throw "No UpdateAgent installation found. Looked for '$msiServiceExe' and '$legacyConfigPath'. Run install-agent-msi.ps1 or install-service.ps1 first."
+}
+
+if ($mode -eq "legacy" -and -not (Test-Path -LiteralPath $ConfigPath)) {
+    throw "Agent configuration not found: $ConfigPath. Run install-service.ps1 first."
 }
 
 $changes = New-Object System.Collections.Generic.List[string]
-$config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+
+$config = $null
+if (Test-Path -LiteralPath $ConfigPath) {
+    $config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+}
+else {
+    $config = [pscustomobject]@{}
+}
 $agent = $config.Agent
 if ($null -eq $agent) {
     $agent = [pscustomobject]@{}
@@ -158,15 +218,14 @@ if ($changes.Count -eq 0) {
     throw "No changes specified. Pass at least one of: -LabManagerUrl, -AgentToken, -AgentTokenFile, -SessionHelperPath, -EnableOverlay, -DisableOverlay, -EnableDryRun, -DisableDryRun."
 }
 
-$json = $config | ConvertTo-Json -Depth 12
-[IO.File]::WriteAllText($configPath, $json, (New-Object System.Text.UTF8Encoding($false)))
+Write-JsonAtomic -Path $ConfigPath -Object $config
 
-& icacls $configPath /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)" | Out-Null
+& icacls $ConfigPath /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)" | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning "Could not tighten the appsettings.json ACL. Check permissions manually."
+    Write-Warning "Could not tighten the ACL on $ConfigPath. Check permissions manually."
 }
 
-Write-Host "Updated $configPath" -ForegroundColor Green
+Write-Host "Updated $ConfigPath ($mode mode)" -ForegroundColor Green
 foreach ($change in $changes) { Write-Host "  $change" }
 
 if ($RestartService) {

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package Name="UpdateAgent Agent"
+           Manufacturer="UpdateAgent"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="58D1BA8F-C2D1-4A36-B944-063870B8F361"
+           Scope="perMachine"
+           Language="1042"
+           InstallerVersion="500"
+           Compressed="yes">
+
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of UpdateAgent Agent is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <Launch Condition="VersionNT64" Message="UpdateAgent requires 64-bit Windows." />
+    <Launch Condition="VersionNT &gt;= 1000" Message="UpdateAgent requires Windows 10 or later." />
+
+    <ui:WixUI Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.NoticeRtf)" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="UpdateAgent">
+        <Directory Id="ServiceDir" Name="Service" />
+        <Directory Id="SessionHelperDir" Name="SessionHelper" />
+        <Directory Id="CliDir" Name="Cli" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="AgentFeature" Title="UpdateAgent Agent" Level="1">
+      <ComponentGroupRef Id="ServiceFiles" />
+      <ComponentGroupRef Id="SessionHelperFiles" />
+    </Feature>
+
+    <Feature Id="CliFeature" Title="Command-line tool" Level="2">
+      <ComponentGroupRef Id="CliFiles" />
+    </Feature>
+
+    <ComponentGroup Id="ServiceFiles" Directory="ServiceDir">
+      <Files Include="$(var.PublishRoot)\agent\service\**">
+        <Exclude Files="$(var.PublishRoot)\agent\service\UpdateAgent.Service.exe" />
+        <Exclude Files="$(var.PublishRoot)\agent\service\appsettings.json" />
+        <Exclude Files="$(var.PublishRoot)\agent\service\appsettings.Development.json" />
+        <Exclude Files="$(var.PublishRoot)\agent\service\**\*.pdb" />
+      </Files>
+
+      <Component Id="AgentServiceComponent" Guid="*">
+        <File Id="AgentServiceExe"
+              Source="$(var.PublishRoot)\agent\service\UpdateAgent.Service.exe"
+              KeyPath="yes" />
+        <File Id="AgentServiceAppSettings"
+              Source="$(var.PublishRoot)\agent\service\appsettings.json" />
+
+        <ServiceInstall Id="AgentServiceInstall"
+                        Name="UpdateAgentService"
+                        DisplayName="UpdateAgent Service"
+                        Description="Windows Update automation agent for computer labs"
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Account="LocalSystem">
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="60"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
+
+        <ServiceControl Id="AgentServiceControl"
+                        Name="UpdateAgentService"
+                        Stop="both"
+                        Remove="uninstall"
+                        Start="install"
+                        Wait="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="SessionHelperFiles" Directory="SessionHelperDir">
+      <Files Include="$(var.PublishRoot)\agent\sessionhelper\**">
+        <Exclude Files="$(var.PublishRoot)\agent\sessionhelper\**\*.pdb" />
+      </Files>
+    </ComponentGroup>
+
+    <ComponentGroup Id="CliFiles" Directory="CliDir">
+      <Files Include="$(var.PublishRoot)\cli\**">
+        <Exclude Files="$(var.PublishRoot)\cli\**\*.pdb" />
+      </Files>
+    </ComponentGroup>
+
+  </Package>
+</Wix>

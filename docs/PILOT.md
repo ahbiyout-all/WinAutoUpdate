@@ -74,6 +74,7 @@ publish\cli
 > **주의:** `publish.ps1`을 다시 실행하면 `publish\labmanager\appsettings.json`과
 > `publish\agent\service\appsettings.json`이 기본값으로 돌아갑니다.
 > 게시 후에는 `configure-labmanager.ps1` / `install-service.ps1`을 다시 실행하세요.
+> MSI를 쓴다면 `publish.ps1` 직후 `build-msi.ps1`을 다시 실행합니다.
 > 이미 설정한 토큰을 잃지 않도록 파일럿 중에는 게시를 반복하지 않는 것이 좋습니다.
 
 ## 3. 교사 PC 설정 및 LabManager 실행
@@ -123,7 +124,47 @@ Set-Location .\publish\labmanager
 
 대시보드 우측 상단에 **관리자 토큰**을 입력합니다.
 
-## 4. 학생 PC 서비스 설치
+## 4. 학생 PC 설치
+
+설치 방법은 **MSI(권장)** 와 기존 스크립트(레거시) 두 가지입니다.
+Phase 0 파일럿에서는 MSI를 먼저 검증하고, 문제가 있으면 스크립트 방식으로 되돌립니다.
+
+### 4-A. MSI 설치 (권장)
+
+개발 PC에서 MSI를 만들고, MSI와 `scripts` 폴더를 학생 PC로 복사합니다.
+
+```powershell
+# 개발 PC
+.\scripts\publish.ps1
+.\scripts\build-msi.ps1
+# 산출물: artifacts\msi\UpdateAgent.Agent-<버전>-x64.msi
+```
+
+학생 PC에서 **관리자 PowerShell**을 열고:
+
+```powershell
+Set-Location "<복사한 폴더>"
+
+$env:UPDATEAGENT_AGENT_TOKEN = Get-Content "<agent-token.txt 경로>" -Raw
+.\scripts\install-agent-msi.ps1 `
+  -MsiPath ".\UpdateAgent.Agent-0.1.0-x64.msi" `
+  -LabManagerUrl "http://<교사-PC-IP>:5080" `
+  -ConfirmMaestro
+```
+
+스크립트가 수행하는 작업:
+
+1. MSI 설치 (최소 UI, `-Quiet`면 무인). 서비스는 `C:\Program Files\UpdateAgent\Service`
+2. `%ProgramData%\UpdateAgent\agent.json`에 URL/토큰/SessionHelper 경로 기록
+3. `agent.json` ACL을 Administrators(전체) + SYSTEM(읽기)로 제한
+4. 서비스 실패 플래그(`failureflag`) 설정
+5. 서비스 재시작 및 상태 확인
+
+- 토큰은 `msiexec` 명령줄/로그에 남지 않습니다.
+- 기존 `agent.json`이 있으면 URL/토큰을 재사용하므로 업그레이드 시 생략할 수 있습니다.
+- 레거시 스크립트 설치가 있으면 그 URL/토큰을 자동으로 재사용합니다.
+
+### 4-B. 스크립트 설치 (레거시)
 
 `publish`와 `scripts` 폴더를 구조 그대로 학생 PC로 복사합니다.
 
@@ -164,14 +205,16 @@ Get-Content C:\ProgramData\UpdateAgent\logs\service-*.log -Tail 30
 
 ```
 UpdateAgent Service 시작: agent=<GUID>, machine=<PC 이름>
-Content root path: C:\ProgramData\UpdateAgent\app\service\
+Content root path: C:\Program Files\UpdateAgent\Service\   (MSI)
+Content root path: C:\ProgramData\UpdateAgent\app\service\  (레거시)
 ```
 
-`Content root path`가 `service` 폴더인지 확인합니다.
+`Content root path`가 설치 방식에 맞는지 확인합니다.
 대시보드에서 30~90초 안에 해당 PC가 **온라인**으로 나타나야 합니다.
 
 > 오버레이를 끄고 먼저 연동만 확인하려면:
-> `.\scripts\install-service.ps1 ... -DisableOverlay`
+> MSI: `.\scripts\install-agent-msi.ps1 ... -DisableOverlay`
+> 레거시: `.\scripts\install-service.ps1 ... -DisableOverlay`
 > 나중에 `.\scripts\configure-agent.ps1 -EnableOverlay -RestartService`로 켤 수 있습니다.
 
 ## 5. 사전 점검 (선택)
@@ -331,13 +374,29 @@ Stop-Service UpdateAgentService
 ### 서비스 제거 (데이터 유지)
 
 ```powershell
+# MSI
+.\scripts\uninstall-agent-msi.ps1 -Force
+
+# 레거시
 .\scripts\uninstall-service.ps1 -RemoveFiles -Force
 ```
 
 ### 서비스 + 데이터 완전 제거
 
 ```powershell
+# MSI
+.\scripts\uninstall-agent-msi.ps1 -RemoveData -Force
+
+# 레거시
 .\scripts\uninstall-service.ps1 -RemoveFiles -RemoveData -Force
+```
+
+### MSI에서 레거시로 되돌리기
+
+```powershell
+.\scripts\uninstall-agent-msi.ps1 -Force
+.\scripts\install-service.ps1 -LabManagerUrl "http://<교사-PC-IP>:5080"
+.\scripts\configure-agent.ps1 -RestartService
 ```
 
 ### 오버레이가 멈춘 경우
@@ -374,7 +433,8 @@ Stop-Process -Name UpdateAgent.SessionHelper -Force -ErrorAction SilentlyContinu
 
 - Ctrl+Alt+Del(보안 관련 시퀀스)은 소프트 오버레이로 차단할 수 없습니다.
 - 기능 업데이트(OS 업그레이드)는 이번 파일럿 범위가 아닙니다.
-- MSI 설치 프로그램과 랩 일괄 원격 배포는 아직 없습니다.
+- MSI는 제공되지만, 상승된 VM/실 PC에서 설치·업그레이드·제거 검증이 아직 필요합니다.
+- 랩 전체 일괄 원격 배포는 아직 없습니다 (USB/공유 폴더 수동 배포).
 - Maestro 연동은 수동 체크리스트 + 마커 검증만 지원합니다.
 - 학생 계정이 로컬 관리자인 환경에서는 완전한 변조 방지가 불가능합니다.
 

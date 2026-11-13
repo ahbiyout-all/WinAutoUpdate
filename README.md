@@ -30,8 +30,10 @@ UpdateAgent.LabManager  <── HTTP 체크인 ──  UpdateAgent.Service (SYST
 | `src/UpdateAgent.LabManager` | 교사 PC 관리 서버 + 웹 대시보드 + WoL |
 | `src/UpdateAgent.Cli` | 로컬 CLI (scan/preflight/run/status/maestro/pause/cancel) |
 | `tests/UpdateAgent.Tests` | xUnit 단위 테스트 |
-| `scripts/` | 파일럿 게시/설정/서비스 설치·제거/방화벽 스크립트 |
+| `installer/UpdateAgent.Agent.Installer` | WiX MSI 패키지 (학생 PC 에이전트) |
+| `scripts/` | 파일럿 게시/MSI/설정/서비스 설치·제거/방화벽 스크립트 |
 | `docs/PILOT.md` | Phase 0 실 PC 파일럿 런북 |
+| `docs/MSI.md` | MSI 패키징 설계·구현 상태·검증 매트릭스 |
 
 ## 지원 범위
 
@@ -67,31 +69,42 @@ dotnet build UpdateAgent.sln
 dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj
 ```
 
-현재 기준: 빌드 경고 0 / 오류 0, 테스트 40개 통과.
+현재 기준: 빌드 경고 0 / 오류 0, 테스트 44개 통과.
+
+MSI는 솔루션 빌드에 포함되지 않습니다(일반 빌드에 WiX 복원을 강제하지 않기 위해).
+MSI가 필요하면 `publish.ps1` 후 `build-msi.ps1`을 실행합니다.
 
 ## 파일럿 키트
 
 실 PC 파일럿에 필요한 스크립트와 런북이 포함되어 있습니다. 상세 절차는 [`docs/PILOT.md`](docs/PILOT.md)를 참고하세요.
+MSI 패키징 설계와 제약은 [`docs/MSI.md`](docs/MSI.md)에 있습니다.
 
 | 스크립트 | 실행 위치 | 설명 |
 |---|---|---|
 | `scripts/publish.ps1` | 개발 PC | LabManager/Service/SessionHelper/CLI 게시 |
+| `scripts/build-msi.ps1` | 개발 PC | 게시물 스테이징 → WiX MSI 빌드/ICE 검증/해시 |
 | `scripts/configure-labmanager.ps1` | 교사 PC | 관리자/에이전트 토큰, 수신 URL 설정 |
 | `scripts/allow-labmanager.ps1` | 교사 PC | TCP 5080 인바운드 방화벽 규칙 (Private/Domain) |
-| `scripts/install-service.ps1` | 학생 PC | 서비스+오버레이 설치, 설정, ACL, 자동 시작 등록 |
-| `scripts/configure-agent.ps1` | 학생 PC | 설치 후 URL/토큰/오버레이/DRY RUN 변경 |
-| `scripts/uninstall-service.ps1` | 학생 PC | 서비스 제거, 필요 시 파일/데이터 삭제 |
+| `scripts/install-agent-msi.ps1` | 학생 PC | MSI 설치 + `agent.json` 설정 + 서비스 시작 (권장) |
+| `scripts/uninstall-agent-msi.ps1` | 학생 PC | MSI 제거, 필요 시 데이터 삭제 |
+| `scripts/install-service.ps1` | 학생 PC | 레거시 스크립트 설치 (서비스+오버레이) |
+| `scripts/configure-agent.ps1` | 학생 PC | MSI `agent.json` 또는 레거시 `appsettings.json` 변경 |
+| `scripts/uninstall-service.ps1` | 학생 PC | 레거시 서비스 제거, 필요 시 파일/데이터 삭제 |
 
 ```powershell
 # 개발 PC
 .\scripts\publish.ps1
+.\scripts\build-msi.ps1          # artifacts\msi\UpdateAgent.Agent-<버전>-x64.msi
 
 # 교사 PC (관리자 PowerShell)
 .\scripts\configure-labmanager.ps1 -AdminTokenFile <파일> -AgentTokenFile <파일>
 .\scripts\allow-labmanager.ps1
 
-# 학생 PC (관리자 PowerShell)
+# 학생 PC (관리자 PowerShell, MSI 권장)
 $env:UPDATEAGENT_AGENT_TOKEN = Get-Content <에이전트-토큰-파일> -Raw
+.\scripts\install-agent-msi.ps1 -MsiPath <MSI 경로> -LabManagerUrl "http://<교사-PC-IP>:5080" -ConfirmMaestro
+
+# 학생 PC (레거시 스크립트)
 .\scripts\install-service.ps1 -LabManagerUrl "http://<교사-PC-IP>:5080"
 ```
 
@@ -148,17 +161,23 @@ $env:Agent__OverlayEnabled = "false"
 dotnet run --project src/UpdateAgent.Service
 ```
 
-운영용 설치는 관리자 PowerShell에서:
+운영용 설치는 관리자 PowerShell에서 MSI를 사용합니다.
 
 ```powershell
 $env:UPDATEAGENT_AGENT_TOKEN = Get-Content <에이전트-토큰-파일> -Raw
-.\scripts\install-service.ps1 -LabManagerUrl "http://<교사-PC-IP>:5080"
+.\scripts\install-agent-msi.ps1 `
+  -MsiPath <MSI 경로> `
+  -LabManagerUrl "http://<교사-PC-IP>:5080" `
+  -ConfirmMaestro
 ```
 
-설치 스크립트가 서비스(`C:\ProgramData\UpdateAgent\app\service`)와 오버레이 헬퍼
-(`...\app\sessionhelper`)를 분리 배치하고, `appsettings.json`에
-`Agent:SessionHelperPath`를 자동으로 기록합니다. 수동으로 경로를 바꾸려면
-`scripts\configure-agent.ps1 -SessionHelperPath <경로>`를 사용하세요.
+MSI는 서비스(`C:\Program Files\UpdateAgent\Service`)와 오버레이 헬퍼
+(`...\SessionHelper`)를 설치하고, 래퍼가 `%ProgramData%\UpdateAgent\agent.json`에
+`Agent:SessionHelperPath`를 포함한 설정을 기록합니다.
+
+레거시 스크립트 설치는 `install-service.ps1`을 사용하며,
+`C:\ProgramData\UpdateAgent\app` 아래에 배치하고 `appsettings.json`을 수정합니다.
+두 방식 모두 `scripts\configure-agent.ps1`로 URL/토큰/오버레이/DRY RUN을 변경할 수 있습니다.
 
 ### 3. 로컬 CLI
 
@@ -195,7 +214,7 @@ dotnet run --project src/UpdateAgent.Cli -- maestro
 
 ## 설정
 
-우선순위: 환경 변수 > `appsettings.json` > 코드 기본값.
+우선순위: 명령줄 인수 > 환경 변수 > `%ProgramData%\UpdateAgent\agent.json` (MSI) > `appsettings.json` > 코드 기본값.
 
 ### LabManager (`LabManager` 섹션)
 
@@ -233,7 +252,8 @@ $env:Agent__AgentToken = "<강력한-토큰>"
 
 데이터 경로:
 
-- 학생 PC: `%ProgramData%\UpdateAgent` (`agent.db`, `resume-marker.json`, `logs\`)
+- 학생 PC: `%ProgramData%\UpdateAgent` (`agent.json`, `agent.db`, `resume-marker.json`, `logs\`)
+- MSI 배포에서 비밀값은 `agent.json`에만 두고, Program Files의 `appsettings.json`에는 넣지 않습니다.
 - `UPDATEAGENT_STATE_PATH`로 Maestro 마커 보조 경로를 지정할 수 있습니다.
 
 ## 보안
@@ -274,6 +294,8 @@ Maestro UI/API 자동화는 2단계로 미뤄져 있습니다.
 - [ ] Wake-on-LAN: 교사 PC에서 매직 패킷 전송 후 학생 PC 부팅 확인
 - [ ] 자동 종료(`--shutdown`/정책) 동작 확인
 - [ ] 학생 PC 2~3대에 서비스 배포, 재부팅 후 자동 시작 및 체크인 확인
+- [ ] MSI 설치 → 업그레이드 → 제거 반복, `agent.json` 유지 및 데이터 보존 확인
+- [ ] MSI 설치 로그에 평문 토큰이 없는지 확인
 - [ ] 토큰 변경 후 기존 토큰이 거부되는지 확인
 - [ ] 방화벽 5080 인바운드, 교사 PC 절전/종료 시 동작 정의
 - [ ] 결과 기록 및 롤백 절차(서비스 중지/제거, Maestro 자동 복구 재설정) 문서화
@@ -310,7 +332,7 @@ Maestro UI/API 자동화는 2단계로 미뤄져 있습니다.
 
 - 기능 업데이트(OS 업그레이드)는 설치하지 않습니다. 승인 + WU/ISO 폴백은 2단계입니다.
 - Maestro 연동은 수동 체크리스트 + 마커 검증만 지원합니다. 벤더 API/UI 자동화는 2단계입니다.
-- MSI 설치 프로그램과 원격 일괄 배포는 아직 없습니다. Phase 0은 수동 게시/서비스 등록으로 진행합니다.
+- MSI 설치 프로그램은 제공되지만, 상승된 VM/실 PC에서 설치·업그레이드·제거 검증이 아직 필요합니다. 랩 일괄 원격 배포는 2단계입니다.
 - 다중 랩 통합 대시보드와 외부 원격 접속은 범위 밖입니다.
 - 드라이버 업데이트는 기본 제외입니다.
 
