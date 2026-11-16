@@ -38,6 +38,7 @@ UpdateAgent.LabManager  <── HTTP 체크인 ──  UpdateAgent.Service (SYST
 | `docs/WORKLOG.md` | 날짜별 작업 로그와 검증 결과 |
 | `docs/PILOT.md` | Phase 0 실 PC 파일럿 런북 |
 | `docs/MSI.md` | MSI 패키징 설계·구현 상태·검증 매트릭스 |
+| `docs/AI-WORK-INSTRUCTIONS.md` | AI 에이전트용 범용 작업 지시서·자아성찰 검증 게이트 |
 
 ## 지원 범위
 
@@ -78,6 +79,19 @@ dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj
 MSI는 솔루션 빌드에 포함되지 않습니다(일반 빌드에 WiX 복원을 강제하지 않기 위해).
 설치 프로그램이 필요하면 `publish.ps1` 후 `build-inno.ps1`(권장) 또는 `build-msi.ps1`을 실행합니다.
 
+에이전트만 빠르게 빌드하려면 저장소 루트의 `build.bat`을 더블클릭하거나 실행합니다.
+`Directory.Build.props`의 버전을 읽어 설치 파일 이름에 버전을 붙이고, 버전별 폴더에 모은 뒤 탐색기를 엽니다.
+
+```text
+build\agent\<버전>\
+  UpdateAgent.Agent-Setup-<버전>-x64.exe
+  UpdateAgent.Agent-Setup-<버전>-x64.exe.sha256
+  build-info.json
+```
+
+> .NET apphost(`UpdateAgent.Service.exe`, `UpdateAgent.Cli.exe` 등)의 파일 이름은 직접 바꾸지 않습니다.
+> apphost는 내부 DLL 이름을 찾기 때문에 이름을 바꾸면 실행되지 않습니다. 버전은 설치 파일 이름으로 관리합니다.
+
 ## 파일럿 키트
 
 실 PC 파일럿에 필요한 스크립트와 런북이 포함되어 있습니다. 상세 절차는 [`docs/PILOT.md`](docs/PILOT.md)를 참고하세요.
@@ -88,8 +102,9 @@ MSI 패키징 설계와 제약은 [`docs/MSI.md`](docs/MSI.md)에 있습니다.
 
 | 스크립트 | 실행 위치 | 설명 |
 |---|---|---|
-| `scripts/publish.ps1` | 개발 PC | LabManager/Service/SessionHelper/CLI 게시 |
-| `scripts/build-inno.ps1` | 개발 PC | 게시물 스테이징 → Inno Setup 설치 파일 2개 빌드/검증/해시 (**권장**) |
+| `build.bat` | 개발 PC | 에이전트만 게시 → Inno 설치 파일 빌드 → `build\agent\<버전>\`에 모아 탐색기 열기 |
+| `scripts/publish.ps1` | 개발 PC | LabManager/Service/SessionHelper/CLI 게시 (`-AgentOnly`로 학생 PC용만) |
+| `scripts/build-inno.ps1` | 개발 PC | 게시물 스테이징 → Inno Setup 설치 파일 2개 빌드/검증/해시 (`-AgentOnly` 지원, **권장**) |
 | `scripts/build-msi.ps1` | 개발 PC | 게시물 스테이징 → WiX MSI 빌드/ICE 검증/해시 (대안) |
 | `scripts/configure-labmanager.ps1` | 교사 PC | 관리자/에이전트 토큰, 수신 URL 설정 |
 | `scripts/allow-labmanager.ps1` | 교사 PC | TCP 5080 인바운드 방화벽 규칙 (Private/Domain) |
@@ -104,7 +119,10 @@ MSI 패키징 설계와 제약은 [`docs/MSI.md`](docs/MSI.md)에 있습니다.
 > 저장소에 업로드되지 않습니다.
 
 ```powershell
-# 개발 PC
+# 개발 PC — 에이전트만 빌드 (버전별 폴더 + 탐색기 열기)
+build.bat
+
+# 개발 PC — 전체 게시 + 설치 파일
 .\scripts\publish.ps1
 .\scripts\build-inno.ps1         # artifacts\inno\*-Setup-<버전>-x64.exe (권장)
 .\scripts\build-msi.ps1          # artifacts\msi\UpdateAgent.Agent-<버전>-x64.msi (대안)

@@ -21,6 +21,7 @@
 [Oo]bj/
 publish/
 artifacts/
+build/
 .vs/
 [Dd]ebug/
 [Rr]elease/
@@ -41,6 +42,7 @@ TestResults/
 # 3) Root files.
 !.gitignore
 !README.md
+!build.bat
 !Directory.Build.props
 !UpdateAgent.sln
 !global.json

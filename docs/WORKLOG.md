@@ -5,6 +5,74 @@
 
 ---
 
+## 2026-11-16 — build.bat 및 에이전트 전용 빌드 경로
+
+### 목적
+
+- Windows에서 더블클릭 한 번으로 에이전트를 빌드하고, 버전이 붙은 설치 파일을 버전별 폴더에 모아 바로 확인.
+- 실행 파일 이름에 버전을 붙여 버전을 관리하되, .NET apphost를 직접 rename하지 않는 안전한 방식 사용.
+
+### 변경
+
+| 파일 | 내용 |
+|---|---|
+| `build.bat` | 신규. `Directory.Build.props` 버전 읽기 → `publish.ps1 -AgentOnly` → `build-inno.ps1 -AgentOnly` → `build\agent\<버전>\` 조립 → 탐색기 열기 |
+| `scripts/publish.ps1` | `-AgentOnly` 추가. LabManager 게시를 생략하고 안내 문구도 에이전트 전용으로 변경 |
+| `scripts/build-inno.ps1` | `-AgentOnly` 추가. LabManager 스테이징/검증/컴파일 생략, `build-info.json`에 `target` 필드 추가 |
+| `.gitignore` | `build.bat` 허용, `build/` 무시 추가 |
+| `README.md`, `docs/INSTALLER.md` | `build.bat` 사용법과 버전 표기 원칙 추가 |
+
+### 검증
+
+- `cmd /c build.bat` 실행: 게시 → Inno 컴파일 성공(76.9초), 완료 후 탐색기 자동 열림.
+- 산출물: `build\agent\0.1.0\UpdateAgent.Agent-Setup-0.1.0-x64.exe`(96.5 MB), `.sha256`, `build-info.json`.
+- `build-info.json`: `target=agent`, `productVersion=0.1.0`, `containsSecrets=false`.
+- LabManager 산출물이 섞이지 않았고, 성공 후 `build\.staging`이 삭제된 것을 확인.
+- `.NET` apphost 파일 이름을 직접 바꾸면 내부 DLL을 찾지 못해 실행 실패하는 것을 재확인.
+  따라서 버전은 Inno Setup 설치 파일 이름으로만 관리.
+
+### 버전 판정
+
+- 빌드 스크립트와 출력 폴더 구조만 추가되었고 응용 프로그램 동작은 바뀌지 않음.
+  SemVer **버전 변경 없음**(0.1.0).
+
+### 남은 작업
+
+- 관리자 권한이 있는 VM/실 PC에서 설치 → 업그레이드 → 제거 검증.
+
+---
+
+## 2026-11-16 — 범용 AI 작업 지시서 문서화
+
+### 목적
+
+- 누적된 요청 텍스트를 특정 프로젝트/기술에 묶이지 않은 **재사용 가능한 AI 작업 SOP**로 정리.
+- "실현 가능성 판정 → 로드맵 → 구현 → 자아성찰 → 오류 수정 → 문서/버전 동기화" 흐름을 고정.
+
+### 변경
+
+| 파일 | 내용 |
+|---|---|
+| `docs/AI-WORK-INSTRUCTIONS.md` | 신규. 7개 절대 원칙, 10단계 표준 파이프라인, 정밀 오류 검증 체크리스트, SemVer 판정 규칙, 완료 정의, 요청 템플릿 수록 |
+| `README.md` | 문서 색인에 AI 작업 지시서 링크 추가 |
+| `docs/WORKLOG.md` | 이 작업 로그 추가 |
+
+### 검증
+
+- 원본 요청 목록의 항목 유형을 지시서의 7개 버킷(기능/UI/빌드/보안/문서/버전/품질)으로 분류해 누락 없이 매핑.
+- 모순되는 요구(고정 창 크기 vs 반응형, 모바일 패키징 vs 제거 등)는 "실현 가능성 판정" 예시로 일반화.
+- 작성 후 파일을 재독해하여 잘못 섞인 문자(한자 혼용) 1건을 발견·수정.
+
+### 버전 판정
+
+- 기능/동작/빌드 산출물 변경 없음(문서 추가만). SemVer **버전 변경 없음**으로 판정.
+
+### 남은 작업
+
+- 이 지시서를 실제 후속 작업에 적용할 때는 매 단계 자아성찰 게이트 결과를 작업 로그에 남긴다.
+
+---
+
 ## 2026-11-16 — GitHub 자동 업데이트 기반 구성
 
 ### 목적

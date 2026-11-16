@@ -208,10 +208,39 @@ C:\Program Files\UpdateAgent\LabManager\
 
 # 스테이징 보존(포함 파일 확인용)
 .\scripts\build-inno.ps1 -NoPublish -KeepStaging
+
+# 에이전트만 게시/빌드
+.\scripts\publish.ps1 -AgentOnly
+.\scripts\build-inno.ps1 -AgentOnly -NoPublish
 ```
 
 `build-inno.ps1`은 `Directory.Build.props`의 `<Version>`을 읽어 파일 이름과
 `AppVersion`을 맞춥니다. 버전은 `scripts\github-push.ps1`이 올립니다.
+
+### 에이전트만 한 번에 빌드 (`build.bat`)
+
+저장소 루트의 `build.bat`을 더블클릭하거나 실행하면 다음을 순서대로 수행합니다.
+
+1. `Directory.Build.props`에서 버전을 읽습니다.
+2. `publish.ps1 -AgentOnly`로 Service/SessionHelper/Cli만 게시합니다.
+3. `build-inno.ps1 -AgentOnly`로 학생 PC용 설치 파일만 빌드합니다.
+4. 결과를 버전별 폴더에 모으고 탐색기를 엽니다.
+
+```text
+build\agent\<버전>\
+  UpdateAgent.Agent-Setup-<버전>-x64.exe
+  UpdateAgent.Agent-Setup-<버전>-x64.exe.sha256
+  build-info.json
+```
+
+중간 산출물은 `build\.staging\`에 만들고 빌드가 끝나면 삭제합니다.
+실패하면 원인 확인을 위해 `build\.staging\`을 남깁니다.
+
+> `.NET` apphost(`UpdateAgent.Service.exe`, `UpdateAgent.SessionHelper.exe`,
+> `UpdateAgent.Cli.exe`)의 파일 이름은 직접 바꾸지 않습니다. apphost는 실행 시
+> 같은 이름의 DLL(예: `UpdateAgent.Cli.dll`)을 찾기 때문에, 이름을 바꾸면
+> `The application to execute does not exist` 오류가 납니다.
+> 버전이 붙은 실행 파일 이름은 Inno Setup 설치 파일이 담당합니다.
 
 ## 10. 업그레이드와 제거
 

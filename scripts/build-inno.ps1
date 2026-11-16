@@ -5,10 +5,12 @@ Builds the UpdateAgent Inno Setup installers from the published output.
 .DESCRIPTION
 Stages publish\ into artifacts\inno\stage, removes debug artifacts, documentation
 and portable/archive files, verifies that only runtime files are included, then
-compiles both installers with Inno Setup 6:
+compiles the installers with Inno Setup 6:
 
   artifacts\inno\UpdateAgent.Agent-Setup-<version>-x64.exe
   artifacts\inno\UpdateAgent.LabManager-Setup-<version>-x64.exe
+
+With -AgentOnly only the student-PC installer is staged and compiled.
 
 Each installer installs individual (unpacked, multi-file) application folders.
 The setup files never contain LabManager URL, agent token or any other secret.
@@ -18,6 +20,9 @@ Run from a normal PowerShell prompt. Inno Setup 6 must be installed.
 .EXAMPLE
 .\scripts\publish.ps1
 .\scripts\build-inno.ps1
+
+.EXAMPLE
+.\scripts\build-inno.ps1 -AgentOnly
 
 .EXAMPLE
 .\scripts\build-inno.ps1 -NoPublish -SkipValidation
@@ -33,6 +38,7 @@ param(
     [string]$StagingRoot,
     [string]$IsccPath,
     [switch]$NoPublish,
+    [switch]$AgentOnly,
     [switch]$KeepStaging,
     [switch]$SkipValidation
 )
@@ -201,7 +207,7 @@ $ProductVersion = ConvertTo-ThreePartVersion $ProductVersion
 $iscc = Find-Iscc -Explicit $IsccPath
 
 if (-not (Test-Path -LiteralPath $agentIss)) { throw "Inno script not found: $agentIss" }
-if (-not (Test-Path -LiteralPath $labManagerIss)) { throw "Inno script not found: $labManagerIss" }
+if (-not $AgentOnly -and -not (Test-Path -LiteralPath $labManagerIss)) { throw "Inno script not found: $labManagerIss" }
 if (-not (Test-Path -LiteralPath $noticeRtf)) { throw "License notice not found: $noticeRtf" }
 
 $serviceSource       = Join-Path $PublishRoot "agent\service"
@@ -209,27 +215,39 @@ $sessionHelperSource = Join-Path $PublishRoot "agent\sessionhelper"
 $cliSource           = Join-Path $PublishRoot "cli"
 $labManagerSource    = Join-Path $PublishRoot "labmanager"
 
-Assert-PublishFolder $serviceSource "UpdateAgent.Service.exe"
-Assert-PublishFolder $sessionHelperSource "UpdateAgent.SessionHelper.exe"
-Assert-PublishFolder $cliSource "UpdateAgent.Cli.exe"
-Assert-PublishFolder $labManagerSource "UpdateAgent.LabManager.exe"
+$requiredSources = @($serviceSource, $sessionHelperSource, $cliSource)
+if (-not $AgentOnly) {
+    $requiredSources += $labManagerSource
+}
 
 if (-not $NoPublish) {
-    $needsPublish = $false
-    foreach ($source in @($serviceSource, $sessionHelperSource, $cliSource, $labManagerSource)) {
+    $needsPublish = -not (Test-Path -LiteralPath $PublishRoot)
+    foreach ($source in $requiredSources) {
         if (-not (Test-Path -LiteralPath $source)) { $needsPublish = $true }
     }
 
-    if (-not (Test-Path -LiteralPath $PublishRoot)) { $needsPublish = $true }
-
     if ($needsPublish) {
         Write-Host "Publish output is missing. Running scripts\publish.ps1..." -ForegroundColor Cyan
-        & (Join-Path $PSScriptRoot "publish.ps1")
+        if ($AgentOnly) {
+            & (Join-Path $PSScriptRoot "publish.ps1") -AgentOnly
+        } else {
+            & (Join-Path $PSScriptRoot "publish.ps1")
+        }
         if ($LASTEXITCODE -ne 0) { throw "publish.ps1 failed (exit code $LASTEXITCODE)." }
     }
 }
 
+Assert-PublishFolder $serviceSource "UpdateAgent.Service.exe"
+Assert-PublishFolder $sessionHelperSource "UpdateAgent.SessionHelper.exe"
+Assert-PublishFolder $cliSource "UpdateAgent.Cli.exe"
+if (-not $AgentOnly) {
+    Assert-PublishFolder $labManagerSource "UpdateAgent.LabManager.exe"
+}
+
+$buildTarget = if ($AgentOnly) { "agent" } else { "agent+labmanager" }
+
 Write-Host "Product version : $ProductVersion"
+Write-Host "Build target    : $buildTarget"
 Write-Host "Publish root    : $PublishRoot"
 Write-Host "Staging root    : $StagingRoot"
 Write-Host "Output root     : $OutputRoot"
@@ -248,8 +266,10 @@ $stageFolders = @(
     [pscustomobject]@{ Source = $serviceSource;       Destination = (Join-Path $agentStage "Service") }
     [pscustomobject]@{ Source = $sessionHelperSource; Destination = (Join-Path $agentStage "SessionHelper") }
     [pscustomobject]@{ Source = $cliSource;           Destination = (Join-Path $agentStage "Cli") }
-    [pscustomobject]@{ Source = $labManagerSource;    Destination = $labManagerStage }
 )
+if (-not $AgentOnly) {
+    $stageFolders += [pscustomobject]@{ Source = $labManagerSource; Destination = $labManagerStage }
+}
 
 foreach ($folder in $stageFolders) {
     New-Item -ItemType Directory -Force -Path $folder.Destination | Out-Null
@@ -266,7 +286,9 @@ Get-ChildItem -LiteralPath $StagingRoot -Recurse -File -Filter "appsettings.Deve
     Remove-Item -Force
 
 $removed = @(Remove-UnwantedStagedFiles -Root $agentStage)
-$removed += @(Remove-UnwantedStagedFiles -Root $labManagerStage)
+if (-not $AgentOnly) {
+    $removed += @(Remove-UnwantedStagedFiles -Root $labManagerStage)
+}
 if ($removed.Count -gt 0) {
     Write-Host ("Removed {0} non-runtime files from staging (docs, symbols, archives)." -f $removed.Count)
     foreach ($item in $removed) { Write-Verbose "  removed: $item" }
@@ -281,11 +303,13 @@ if (-not $SkipValidation) {
         "SessionHelper\UpdateAgent.SessionHelper.exe",
         "Cli\UpdateAgent.Cli.exe"
     )
-    Assert-IncludedFileSet -Root $labManagerStage -Label "LabManager" -RequiredFiles @(
-        "UpdateAgent.LabManager.exe",
-        "appsettings.json",
-        "wwwroot\index.html"
-    )
+    if (-not $AgentOnly) {
+        Assert-IncludedFileSet -Root $labManagerStage -Label "LabManager" -RequiredFiles @(
+            "UpdateAgent.LabManager.exe",
+            "appsettings.json",
+            "wwwroot\index.html"
+        )
+    }
 }
 
 $agentStageArg = [IO.Path]::GetFullPath($agentStage)
@@ -300,17 +324,21 @@ if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup failed for the Agent installer (exit code $LASTEXITCODE)."
 }
 
-Write-Host ""
-Write-Host "Building LabManager installer..." -ForegroundColor Cyan
-& $iscc "/DAppVersion=$ProductVersion" "/DStageRoot=$labManagerStageArg" "/DOutputDir=$outputArg" "/DNoticeRtf=$noticeArg" $labManagerIss
-if ($LASTEXITCODE -ne 0) {
-    throw "Inno Setup failed for the LabManager installer (exit code $LASTEXITCODE)."
+if (-not $AgentOnly) {
+    Write-Host ""
+    Write-Host "Building LabManager installer..." -ForegroundColor Cyan
+    & $iscc "/DAppVersion=$ProductVersion" "/DStageRoot=$labManagerStageArg" "/DOutputDir=$outputArg" "/DNoticeRtf=$noticeArg" $labManagerIss
+    if ($LASTEXITCODE -ne 0) {
+        throw "Inno Setup failed for the LabManager installer (exit code $LASTEXITCODE)."
+    }
 }
 
 $setupFiles = @(
     [pscustomobject]@{ Name = "UpdateAgent.Agent-Setup-$ProductVersion-x64.exe"; Product = "UpdateAgent Agent" }
-    [pscustomobject]@{ Name = "UpdateAgent.LabManager-Setup-$ProductVersion-x64.exe"; Product = "UpdateAgent LabManager" }
 )
+if (-not $AgentOnly) {
+    $setupFiles += [pscustomobject]@{ Name = "UpdateAgent.LabManager-Setup-$ProductVersion-x64.exe"; Product = "UpdateAgent LabManager" }
+}
 
 $results = New-Object System.Collections.Generic.List[object]
 foreach ($setupFile in $setupFiles) {
@@ -341,6 +369,7 @@ catch {
 
 $buildInfo = [pscustomobject]@{
     productVersion  = $ProductVersion
+    target          = $buildTarget
     platform        = "x64"
     selfContained   = $true
     unpackedInstall = $true
@@ -369,8 +398,12 @@ Write-Host ""
 Write-Host "Next steps:"
 Write-Host "  1) Agent (student PC): UpdateAgent.Agent-Setup-$ProductVersion-x64.exe"
 Write-Host "     Elevated: scripts\install-agent-msi.ps1 handles MSI; for Inno use the setup UI or /VERYSILENT."
-Write-Host "  2) LabManager (teacher PC): UpdateAgent.LabManager-Setup-$ProductVersion-x64.exe"
-Write-Host "  3) Full guide: docs\INSTALLER.md"
+if (-not $AgentOnly) {
+    Write-Host "  2) LabManager (teacher PC): UpdateAgent.LabManager-Setup-$ProductVersion-x64.exe"
+    Write-Host "  3) Full guide: docs\INSTALLER.md"
+} else {
+    Write-Host "  2) Full guide: docs\INSTALLER.md"
+}
 
 # Version probe commands can leave a non-zero $LASTEXITCODE after a successful build.
 $global:LASTEXITCODE = 0
