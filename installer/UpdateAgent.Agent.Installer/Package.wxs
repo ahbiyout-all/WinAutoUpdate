@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
-     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:firewall="http://wixtoolset.org/schemas/v4/wxs/firewall">
 
   <Package Name="UpdateAgent Agent"
-           Manufacturer="UpdateAgent"
+           Manufacturer="AhBiYout"
            Version="$(var.ProductVersion)"
            UpgradeCode="58D1BA8F-C2D1-4A36-B944-063870B8F361"
            Scope="perMachine"
@@ -21,6 +22,7 @@
     <Launch Condition="VersionNT &gt;= 1000" Message="UpdateAgent requires Windows 10 or later." />
 
     <ui:WixUI Id="WixUI_Minimal" />
+    <UIRef Id="UpdateAgentDialogs" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.NoticeRtf)" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -46,6 +48,10 @@
         <Exclude Files="$(var.PublishRoot)\agent\service\appsettings.json" />
         <Exclude Files="$(var.PublishRoot)\agent\service\appsettings.Development.json" />
         <Exclude Files="$(var.PublishRoot)\agent\service\**\*.pdb" />
+        <Exclude Files="$(var.PublishRoot)\agent\service\**\*.xml" />
+        <Exclude Files="$(var.PublishRoot)\agent\service\**\*.md" />
+        <Exclude Files="$(var.PublishRoot)\agent\service\**\*.txt" />
+        <Exclude Files="$(var.PublishRoot)\agent\service\**\*.pdf" />
       </Files>
 
       <Component Id="AgentServiceComponent" Guid="*">
@@ -76,18 +82,40 @@
                         Remove="uninstall"
                         Start="install"
                         Wait="yes" />
+
+        <!-- 방화벽 규칙을 조용히 등록한다. 기본 이름과 버전이 붙은 이름을 함께 만든다. -->
+        <firewall:FirewallException Id="FirewallRuleDefaultName"
+                                    Name="UpdateAgent Agent"
+                                    File="AgentServiceExe"
+                                    Profile="all"
+                                    Scope="any"
+                                    Description="UpdateAgent Service (all networks)" />
+        <firewall:FirewallException Id="FirewallRuleVersionedName"
+                                    Name="UpdateAgent Agent $(var.ProductVersion)"
+                                    File="AgentServiceExe"
+                                    Profile="all"
+                                    Scope="any"
+                                    Description="UpdateAgent Service (versioned rule)" />
       </Component>
     </ComponentGroup>
 
     <ComponentGroup Id="SessionHelperFiles" Directory="SessionHelperDir">
       <Files Include="$(var.PublishRoot)\agent\sessionhelper\**">
         <Exclude Files="$(var.PublishRoot)\agent\sessionhelper\**\*.pdb" />
+        <Exclude Files="$(var.PublishRoot)\agent\sessionhelper\**\*.xml" />
+        <Exclude Files="$(var.PublishRoot)\agent\sessionhelper\**\*.md" />
+        <Exclude Files="$(var.PublishRoot)\agent\sessionhelper\**\*.txt" />
+        <Exclude Files="$(var.PublishRoot)\agent\sessionhelper\**\*.pdf" />
       </Files>
     </ComponentGroup>
 
     <ComponentGroup Id="CliFiles" Directory="CliDir">
       <Files Include="$(var.PublishRoot)\cli\**">
         <Exclude Files="$(var.PublishRoot)\cli\**\*.pdb" />
+        <Exclude Files="$(var.PublishRoot)\cli\**\*.xml" />
+        <Exclude Files="$(var.PublishRoot)\cli\**\*.md" />
+        <Exclude Files="$(var.PublishRoot)\cli\**\*.txt" />
+        <Exclude Files="$(var.PublishRoot)\cli\**\*.pdf" />
       </Files>
     </ComponentGroup>
 

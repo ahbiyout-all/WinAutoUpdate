@@ -30,8 +30,12 @@ UpdateAgent.LabManager  <── HTTP 체크인 ──  UpdateAgent.Service (SYST
 | `src/UpdateAgent.LabManager` | 교사 PC 관리 서버 + 웹 대시보드 + WoL |
 | `src/UpdateAgent.Cli` | 로컬 CLI (scan/preflight/run/status/maestro/pause/cancel) |
 | `tests/UpdateAgent.Tests` | xUnit 단위 테스트 |
-| `installer/UpdateAgent.Agent.Installer` | WiX MSI 패키지 (학생 PC 에이전트) |
-| `scripts/` | 파일럿 게시/MSI/설정/서비스 설치·제거/방화벽 스크립트 |
+| `installer/InnoSetup` | Inno Setup 6 설치 스크립트 (권장, 학생/교사 PC) |
+| `installer/UpdateAgent.Agent.Installer` | WiX MSI 패키지 (대안, 학생 PC 에이전트) |
+| `scripts/` | 파일럿 게시/설치 프로그램/설정/서비스 설치·제거/방화벽 스크립트 |
+| `docs/INSTALLER.md` | Inno Setup 설치 프로그램 설계·무인 설치·체크리스트 |
+| `docs/RELEASE.md` | 버전 관리·GitHub 릴리스·자동 업데이트 운영 |
+| `docs/WORKLOG.md` | 날짜별 작업 로그와 검증 결과 |
 | `docs/PILOT.md` | Phase 0 실 PC 파일럿 런북 |
 | `docs/MSI.md` | MSI 패키징 설계·구현 상태·검증 매트릭스 |
 
@@ -69,38 +73,51 @@ dotnet build UpdateAgent.sln
 dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj
 ```
 
-현재 기준: 빌드 경고 0 / 오류 0, 테스트 44개 통과.
+현재 기준: 빌드 경고 0 / 오류 0, 테스트 56개 통과.
 
 MSI는 솔루션 빌드에 포함되지 않습니다(일반 빌드에 WiX 복원을 강제하지 않기 위해).
-MSI가 필요하면 `publish.ps1` 후 `build-msi.ps1`을 실행합니다.
+설치 프로그램이 필요하면 `publish.ps1` 후 `build-inno.ps1`(권장) 또는 `build-msi.ps1`을 실행합니다.
 
 ## 파일럿 키트
 
 실 PC 파일럿에 필요한 스크립트와 런북이 포함되어 있습니다. 상세 절차는 [`docs/PILOT.md`](docs/PILOT.md)를 참고하세요.
+설치 프로그램 설계와 무인 설치 옵션은 [`docs/INSTALLER.md`](docs/INSTALLER.md),
+버전/릴리스/자동 업데이트 운영은 [`docs/RELEASE.md`](docs/RELEASE.md),
+작업 이력은 [`docs/WORKLOG.md`](docs/WORKLOG.md)에 있습니다.
 MSI 패키징 설계와 제약은 [`docs/MSI.md`](docs/MSI.md)에 있습니다.
 
 | 스크립트 | 실행 위치 | 설명 |
 |---|---|---|
 | `scripts/publish.ps1` | 개발 PC | LabManager/Service/SessionHelper/CLI 게시 |
-| `scripts/build-msi.ps1` | 개발 PC | 게시물 스테이징 → WiX MSI 빌드/ICE 검증/해시 |
+| `scripts/build-inno.ps1` | 개발 PC | 게시물 스테이징 → Inno Setup 설치 파일 2개 빌드/검증/해시 (**권장**) |
+| `scripts/build-msi.ps1` | 개발 PC | 게시물 스테이징 → WiX MSI 빌드/ICE 검증/해시 (대안) |
 | `scripts/configure-labmanager.ps1` | 교사 PC | 관리자/에이전트 토큰, 수신 URL 설정 |
 | `scripts/allow-labmanager.ps1` | 교사 PC | TCP 5080 인바운드 방화벽 규칙 (Private/Domain) |
-| `scripts/install-agent-msi.ps1` | 학생 PC | MSI 설치 + `agent.json` 설정 + 서비스 시작 (권장) |
+| `scripts/install-agent-msi.ps1` | 학생 PC | MSI 설치 + `agent.json` 설정 + 서비스 시작 (대안) |
 | `scripts/uninstall-agent-msi.ps1` | 학생 PC | MSI 제거, 필요 시 데이터 삭제 |
 | `scripts/install-service.ps1` | 학생 PC | 레거시 스크립트 설치 (서비스+오버레이) |
 | `scripts/configure-agent.ps1` | 학생 PC | MSI `agent.json` 또는 레거시 `appsettings.json` 변경 |
 | `scripts/uninstall-service.ps1` | 학생 PC | 레거시 서비스 제거, 필요 시 파일/데이터 삭제 |
+| `scripts/github-push.ps1` | 개발 PC | 버전 올림 → 빌드/테스트 → 비밀값 검사 → 커밋/태그/push (**로컬 전용, Git 제외**) |
+
+> `scripts/github-push.ps1`과 `scripts/github-push.bat`은 `.gitignore`에서 제외되어
+> 저장소에 업로드되지 않습니다.
 
 ```powershell
 # 개발 PC
 .\scripts\publish.ps1
-.\scripts\build-msi.ps1          # artifacts\msi\UpdateAgent.Agent-<버전>-x64.msi
+.\scripts\build-inno.ps1         # artifacts\inno\*-Setup-<버전>-x64.exe (권장)
+.\scripts\build-msi.ps1          # artifacts\msi\UpdateAgent.Agent-<버전>-x64.msi (대안)
 
 # 교사 PC (관리자 PowerShell)
 .\scripts\configure-labmanager.ps1 -AdminTokenFile <파일> -AgentTokenFile <파일>
 .\scripts\allow-labmanager.ps1
 
-# 학생 PC (관리자 PowerShell, MSI 권장)
+# 학생 PC (관리자 PowerShell, Inno Setup 권장)
+.\UpdateAgent.Agent-Setup-<버전>-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
+  /LabManagerUrl=http://<교사-PC-IP>:5080 /AgentTokenFile=<에이전트-토큰-파일>
+
+# 학생 PC (관리자 PowerShell, MSI 대안)
 $env:UPDATEAGENT_AGENT_TOKEN = Get-Content <에이전트-토큰-파일> -Raw
 .\scripts\install-agent-msi.ps1 -MsiPath <MSI 경로> -LabManagerUrl "http://<교사-PC-IP>:5080" -ConfirmMaestro
 
@@ -161,7 +178,24 @@ $env:Agent__OverlayEnabled = "false"
 dotnet run --project src/UpdateAgent.Service
 ```
 
-운영용 설치는 관리자 PowerShell에서 MSI를 사용합니다.
+운영용 설치는 관리자 PowerShell에서 **Inno Setup 설치 파일**을 사용하는 것을 권장합니다.
+설치 파일은 개별 파일(Unpacked Multi-File) 구조로 `C:\Program Files\UpdateAgent`에 배치하고,
+서비스 등록과 방화벽 규칙(기본 이름/버전 이름)을 설치 단계에서 조용히 처리합니다.
+
+```powershell
+# 학생 PC (관리자 PowerShell, 무인 설치)
+.\UpdateAgent.Agent-Setup-<버전>-x64.exe `
+  /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
+  /LabManagerUrl=http://<교사-PC-IP>:5080 `
+  /AgentTokenFile=<에이전트-토큰-파일>
+```
+
+토큰은 명령줄에 직접 쓰지 않고 `/AgentTokenFile`로 전달합니다.
+설치 파일의 전체 옵션과 체크리스트는 [`docs/INSTALLER.md`](docs/INSTALLER.md)를 참고하세요.
+
+MSI는 대안으로 유지됩니다. MSI는 서비스(`C:\Program Files\UpdateAgent\Service`)와 오버레이 헬퍼
+(`...\SessionHelper`)를 설치하고, 래퍼가 `%ProgramData%\UpdateAgent\agent.json`에
+`Agent:SessionHelperPath`를 포함한 설정을 기록합니다.
 
 ```powershell
 $env:UPDATEAGENT_AGENT_TOKEN = Get-Content <에이전트-토큰-파일> -Raw
@@ -171,13 +205,9 @@ $env:UPDATEAGENT_AGENT_TOKEN = Get-Content <에이전트-토큰-파일> -Raw
   -ConfirmMaestro
 ```
 
-MSI는 서비스(`C:\Program Files\UpdateAgent\Service`)와 오버레이 헬퍼
-(`...\SessionHelper`)를 설치하고, 래퍼가 `%ProgramData%\UpdateAgent\agent.json`에
-`Agent:SessionHelperPath`를 포함한 설정을 기록합니다.
-
 레거시 스크립트 설치는 `install-service.ps1`을 사용하며,
 `C:\ProgramData\UpdateAgent\app` 아래에 배치하고 `appsettings.json`을 수정합니다.
-두 방식 모두 `scripts\configure-agent.ps1`로 URL/토큰/오버레이/DRY RUN을 변경할 수 있습니다.
+세 방식 모두 `scripts\configure-agent.ps1`로 URL/토큰/오버레이/DRY RUN을 변경할 수 있습니다.
 
 ### 3. 로컬 CLI
 
@@ -211,6 +241,23 @@ dotnet run --project src/UpdateAgent.Cli -- maestro
 
 `run` 옵션: `--max-reboots N`, `--optional`, `--drivers`, `--pause-on-user`, `--no-overlay`,
 `--reboot-never`, `--shutdown`, `--dry-run`, `--confirm-maestro`
+
+## 릴리스와 자동 업데이트
+
+버전의 단일 소스는 `Directory.Build.props`의 `<Version>`입니다.
+GitHub 저장소(`AhBiYout-all/UpdateAgent`)의 최신 릴리스를 조회해 새 버전이 있으면
+LabManager 대시보드에 업데이트 팝업을 표시합니다. 설치 파일은 릴리스 자산에서만 받습니다.
+
+```powershell
+# 로컬 릴리스: 버전 올림 -> 빌드/테스트 -> 비밀값 검사 -> 커밋/태그/push
+.\scripts\github-push.ps1 -Bump patch
+
+# 태그(v*) push 시 GitHub Actions가 설치 파일을 빌드해 Release에 첨부
+```
+
+- 릴리스 자산은 Inno Setup 설치 파일 2개(`*Setup*.exe`)와 선택적 MSI만 허용합니다.
+- SHA-256은 릴리스 노트에 기록합니다.
+- 상세 절차와 문제 해결: [`docs/RELEASE.md`](docs/RELEASE.md)
 
 ## 설정
 

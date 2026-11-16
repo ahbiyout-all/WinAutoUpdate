@@ -96,6 +96,39 @@ function Assert-PublishFolder {
     }
 }
 
+function Remove-UnwantedStagedFiles {
+    param([string]$Root)
+
+    # MSI에는 실행에 필요한 런타임 파일만 넣는다(개별 파일/언팩 배포).
+    # 문서, 심볼, 로그, 포터블/압축 파일, 바로가기는 패키징하지 않는다.
+    $blockedExtensions = @(
+        ".pdb", ".xml", ".md", ".txt", ".rtf", ".pdf", ".doc", ".docx",
+        ".log", ".tmp", ".msi", ".msix", ".cab", ".zip", ".7z", ".rar",
+        ".lnk", ".url"
+    )
+    $blockedFolders = @("docs", "doc", "samples", "examples", "portable")
+
+    $removed = New-Object System.Collections.Generic.List[string]
+
+    Get-ChildItem -LiteralPath $Root -Recurse -File | ForEach-Object {
+        $relative = $_.FullName.Substring($Root.Length).TrimStart('\', '/')
+        $segments = @($relative -split '[\\/]')
+        $inBlockedFolder = $false
+        if ($segments.Count -gt 1) {
+            $folderSegments = $segments[0..($segments.Count - 2)]
+            $inBlockedFolder = [bool]($folderSegments |
+                Where-Object { $blockedFolders -contains $_.ToLowerInvariant() })
+        }
+
+        if ($inBlockedFolder -or $blockedExtensions -contains $_.Extension.ToLowerInvariant()) {
+            $removed.Add($relative)
+            Remove-Item -LiteralPath $_.FullName -Force
+        }
+    }
+
+    return $removed
+}
+
 function Invoke-SignTool {
     param([string]$FilePath)
 
@@ -172,10 +205,16 @@ if ($template -match 'change-me-') {
     throw "The MSI appsettings template still contains a default token."
 }
 
-Get-ChildItem -LiteralPath $StagingRoot -Recurse -File -Filter "*.pdb" |
-    Remove-Item -Force
 Get-ChildItem -LiteralPath $StagingRoot -Recurse -File -Filter "appsettings.Development.json" |
     Remove-Item -Force
+
+$removedFiles = @(Remove-UnwantedStagedFiles -Root $StagingRoot)
+if ($removedFiles.Count -gt 0) {
+    Write-Host ("Removed {0} non-runtime files from staging (docs, symbols, archives)." -f $removedFiles.Count)
+    foreach ($removedFile in $removedFiles) {
+        Write-Verbose "  removed: $removedFile"
+    }
+}
 
 if ($Sign) {
     $assemblies = Get-ChildItem -LiteralPath $StagingRoot -Recurse -File |

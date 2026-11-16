@@ -46,6 +46,11 @@ builder.Services.AddSingleton(sp =>
     return new LabStore(options.ResolveDatabasePath());
 });
 builder.Services.AddSingleton<WakeOnLanService>();
+builder.Services.AddHttpClient("github", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
+builder.Services.AddSingleton<UpdateCheckService>();
 
 var app = builder.Build();
 
@@ -69,6 +74,17 @@ app.MapGet("/api/health", () => Results.Ok(new
     version = UpdateAgentConstants.AgentVersion,
     serverTime = DateTimeOffset.Now,
 }));
+
+// ---------------- 앱 업데이트 확인 ----------------
+
+app.MapGet("/api/admin/update", async (
+    bool? force,
+    UpdateCheckService updateCheck,
+    CancellationToken cancellationToken) =>
+{
+    var info = await updateCheck.GetAsync(force == true, cancellationToken);
+    return Results.Ok(info);
+});
 
 // ---------------- 에이전트 체크인 ----------------
 

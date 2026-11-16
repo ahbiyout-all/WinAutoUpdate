@@ -242,4 +242,13 @@
   <String Id="ProgressTextRollback" Overridable="yes" Value="롤백 중" />
   <String Id="ProgressTextRollbackTemplate" Overridable="yes" Value="롤백: [1]" />
 
+  <!-- 방화벽 확장 (WixToolset.Firewall.wixext) -->
+  <String Id="msierrFirewallCannotConnect" Overridable="yes" Value="Windows 방화벽에 연결할 수 없습니다. ([2] [3] [4] [5])" />
+  <String Id="WixSchedFirewallExceptionsInstall" Overridable="yes" Value="Windows 방화벽 구성 중" />
+  <String Id="WixSchedFirewallExceptionsUninstall" Overridable="yes" Value="Windows 방화벽 구성 중" />
+  <String Id="WixRollbackFirewallExceptionsInstall" Overridable="yes" Value="Windows 방화벽 구성 롤백 중" />
+  <String Id="WixRollbackFirewallExceptionsUninstall" Overridable="yes" Value="Windows 방화벽 구성 롤백 중" />
+  <String Id="WixExecFirewallExceptionsInstall" Overridable="yes" Value="Windows 방화벽 구성 적용 중" />
+  <String Id="WixExecFirewallExceptionsUninstall" Overridable="yes" Value="Windows 방화벽 구성 제거 중" />
+
 </WixLocalization>

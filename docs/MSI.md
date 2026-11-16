@@ -2,6 +2,11 @@
 
 > 상태: **구현 완료, 상승된 VM/실 PC 검증 대기**. MSI 빌드와 ICE 검증은 통과했습니다.
 > 범위: Phase 0 파일럿 이후, 학생 PC 에이전트를 `install-service.ps1` 대신 MSI로 배포하는 것.
+>
+> **권장 설치 방식은 Inno Setup입니다.** 이 문서의 MSI는 대안으로 유지됩니다.
+> 개별 파일(Unpacked Multi-File) 설치, 무인 설치, 방화벽 사전 등록, 프로그램 추가/제거 등록은
+> [`INSTALLER.md`](INSTALLER.md)를 참고하세요. 두 설치 파일은 같은 AppID/폴더 규칙을 공유하지 않으며,
+> MSI가 설치된 PC에 Inno Setup을 실행하면 MSI 제품을 자동 제거한 뒤 전환합니다.
 
 ## 1. 목표와 범위
 
@@ -710,7 +715,7 @@ msiexec /x ".\UpdateAgent.Agent-0.1.0-x64.msi" /qn /norestart /l*v ".\uninstall.
 
 ### 파일럿 전 추가 확인
 
-- [ ] `dotnet test` 전체 통과 (44개)
+- [ ] `dotnet test` 전체 통과 (56개)
 - [ ] `dotnet build UpdateAgent.sln` 경고 0/오류 0
 - [ ] MSI SHA-256 기록
 - [ ] 서명 검증 (`signtool verify /pa /all`)
@@ -752,7 +757,7 @@ msiexec /x ".\UpdateAgent.Agent-0.1.0-x64.msi" /qn /norestart /l*v ".\uninstall.
 
 | # | 항목 | 상태 |
 |---|---|---|
-| 1 | 코드 변경 (`agent.json`, `AgentVersion`, SessionHelper 폴백) + 단위 테스트 | 완료 (테스트 44개 통과) |
+| 1 | 코드 변경 (`agent.json`, `AgentVersion`, SessionHelper 폴백) + 단위 테스트 | 완료 (테스트 56개 통과) |
 | 2 | WiX 프로젝트 + `Package.wxs` | 완료 |
 | 3 | 정제된 `appsettings.json` 템플릿, `notice.ko.rtf` | 완료 |
 | 3-1 | `ko-KR.wxl` 한국어 WixUI 번역 (Control 테이블 검증) | 완료 |

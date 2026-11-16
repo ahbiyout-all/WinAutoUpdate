@@ -126,10 +126,42 @@ Set-Location .\publish\labmanager
 
 ## 4. 학생 PC 설치
 
-설치 방법은 **MSI(권장)** 와 기존 스크립트(레거시) 두 가지입니다.
-Phase 0 파일럿에서는 MSI를 먼저 검증하고, 문제가 있으면 스크립트 방식으로 되돌립니다.
+설치 방법은 **Inno Setup(권장)**, **MSI(대안)**, 기존 스크립트(레거시) 세 가지입니다.
+Phase 0 파일럿에서는 Inno Setup을 먼저 검증하고, 문제가 있으면 MSI나 스크립트 방식으로 되돌립니다.
+설치 프로그램 전체 안내는 [`INSTALLER.md`](INSTALLER.md)를 참고하세요.
 
-### 4-A. MSI 설치 (권장)
+### 4-A. Inno Setup 설치 (권장)
+
+개별 파일(Unpacked Multi-File) 구조로 설치하며, 서비스 등록과 방화벽 규칙
+(기본 이름/버전 이름)을 설치 단계에서 조용히 처리합니다.
+
+```powershell
+# 개발 PC
+.\scripts\publish.ps1
+.\scripts\build-inno.ps1
+# 산출물:
+#   artifacts\inno\UpdateAgent.Agent-Setup-<버전>-x64.exe
+#   artifacts\inno\UpdateAgent.LabManager-Setup-<버전>-x64.exe
+```
+
+학생 PC에서 **관리자 PowerShell**을 열고 토큰 파일과 함께 무인 설치합니다.
+
+```powershell
+Set-Location "<복사한 폴더>"
+
+.\UpdateAgent.Agent-Setup-0.1.0-x64.exe `
+  /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
+  /LabManagerUrl=http://<교사-PC-IP>:5080 `
+  /AgentTokenFile="<agent-token.txt 경로>"
+```
+
+- 토큰은 명령줄/로그에 남지 않도록 `/AgentTokenFile`로만 전달합니다.
+- 기존 Inno 설치가 있으면 무인 설치에서는 자동으로 제거 후 설치합니다.
+- `%ProgramData%\UpdateAgent\agent.json`과 로그/데이터는 업그레이드 후에도 유지됩니다.
+- 방화벽 규칙은 `UpdateAgent Agent`, `UpdateAgent Agent <버전>` 두 개가 등록됩니다.
+- 설치 후 서비스(`UpdateAgentService`)가 자동 시작됩니다.
+
+### 4-B. MSI 설치 (대안)
 
 개발 PC에서 MSI를 만들고, MSI와 `scripts` 폴더를 학생 PC로 복사합니다.
 
@@ -164,7 +196,7 @@ $env:UPDATEAGENT_AGENT_TOKEN = Get-Content "<agent-token.txt 경로>" -Raw
 - 기존 `agent.json`이 있으면 URL/토큰을 재사용하므로 업그레이드 시 생략할 수 있습니다.
 - 레거시 스크립트 설치가 있으면 그 URL/토큰을 자동으로 재사용합니다.
 
-### 4-B. 스크립트 설치 (레거시)
+### 4-C. 스크립트 설치 (레거시)
 
 `publish`와 `scripts` 폴더를 구조 그대로 학생 PC로 복사합니다.
 

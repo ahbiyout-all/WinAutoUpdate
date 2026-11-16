@@ -349,6 +349,8 @@ async function refresh() {
     renderJobs();
     renderAudit();
     if (openJobId) await refreshJobDetail(openJobId, true);
+    // 첫 성공 이후 백그라운드에서 GitHub Releases를 확인한다(30분 간격).
+    maybeCheckForUpdates(false);
   } catch (error) {
     if (error.message !== 'unauthorized') {
       setError(`서버 연결 오류: ${error.message}`);
@@ -605,6 +607,130 @@ function renderMaestro(data) {
   }
 }
 
+// ---------------- GitHub 업데이트 확인 ----------------
+
+const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+const UPDATE_DISMISS_KEY = 'ua_dismissed_update_version';
+
+let updateInfo = null;
+let lastUpdateCheck = 0;
+let updateCheckInFlight = false;
+
+function formatBytes(bytes) {
+  if (!bytes || bytes <= 0) return '';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function formatDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
+function applyUpdateInfo(info) {
+  if (!info) return;
+
+  $('#version-text').textContent = `v${info.currentVersion || '?'}`;
+  $('#version-button').title = info.checkSucceeded
+    ? `현재 v${info.currentVersion} · 최신 v${info.latestVersion}`
+    : `현재 v${info.currentVersion} · 업데이트 확인 실패`;
+
+  $('#version-dot').classList.toggle('hidden', !info.updateAvailable);
+
+  if (!info.updateAvailable) {
+    $('#update-modal').classList.add('hidden');
+    return;
+  }
+
+  $('#update-current').textContent = `v${info.currentVersion}`;
+  $('#update-latest').textContent = `v${info.latestVersion}`;
+
+  const meta = [];
+  if (info.releaseName) meta.push(info.releaseName);
+  if (info.publishedAt) meta.push(`${formatDate(info.publishedAt)} 배포`);
+  if (info.assetName) {
+    const size = formatBytes(info.assetSizeBytes);
+    meta.push(size ? `${info.assetName} · ${size}` : info.assetName);
+  }
+  $('#update-meta').textContent = meta.join(' · ');
+
+  $('#update-github-link').href = info.repositoryUrl || 'https://github.com/AhBiYout-all/UpdateAgent';
+  $('#update-release-link').href = info.releaseUrl || 'https://github.com/AhBiYout-all/UpdateAgent/releases';
+
+  const download = $('#update-download');
+  download.href = info.assetUrl || info.releaseUrl || 'https://github.com/AhBiYout-all/UpdateAgent/releases';
+  download.textContent = info.assetUrl ? '업데이트 내려받기' : '릴리스 열기';
+
+  $('#update-notes').textContent = (info.releaseNotes || '').trim();
+
+  if (sessionStorage.getItem(UPDATE_DISMISS_KEY) !== info.latestVersion) {
+    $('#update-modal').classList.remove('hidden');
+  }
+}
+
+async function maybeCheckForUpdates(force) {
+  if (!adminToken || updateCheckInFlight) return;
+
+  const now = Date.now();
+  if (!force && now - lastUpdateCheck < UPDATE_CHECK_INTERVAL_MS) return;
+
+  updateCheckInFlight = true;
+  lastUpdateCheck = now;
+  try {
+    const info = await api(`/api/admin/update${force ? '?force=true' : ''}`);
+    updateInfo = info;
+    applyUpdateInfo(info);
+  } catch {
+    // 토큰/네트워크 오류는 refresh()에서 이미 표시한다.
+  } finally {
+    updateCheckInFlight = false;
+  }
+}
+
+function dismissUpdate() {
+  if (updateInfo?.latestVersion) {
+    sessionStorage.setItem(UPDATE_DISMISS_KEY, updateInfo.latestVersion);
+  }
+  $('#update-modal').classList.add('hidden');
+}
+
+function setupUpdateDialog() {
+  $('#update-close').addEventListener('click', dismissUpdate);
+  $('#update-later').addEventListener('click', dismissUpdate);
+  $('#update-download').addEventListener('click', () => {
+    // 다운로드를 시작한 뒤 팝업은 닫아 둔다.
+    setTimeout(dismissUpdate, 300);
+  });
+  $('#update-modal').addEventListener('click', (event) => {
+    if (event.target === $('#update-modal')) dismissUpdate();
+  });
+
+  $('#version-button').addEventListener('click', async () => {
+    if (updateInfo?.updateAvailable) {
+      $('#update-modal').classList.remove('hidden');
+      return;
+    }
+
+    await maybeCheckForUpdates(true);
+
+    if (updateInfo?.updateAvailable) {
+      $('#update-modal').classList.remove('hidden');
+    } else if (updateInfo && !updateInfo.checkSucceeded) {
+      toast(`업데이트 확인 실패: ${updateInfo.error || 'GitHub에 연결할 수 없습니다.'}`, 'error');
+    } else {
+      toast(`최신 버전을 사용 중입니다 (v${updateInfo?.currentVersion || '?'})`, 'success');
+    }
+  });
+}
+
 // ---------------- 초기화 ----------------
 
 function setupTokenDialog() {
@@ -622,6 +748,7 @@ function setupTokenDialog() {
     dialog.classList.add('hidden');
     setError('');
     refresh();
+    maybeCheckForUpdates(true);
   };
 
   $('#token-save').addEventListener('click', save);
@@ -669,5 +796,6 @@ function wireEvents() {
 
 setupTokenDialog();
 wireEvents();
+setupUpdateDialog();
 refresh();
 setInterval(refresh, 5000);

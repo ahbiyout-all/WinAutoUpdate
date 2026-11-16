@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <!--
+    기존 버전이 감지되면 WelcomeEulaDlg 다음에 표시하는 덮어쓰기 확인 대화상자.
+    MajorUpgrade가 기존 제품을 자동 제거하므로 "덮어쓰기 설치"와 "취소"만 제공한다.
+    무인 설치(/qn)에서는 UI 시퀀스가 실행되지 않으므로 이 대화상자도 표시되지 않는다.
+
+    WiX는 이름 없는 기본 UI에 선언된 다이얼로그를 링크 단계에서 제외하므로,
+    UI에 Id를 주고 Package.wxs에서 UIRef로 참조한다.
+  -->
+  <Fragment>
+    <UI Id="UpdateAgentDialogs">
+      <Dialog Id="ExistingVersionDlg" Width="370" Height="270" Title="UpdateAgent Agent 설치">
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="340" Height="30"
+                 Transparent="yes" NoPrefix="yes"
+                 Text="기존 버전이 설치되어 있습니다" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Description" Type="Text" X="25" Y="60" Width="320" Height="100"
+                 Transparent="yes" NoPrefix="yes"
+                 Text="이 PC에는 UpdateAgent Agent가 이미 설치되어 있습니다. 계속하면 기존 버전을 제거한 뒤 새 버전으로 덮어씁니다. 기존 설정(agent.json)과 데이터는 유지됩니다." />
+        <Control Id="Hint" Type="Text" X="25" Y="170" Width="320" Height="40"
+                 Transparent="yes" NoPrefix="yes"
+                 Text="덮어쓰기를 원하지 않으면 취소를 누르세요. 무인 설치는 /qn 옵션을 사용합니다." />
+        <Control Id="Back" Type="PushButton" X="156" Y="243" Width="56" Height="17"
+                 Disabled="yes" Text="뒤로" />
+        <Control Id="Install" Type="PushButton" X="200" Y="243" Width="96" Height="17"
+                 Default="yes" Text="덮어쓰기 설치">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17"
+                 Cancel="yes" Text="취소">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <InstallUISequence>
+        <Show Dialog="ExistingVersionDlg" After="WelcomeEulaDlg" Condition="WIX_UPGRADE_DETECTED" />
+      </InstallUISequence>
+    </UI>
+  </Fragment>
+
+</Wix>

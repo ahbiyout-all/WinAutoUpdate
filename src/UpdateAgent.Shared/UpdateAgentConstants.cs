@@ -45,6 +45,31 @@ public static class UpdateAgentConstants
     /// <summary>복원이 일어나도 살아남는 경로를 지정할 때 사용하는 환경 변수.</summary>
     public const string UnprotectedStatePathVariable = "UPDATEAGENT_STATE_PATH";
 
+    // ---------------- 제작자 / 공식 채널 ----------------
+
+    /// <summary>개발자 이름.</summary>
+    public const string DeveloperName = "AhBiYout";
+
+    /// <summary>GitHub 계정(개발자명).</summary>
+    public const string GitHubOwner = "AhBiYout-all";
+
+    /// <summary>GitHub 저장소 이름. 앱 이름과 동일하게 유지한다.</summary>
+    public const string GitHubRepositoryName = "UpdateAgent";
+
+    public static string GitHubRepositoryUrl => $"https://github.com/{GitHubOwner}/{GitHubRepositoryName}";
+
+    public static string GitHubReleasesUrl => $"{GitHubRepositoryUrl}/releases";
+
+    /// <summary>자동 업데이트 확인에 사용하는 GitHub Releases 최신 릴리스 API.</summary>
+    public static string LatestReleaseApiUrl =>
+        $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepositoryName}/releases/latest";
+
+    /// <summary>공식 구글 블로그.</summary>
+    public const string BlogUrl = "https://ahbiyoutvibe.blogspot.com/";
+
+    /// <summary>대시보드가 새 릴리스를 다시 확인하는 주기(분).</summary>
+    public const int UpdateCheckIntervalMinutes = 30;
+
     public static string ResolveDataDirectory()
     {
         var overridePath = Environment.GetEnvironmentVariable(UnprotectedStatePathVariable);

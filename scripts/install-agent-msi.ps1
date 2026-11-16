@@ -12,6 +12,10 @@ Existing agent.json values are preserved on upgrade unless a parameter overrides
 them. If a legacy script installation exists, its URL/token are reused when the
 parameters are omitted.
 
+If an existing UpdateAgent Agent MSI is already registered, the script asks
+whether to overwrite/upgrade, remove it first, or cancel. Use -Force (or -Quiet)
+to upgrade without prompting.
+
 Run from an elevated 64-bit PowerShell prompt.
 
 .EXAMPLE
@@ -36,6 +40,7 @@ param(
     [switch]$ConfirmMaestro,
     [switch]$SkipStart,
     [switch]$Quiet,
+    [switch]$Force,
     [string]$LogPath,
     [string]$ServiceName = "UpdateAgentService",
     [string]$DataRoot = "C:\ProgramData\UpdateAgent",
@@ -167,6 +172,45 @@ function Get-LatestMsi {
     return ($candidates | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).FullName
 }
 
+function Get-InstalledAgent {
+    # MSI 등록 정보(제품 코드/버전)와 서비스 존재 여부로 기존 설치를 감지한다.
+    $uninstallRoots = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    )
+
+    $products = @()
+    foreach ($root in $uninstallRoots) {
+        $products += Get-ItemProperty -Path $root -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like "UpdateAgent Agent*" } |
+            ForEach-Object {
+                [pscustomobject]@{
+                    ProductCode = $_.PSChildName
+                    DisplayName = $_.DisplayName
+                    DisplayVersion = $_.DisplayVersion
+                }
+            }
+    }
+
+    return @($products | Sort-Object DisplayName -Unique)
+}
+
+function Remove-InstalledAgent {
+    param([object[]]$Products)
+
+    foreach ($product in $Products) {
+        if ($product.ProductCode -notmatch '^\{[0-9A-Fa-f-]{36}\}$') { continue }
+
+        Write-Host "Removing $($product.DisplayName) $($product.DisplayVersion)..."
+        $removeLog = Join-Path $env:TEMP ("UpdateAgent.Agent-remove-{0}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
+        $removeArgs = @("/x", $product.ProductCode, "/qn", "/norestart", "/l*v", "`"$removeLog`"")
+        $removeProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $removeArgs -Wait -PassThru
+        if ($removeProcess.ExitCode -ne 0 -and $removeProcess.ExitCode -ne 1605) {
+            throw "Could not remove the existing installation (exit code $($removeProcess.ExitCode)). See $removeLog"
+        }
+    }
+}
+
 Assert-Administrator
 Assert-64BitProcess
 
@@ -189,6 +233,36 @@ if ([string]::IsNullOrWhiteSpace($MsiPath)) {
 $MsiPath = [IO.Path]::GetFullPath($MsiPath)
 if (-not (Test-Path -LiteralPath $MsiPath)) {
     throw "MSI not found: $MsiPath"
+}
+
+# 기존 설치가 있으면 사용자에게 덮어쓰기/제거 후 설치/취소를 묻는다.
+# -Quiet 또는 -Force에서는 묻지 않고 업그레이드한다(MajorUpgrade가 기존 제품을 제거).
+$installedProducts = Get-InstalledAgent
+if ($installedProducts.Count -gt 0) {
+    Write-Host ""
+    Write-Host "An existing UpdateAgent Agent installation was found:" -ForegroundColor Yellow
+    foreach ($product in $installedProducts) {
+        Write-Host ("  {0} {1} ({2})" -f $product.DisplayName, $product.DisplayVersion, $product.ProductCode)
+    }
+    Write-Host ""
+
+    if ($Quiet -or $Force) {
+        Write-Host "Upgrading the existing installation without prompting (-Quiet/-Force)."
+    }
+    else {
+        Write-Host "  [1] Overwrite / upgrade (recommended)"
+        Write-Host "  [2] Remove the existing version first, then install"
+        Write-Host "  [3] Cancel"
+        $choice = (Read-Host "Choose 1, 2 or 3").Trim()
+
+        switch ($choice) {
+            "1" { Write-Host "Upgrading the existing installation." }
+            "2" { Remove-InstalledAgent -Products $installedProducts }
+            "3" { throw "Installation cancelled by the user." }
+            default { throw "Invalid choice. Installation cancelled." }
+        }
+    }
+    Write-Host ""
 }
 
 $DataRoot = [IO.Path]::GetFullPath($DataRoot)

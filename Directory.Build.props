@@ -4,10 +4,16 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- 버전 단일 소스: scripts\github-push.ps1이 이 값을 올리고 태그 v<version>을 만든다. -->
     <Version>0.1.0</Version>
-    <Authors>UpdateAgent</Authors>
+    <Authors>AhBiYout</Authors>
     <Product>UpdateAgent</Product>
-    <Company>UpdateAgent</Company>
+    <Company>AhBiYout</Company>
+    <Copyright>Copyright (c) AhBiYout</Copyright>
     <NeutralLanguage>ko-KR</NeutralLanguage>
+    <RepositoryUrl>https://github.com/AhBiYout-all/UpdateAgent</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <PackageProjectUrl>https://ahbiyoutvibe.blogspot.com/</PackageProjectUrl>
   </PropertyGroup>
 </Project>
