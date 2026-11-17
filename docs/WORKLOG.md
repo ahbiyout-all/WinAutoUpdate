@@ -221,7 +221,7 @@
 
 ### 목적
 
-- GitHub 저장소(`AhBiYout-all/UpdateAgent`) 공개를 전제로 한 실시간 업데이트 확인.
+- GitHub 저장소(`ahbiyout-all/WinAutoUpdate`) 공개를 전제로 한 실시간 업데이트 확인.
 - 대시보드에서 새 버전을 자동 감지해 알림 팝업 표시.
 - 버전 정보를 코드/빌드/릴리스/UI에서 일관되게 유지.
 

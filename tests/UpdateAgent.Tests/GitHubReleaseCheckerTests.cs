@@ -34,7 +34,7 @@ public sealed class GitHubReleaseCheckerTests
           "tag_name": "v9.9.9",
           "name": "UpdateAgent 9.9.9",
           "body": "릴리스 노트",
-          "html_url": "https://github.com/AhBiYout-all/UpdateAgent/releases/tag/v9.9.9",
+          "html_url": "https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v9.9.9",
           "published_at": "2026-11-16T00:00:00Z",
           "assets": [
             { "name": "notes.txt", "browser_download_url": "https://example.test/notes.txt", "size": 10 },

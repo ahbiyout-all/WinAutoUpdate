@@ -662,11 +662,11 @@ function applyUpdateInfo(info) {
   }
   $('#update-meta').textContent = meta.join(' · ');
 
-  $('#update-github-link').href = info.repositoryUrl || 'https://github.com/AhBiYout-all/UpdateAgent';
-  $('#update-release-link').href = info.releaseUrl || 'https://github.com/AhBiYout-all/UpdateAgent/releases';
+  $('#update-github-link').href = info.repositoryUrl || 'https://github.com/ahbiyout-all/WinAutoUpdate';
+  $('#update-release-link').href = info.releaseUrl || 'https://github.com/ahbiyout-all/WinAutoUpdate/releases';
 
   const download = $('#update-download');
-  download.href = info.assetUrl || info.releaseUrl || 'https://github.com/AhBiYout-all/UpdateAgent/releases';
+  download.href = info.assetUrl || info.releaseUrl || 'https://github.com/ahbiyout-all/WinAutoUpdate/releases';
   download.textContent = info.assetUrl ? '업데이트 내려받기' : '릴리스 열기';
 
   $('#update-notes').textContent = (info.releaseNotes || '').trim();

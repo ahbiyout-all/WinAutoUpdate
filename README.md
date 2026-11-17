@@ -279,7 +279,7 @@ dotnet run --project src/UpdateAgent.Cli -- maestro
 ## 릴리스와 자동 업데이트
 
 버전의 단일 소스는 `Directory.Build.props`의 `<Version>`입니다.
-GitHub 저장소(`AhBiYout-all/UpdateAgent`)의 최신 릴리스를 조회해 새 버전이 있으면
+GitHub 저장소(`ahbiyout-all/WinAutoUpdate`)의 최신 릴리스를 조회해 새 버전이 있으면
 LabManager 대시보드에 업데이트 팝업을 표시합니다. 설치 파일은 릴리스 자산에서만 받습니다.
 
 ```powershell

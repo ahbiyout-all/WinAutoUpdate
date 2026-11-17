@@ -4,7 +4,7 @@
 Inno Setup 6 기반 설치 프로그램이 **권장 방식**이며, 기존 WiX MSI는 대안으로 유지됩니다.
 
 - 개발자: AhBiYout
-- GitHub: <https://github.com/AhBiYout-all>
+- GitHub: <https://github.com/ahbiyout-all>
 - 공식 블로그: <https://ahbiyoutvibe.blogspot.com/>
 
 ## 1. 산출물

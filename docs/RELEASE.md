@@ -4,8 +4,8 @@
 설치 프로그램 자체의 설계는 [`INSTALLER.md`](INSTALLER.md), 작업 이력은 [`WORKLOG.md`](WORKLOG.md)를 참고하세요.
 
 - 개발자: AhBiYout
-- GitHub 계정: <https://github.com/AhBiYout-all>
-- 저장소: <https://github.com/AhBiYout-all/UpdateAgent>
+- GitHub 계정: <https://github.com/ahbiyout-all>
+- 저장소: <https://github.com/ahbiyout-all/WinAutoUpdate>
 - 공식 블로그: <https://ahbiyoutvibe.blogspot.com/>
 
 ## 1. 버전 단일 소스
@@ -61,7 +61,7 @@ LabManager는 30분마다(강제 확인 시 즉시) GitHub Releases API를 조�
 - Inno Setup 6 (`ISCC.exe`)
 - GitHub 인증: `gh auth login` 또는 Git Credential Manager
 - 저장소 원격(`origin`)은 스크립트가 없으면 자동 추가합니다.
-  `https://github.com/AhBiYout-all/UpdateAgent.git`
+  `https://github.com/ahbiyout-all/WinAutoUpdate.git`
 
 ### 사용법
 
@@ -176,7 +176,7 @@ UpdateAgent.Agent-<버전>-x64.msi        (대안)
 
 ## 7. 자동 업데이트 동작
 
-1. LabManager가 `GET https://api.github.com/repos/AhBiYout-all/UpdateAgent/releases/latest`를 호출합니다.
+1. LabManager가 `GET https://api.github.com/repos/ahbiyout-all/WinAutoUpdate/releases/latest`를 호출합니다.
 2. 현재 버전과 태그를 숫자로 비교합니다.
 3. 새 버전이면 대시보드에 팝업을 표시합니다.
    - 현재/최신 버전

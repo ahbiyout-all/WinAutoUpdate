@@ -156,7 +156,7 @@ jobs:
           $lines.Add('- 학생 PC: `UpdateAgent.Agent-Setup-<버전>-x64.exe` 실행')
           $lines.Add('- 교사 PC: `UpdateAgent.LabManager-Setup-<버전>-x64.exe` 실행')
           $lines.Add('- 무인 설치: `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`')
-          $lines.Add('- 전체 안내: https://github.com/AhBiYout-all/UpdateAgent/blob/main/docs/INSTALLER.md')
+          $lines.Add('- 전체 안내: https://github.com/ahbiyout-all/WinAutoUpdate/blob/master/docs/INSTALLER.md')
           $lines.Add('')
           $lines.Add('## 참고')
           $lines.Add('')
