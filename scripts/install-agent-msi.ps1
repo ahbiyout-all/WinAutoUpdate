@@ -24,7 +24,7 @@ $env:UPDATEAGENT_AGENT_TOKEN = Read-Host -AsSecureString
 
 .EXAMPLE
 .\scripts\install-agent-msi.ps1 `
-  -MsiPath ".\artifacts\msi\UpdateAgent.Agent-0.1.0-x64.msi" `
+  -MsiPath ".\artifacts\msi\UpdateAgent.Agent-0.1.1-x64.msi" `
   -LabManagerUrl "http://192.168.0.10:5080" `
   -AgentTokenFile ".\pilot-agent-token.txt" `
   -ConfirmMaestro -Quiet
@@ -173,7 +173,7 @@ function Get-LatestMsi {
 }
 
 function Get-InstalledAgent {
-    # MSI 등록 정보(제품 코드/버전)와 서비스 존재 여부로 기존 설치를 감지한다.
+    # Detect an existing installation through MSI registration data (product code/version) and service presence.
     $uninstallRoots = @(
         "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
         "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
@@ -184,10 +184,15 @@ function Get-InstalledAgent {
         $products += Get-ItemProperty -Path $root -ErrorAction SilentlyContinue |
             Where-Object { $_.DisplayName -like "UpdateAgent Agent*" } |
             ForEach-Object {
+                $productCode = $_.PSChildName
+                $installerType = if ($productCode -like '*_is1' -or
+                                     $_.UninstallString -match 'unins') { 'Inno' } else { 'Msi' }
                 [pscustomobject]@{
-                    ProductCode = $_.PSChildName
+                    ProductCode = $productCode
                     DisplayName = $_.DisplayName
                     DisplayVersion = $_.DisplayVersion
+                    UninstallString = $_.UninstallString
+                    InstallerType = $installerType
                 }
             }
     }
@@ -199,14 +204,34 @@ function Remove-InstalledAgent {
     param([object[]]$Products)
 
     foreach ($product in $Products) {
+        Write-Host "Removing $($product.DisplayName) $($product.DisplayVersion) ($($product.InstallerType))..."
+
+        if ($product.InstallerType -eq 'Inno') {
+            $uninstallExe = "$($product.UninstallString)"
+            if ($uninstallExe -match '^"([^"]+)"') {
+                $uninstallExe = $Matches[1]
+            }
+            else {
+                $uninstallExe = ($uninstallExe -split '\s+/', 2)[0].Trim('"')
+            }
+            if (-not (Test-Path -LiteralPath $uninstallExe)) {
+                throw "Inno uninstaller not found: $uninstallExe"
+            }
+            $removeProcess = Start-Process -FilePath $uninstallExe `
+                -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
+            if ($removeProcess.ExitCode -ne 0 -and $removeProcess.ExitCode -ne 3010 -and $removeProcess.ExitCode -ne 1641) {
+                throw "Could not remove the existing Inno installation (exit code $($removeProcess.ExitCode))."
+            }
+            continue
+        }
+
         if ($product.ProductCode -notmatch '^\{[0-9A-Fa-f-]{36}\}$') { continue }
 
-        Write-Host "Removing $($product.DisplayName) $($product.DisplayVersion)..."
         $removeLog = Join-Path $env:TEMP ("UpdateAgent.Agent-remove-{0}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
         $removeArgs = @("/x", $product.ProductCode, "/qn", "/norestart", "/l*v", "`"$removeLog`"")
         $removeProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $removeArgs -Wait -PassThru
-        if ($removeProcess.ExitCode -ne 0 -and $removeProcess.ExitCode -ne 1605) {
-            throw "Could not remove the existing installation (exit code $($removeProcess.ExitCode)). See $removeLog"
+        if ($removeProcess.ExitCode -notin @(0, 1605, 3010, 1641)) {
+            throw "Could not remove the existing MSI installation (exit code $($removeProcess.ExitCode)). See $removeLog"
         }
     }
 }
@@ -235,13 +260,26 @@ if (-not (Test-Path -LiteralPath $MsiPath)) {
     throw "MSI not found: $MsiPath"
 }
 
-# 기존 설치가 있으면 사용자에게 덮어쓰기/제거 후 설치/취소를 묻는다.
-# -Quiet 또는 -Force에서는 묻지 않고 업그레이드한다(MajorUpgrade가 기존 제품을 제거).
-$installedProducts = Get-InstalledAgent
-if ($installedProducts.Count -gt 0) {
+# MSI MajorUpgrade cannot remove an existing Inno installation, so silently remove it first.
+$installedProducts = @(Get-InstalledAgent)
+$innoProducts = @($installedProducts | Where-Object { $_.InstallerType -eq 'Inno' })
+$msiProducts = @($installedProducts | Where-Object { $_.InstallerType -ne 'Inno' })
+
+if ($innoProducts.Count -gt 0) {
     Write-Host ""
-    Write-Host "An existing UpdateAgent Agent installation was found:" -ForegroundColor Yellow
-    foreach ($product in $installedProducts) {
+    Write-Host "An existing Inno Setup installation was found. Removing it before MSI install:" -ForegroundColor Yellow
+    foreach ($product in $innoProducts) {
+        Write-Host ("  {0} {1} ({2})" -f $product.DisplayName, $product.DisplayVersion, $product.ProductCode)
+    }
+    Remove-InstalledAgent -Products $innoProducts
+    Write-Host ""
+}
+
+# The same MSI product can be handled by MajorUpgrade, so do not prompt with -Quiet/-Force.
+if ($msiProducts.Count -gt 0) {
+    Write-Host ""
+    Write-Host "An existing UpdateAgent Agent MSI was found:" -ForegroundColor Yellow
+    foreach ($product in $msiProducts) {
         Write-Host ("  {0} {1} ({2})" -f $product.DisplayName, $product.DisplayVersion, $product.ProductCode)
     }
     Write-Host ""
@@ -257,7 +295,7 @@ if ($installedProducts.Count -gt 0) {
 
         switch ($choice) {
             "1" { Write-Host "Upgrading the existing installation." }
-            "2" { Remove-InstalledAgent -Products $installedProducts }
+            "2" { Remove-InstalledAgent -Products $msiProducts }
             "3" { throw "Installation cancelled by the user." }
             default { throw "Invalid choice. Installation cancelled." }
         }

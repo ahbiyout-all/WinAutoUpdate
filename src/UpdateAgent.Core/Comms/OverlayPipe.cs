@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.IO.Pipes;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using UpdateAgent.Shared;
 using UpdateAgent.Shared.Models;
@@ -27,6 +29,26 @@ public sealed class OverlayPipeServer : IAsyncDisposable
         _acceptLoop ??= Task.Run(() => AcceptLoopAsync(_cts.Token));
     }
 
+    private static PipeSecurity CreatePipeSecurity()
+    {
+        var security = new PipeSecurity();
+        security.AddAccessRule(new PipeAccessRule(
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            PipeAccessRights.FullControl,
+            AccessControlType.Allow));
+        security.AddAccessRule(new PipeAccessRule(
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            PipeAccessRights.ReadWrite,
+            AccessControlType.Allow));
+        // 학생 계정은 로컬 관리자로 배포된다. UAC 필터링으로 관리자 그룹이
+        // 비활성화된 토큰에서도 helper가 연결될 수 있도록 인증 사용자도 허용한다.
+        security.AddAccessRule(new PipeAccessRule(
+            new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
+            PipeAccessRights.ReadWrite,
+            AccessControlType.Allow));
+        return security;
+    }
+
     private async Task AcceptLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
@@ -34,12 +56,18 @@ public sealed class OverlayPipeServer : IAsyncDisposable
             NamedPipeServerStream? pipe = null;
             try
             {
-                pipe = new NamedPipeServerStream(
+                // 기본 파이프 DACL은 Everyone에 읽기만 허용하므로 사용자 세션 helper가
+                // InOut 클라이언트를 열 수 없다. SYSTEM/관리자/인증 사용자에게 명시적으로
+                // 읽기-쓰기를 허용해 오버레이 연결이 실제로 동작하도록 한다.
+                pipe = NamedPipeServerStreamAcl.Create(
                     _pipeName,
                     PipeDirection.InOut,
                     NamedPipeServerStream.MaxAllowedServerInstances,
                     PipeTransmissionMode.Byte,
-                    PipeOptions.Asynchronous);
+                    PipeOptions.Asynchronous,
+                    inBufferSize: 4096,
+                    outBufferSize: 4096,
+                    pipeSecurity: CreatePipeSecurity());
 
                 await pipe.WaitForConnectionAsync(cancellationToken);
 

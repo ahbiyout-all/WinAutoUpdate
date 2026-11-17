@@ -46,7 +46,8 @@ TestResults/
 !Directory.Build.props
 !UpdateAgent.sln
 !global.json
-!dotnet-tools.json
+!.config/
+!.config/dotnet-tools.json
 
 # 4) GitHub Actions workflows.
 !.github/

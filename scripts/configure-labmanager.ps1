@@ -21,7 +21,8 @@ param(
     [string]$AdminTokenFile,
     [string]$AgentToken,
     [string]$AgentTokenFile,
-    [string]$ListenUrl = "http://0.0.0.0:5080"
+    [string]$ListenUrl = "http://0.0.0.0:5080",
+    [switch]$AllowDefaultTokens
 )
 
 $ErrorActionPreference = "Stop"
@@ -82,8 +83,9 @@ $AgentToken = Resolve-Secret `
 
 if ([string]::IsNullOrWhiteSpace($AdminToken)) { throw "Admin token is required." }
 if ([string]::IsNullOrWhiteSpace($AgentToken)) { throw "Agent token is required." }
-if ($AdminToken -eq "change-me-admin-token" -or $AgentToken -eq "change-me-agent-token") {
-    Write-Warning "A default token is still in use. Change both tokens before a real lab rollout."
+if (-not $AllowDefaultTokens -and
+    ($AdminToken -eq "change-me-admin-token" -or $AgentToken -eq "change-me-agent-token")) {
+    throw "A default token is still in use. Generate new tokens for the pilot, or pass -AllowDefaultTokens for local development only."
 }
 
 $uri = $null
@@ -101,6 +103,7 @@ if ($null -eq $lab) {
 
 Set-JsonProperty $lab "AdminToken" $AdminToken
 Set-JsonProperty $lab "AgentToken" $AgentToken
+Set-JsonProperty $lab "AllowDefaultTokens" ([bool]$AllowDefaultTokens)
 Set-JsonProperty $config "Urls" $ListenUrl
 
 $json = $config | ConvertTo-Json -Depth 12

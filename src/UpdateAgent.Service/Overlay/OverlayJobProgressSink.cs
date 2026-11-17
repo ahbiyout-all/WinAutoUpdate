@@ -33,7 +33,9 @@ public sealed class OverlayJobProgressSink : IJobProgressSink, IDisposable
     public async Task OnProgressAsync(JobDetail detail, CancellationToken cancellationToken = default)
     {
         var options = _options.CurrentValue;
-        if (!options.OverlayEnabled || !detail.Policy.OverlayEnabled)
+        if (!options.OverlayEnabled ||
+            !detail.Policy.OverlayEnabled ||
+            detail.Policy.OverlayMode != OverlayMode.FullOverlay)
         {
             return;
         }

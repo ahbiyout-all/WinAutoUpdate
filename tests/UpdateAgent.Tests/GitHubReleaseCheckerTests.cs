@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using UpdateAgent.Shared;
 using UpdateAgent.Shared.Updates;
 
 namespace UpdateAgent.Tests;
@@ -12,6 +13,7 @@ public sealed class GitHubReleaseCheckerTests
     [InlineData("v0.1.0-beta", "0.1.0", false)]
     [InlineData("0.10.0", "0.9.0", true)]
     [InlineData("1.0.0", "0.99.99", true)]
+    [InlineData("release-2026", "0.1.0", false)]
     public void IsNewer_ComparesVersionsNumerically(string candidate, string current, bool expected)
     {
         Assert.Equal(expected, GitHubReleaseChecker.IsNewer(candidate, current));
@@ -24,6 +26,27 @@ public sealed class GitHubReleaseCheckerTests
     public void NormalizeVersion_StripsPrefixAndWhitespace(string value, string expected)
     {
         Assert.Equal(expected, GitHubReleaseChecker.NormalizeVersion(value));
+    }
+
+    [Fact]
+    public void LatestReleaseApiUrl_UsesTheCanonicalRepository()
+    {
+        Assert.Equal(
+            "https://api.github.com/repos/ahbiyout-all/WinAutoUpdate/releases/latest",
+            UpdateAgentConstants.LatestReleaseApiUrl);
+    }
+
+    [Fact]
+    public async Task CheckAsync_RequestsTheExactLatestReleaseEndpoint()
+    {
+        using var handler = new StubHandler("{}", HttpStatusCode.NotFound);
+        using var http = new HttpClient(handler);
+
+        await new GitHubReleaseChecker(http).CheckAsync();
+
+        Assert.Equal(
+            "https://api.github.com/repos/ahbiyout-all/WinAutoUpdate/releases/latest",
+            handler.RequestUri?.ToString());
     }
 
     [Fact]
@@ -110,10 +133,13 @@ public sealed class GitHubReleaseCheckerTests
             _status = status;
         }
 
+        public Uri? RequestUri { get; private set; }
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            RequestUri = request.RequestUri;
             var response = new HttpResponseMessage(_status)
             {
                 Content = new StringContent(_content, Encoding.UTF8, "application/json"),

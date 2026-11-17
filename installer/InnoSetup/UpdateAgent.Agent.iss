@@ -19,7 +19,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.1.1"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -103,6 +103,9 @@ Filename: "{cmd}"; Parameters: "/k ""{app}\Cli\UpdateAgent.Cli.exe"" status"; Wo
 var
   OldInnoUninstall: String;
   OldMsiProduct: String;
+  AgentConfigFile: String;
+  AgentConfigBackup: String;
+  AgentConfigRestoreNeeded: Boolean;
 
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
@@ -165,6 +168,24 @@ begin
     Result := Value
   else if RegQueryStringValue(HKLM32, UninstallKey + '\{6F0C2E8A-9B3D-4A71-8E52-1C7D4B9A3F60}_is1', 'UninstallString', Value) then
     Result := Value;
+end;
+
+function WaitForInnoUninstallComplete: Boolean;
+var
+  I: Integer;
+  KeyExists: Boolean;
+begin
+  { Inno 제거 프로그램은 종료 코드를 반환한 뒤 임시 복제본에서 계속 파일을 지울 수 있다. }
+  Result := True;
+  for I := 0 to 40 do
+  begin
+    KeyExists :=
+      RegKeyExists(HKLM64, UninstallKey + '\{6F0C2E8A-9B3D-4A71-8E52-1C7D4B9A3F60}_is1') or
+      RegKeyExists(HKLM32, UninstallKey + '\{6F0C2E8A-9B3D-4A71-8E52-1C7D4B9A3F60}_is1');
+    if not KeyExists then Exit;
+    Sleep(250);
+  end;
+  Result := not KeyExists;
 end;
 
 function FindMsiProductCodeIn(const RootKey: Integer): String;
@@ -258,8 +279,7 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Code: Integer;
-  UninstallExe, ConfigFile, BackupFile: String;
-  ConfigSaved: Boolean;
+  UninstallExe: String;
 begin
   Result := '';
 
@@ -269,15 +289,19 @@ begin
   Sleep(1200);
   KillProcess('UpdateAgent.Service.exe');
 
-  { 이전 제거 프로그램이 appsettings.json도 삭제하므로 먼저 백업한다. }
-  ConfigFile := ExpandConstant('{app}\Service\appsettings.json');
-  BackupFile := AddBackslash(GetTempDir) + 'UpdateAgent.Agent.appsettings.json.bak';
-  ConfigSaved := False;
-  if FileExists(ConfigFile) then
+  { 이전 제거 프로그램/InstallDelete가 appsettings.json을 지우므로 먼저 백업한다. }
+  AgentConfigFile := ExpandConstant('{app}\Service\appsettings.json');
+  AgentConfigBackup := AddBackslash(GetTempDir) + 'UpdateAgent.Agent.appsettings.json.bak';
+  AgentConfigRestoreNeeded := False;
+  DeleteFile(AgentConfigBackup);
+  if FileExists(AgentConfigFile) then
   begin
-    ConfigSaved := CopyFile(ConfigFile, BackupFile, False);
-    if not ConfigSaved then
-      Log('Failed to back up existing Agent appsettings.json');
+    if not CopyFile(AgentConfigFile, AgentConfigBackup, False) then
+    begin
+      Result := '기존 Agent appsettings.json 백업에 실패해 설치를 중단합니다.';
+      Exit;
+    end;
+    AgentConfigRestoreNeeded := True;
   end;
 
   { MSI로 설치된 제품이 있으면 Inno 설치와 공존할 수 없으므로 항상 제거한다. }
@@ -286,12 +310,21 @@ begin
     Code := -1;
     if not Exec(ExpandConstant('{sys}\msiexec.exe'),
         '/x ' + OldMsiProduct + ' /qn /norestart', '',
-        SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+        SW_HIDE, ewWaitUntilTerminated, Code) then
     begin
       Result := '기존 WiX MSI UpdateAgent Agent 제거에 실패했습니다. (code ' +
         IntToStr(Code) + ') 설치를 중단합니다.';
       Exit;
     end;
+
+    { 0/3010/1641은 모두 성공이다. 3010/1641은 재부팅이 필요함을 의미한다. }
+    if not (Code in [0, 3010, 1641]) then
+    begin
+      Result := '기존 WiX MSI UpdateAgent Agent 제거에 실패했습니다. (code ' +
+        IntToStr(Code) + ') 설치를 중단합니다.';
+      Exit;
+    end;
+    if Code in [3010, 1641] then NeedsRestart := True;
     Sleep(1200);
   end;
 
@@ -312,34 +345,43 @@ begin
         IntToStr(Code) + ') 설치를 중단합니다.';
       Exit;
     end;
+
+    if not WaitForInnoUninstallComplete then
+    begin
+      Result := '기존 UpdateAgent Agent 제거가 완료되지 않아 설치를 중단합니다.';
+      Exit;
+    end;
   end;
 
-  if ConfigSaved then
-  begin
-    ForceDirectories(ExtractFileDir(ConfigFile));
-    if not CopyFile(BackupFile, ConfigFile, False) then
-      Log('Failed to restore Agent appsettings.json');
-    DeleteFile(BackupFile);
-  end;
+  { 설정 복원은 InstallDelete/[Files]가 끝난 뒤 ssPostInstall에서 수행한다. }
 end;
 
-procedure EnsureService;
+function EnsureService: Boolean;
 var
   ServiceExe: String;
   Sc: String;
+  Code: Integer;
 begin
+  Result := False;
   ServiceExe := ExpandConstant('{app}\Service\UpdateAgent.Service.exe');
   Sc := ExpandConstant('{sys}\sc.exe');
 
   if RunHidden(Sc, 'query ' + ServiceName) <> 0 then
-    RunHidden(Sc, 'create ' + ServiceName + ' binPath= "' + ServiceExe +
+    Code := RunHidden(Sc, 'create ' + ServiceName + ' binPath= "' + ServiceExe +
       '" start= auto DisplayName= "UpdateAgent Service"')
   else
-    RunHidden(Sc, 'config ' + ServiceName + ' binPath= "' + ServiceExe + '" start= auto');
+    Code := RunHidden(Sc, 'config ' + ServiceName + ' binPath= "' + ServiceExe + '" start= auto');
+
+  if Code <> 0 then
+  begin
+    Log('Failed to create/configure UpdateAgentService (code ' + IntToStr(Code) + ')');
+    Exit;
+  end;
 
   RunHidden(Sc, 'description ' + ServiceName + ' "Windows Update automation agent for computer labs"');
   RunHidden(Sc, 'failure ' + ServiceName + ' reset= 86400 actions= restart/60000/restart/60000/restart/60000');
   RunHidden(Sc, 'failureflag ' + ServiceName + ' 1');
+  Result := True;
 end;
 
 procedure AddFirewallRule(const RuleName, ProgramPath, Description: String);
@@ -421,14 +463,25 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
-    EnsureService;
+    { InstallDelete와 [Files]가 모두 끝난 뒤에 설정을 복원해야 덮어써지지 않는다. }
+    if AgentConfigRestoreNeeded then
+    begin
+      ForceDirectories(ExtractFileDir(AgentConfigFile));
+      if not CopyFile(AgentConfigBackup, AgentConfigFile, True) then
+        RaiseException('기존 Agent appsettings.json 복원에 실패해 설치를 중단합니다.');
+      DeleteFile(AgentConfigBackup);
+      AgentConfigRestoreNeeded := False;
+    end;
+
+    if not EnsureService then
+      RaiseException('UpdateAgentService 등록/설정에 실패해 설치를 중단합니다.');
+
     ApplyFirewallRules;
     WriteAgentConfigIfRequested;
 
     Code := RunHidden(ExpandConstant('{sys}\sc.exe'), 'start ' + ServiceName);
-    if (Code <> 0) and (Code <> 1056) and not WizardSilent then
-      MsgBox('서비스 시작에 실패했습니다(sc ' + IntToStr(Code) + '). Windows 서비스에서 UpdateAgentService를 시작하세요.',
-        mbError, MB_OK);
+    if (Code <> 0) and (Code <> 1056) then
+      RaiseException('UpdateAgentService 시작에 실패했습니다(sc ' + IntToStr(Code) + ').');
   end;
 end;
 

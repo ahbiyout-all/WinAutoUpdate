@@ -13,7 +13,7 @@
 버전은 **`Directory.Build.props`의 `<Version>` 하나**만 사용합니다.
 
 ```xml
-<Version>0.1.0</Version>
+<Version>0.1.1</Version>
 ```
 
 이 값이 다음 위치에 그대로 반영됩니다.
@@ -92,7 +92,7 @@ scripts\github-push.bat -Bump patch
 ### 스크립트가 하는 일
 
 1. `git config user.name/user.email`을 저장소 로컬에 설정
-   (`AhBiYout <AhBiYout-all@users.noreply.github.com>`).
+   (`AhBiYout`, GitHub noreply 이메일 주소).
 2. `Directory.Build.props`의 버전을 올리고 파일을 갱신.
 3. `dotnet build UpdateAgent.sln -c Release`와 xUnit 테스트 실행.
 4. 커밋 대상 파일에서 비밀값/개인 이메일/로컬 절대 경로를 검사.
@@ -117,10 +117,11 @@ scripts\github-push.bat -Bump patch
 | 트리거 | 동작 |
 |---|---|
 | `v*` 태그 push | 태그 버전으로 릴리스 생성 |
-| `workflow_dispatch` | 입력한 버전(없으면 `Directory.Build.props`)으로 릴리스 생성 |
+| `workflow_dispatch` | `Directory.Build.props`의 현재 버전으로 릴리스 생성 |
 
-수동 실행 시 `version`을 비우면 현재 버전을 사용합니다. 이미 같은 태그의 릴리스가 있으면
-설치 파일을 덮어쓰고 릴리스 노트를 갱신합니다.
+수동 실행에서는 버전을 입력받지 않습니다. 버전을 바꾸려면 `Directory.Build.props`를 수정하고
+커밋한 뒤 실행하세요. 태그 버전과 소스 버전이 다르면 워크플로가 중단됩니다.
+이미 같은 태그의 릴리스가 있으면 설치 파일을 덮어쓰고 릴리스 노트를 갱신합니다.
 
 ### 러너 구성
 

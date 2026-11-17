@@ -46,10 +46,11 @@ $projects = @(
         Name    = "LabManager"
         Project = Join-Path $repoRoot "src\UpdateAgent.LabManager\UpdateAgent.LabManager.csproj"
         Output  = Join-Path $OutputRoot "labmanager"
-        Clean   = $true
+        # The server and desktop launcher share this folder; clean it once below.
+        Clean   = $false
     },
     [pscustomobject]@{
-        # 두 실행 파일을 같은 폴더에 설치해야 하므로 이 게시에서는 출력을 비우지 않는다.
+        # Both executables must be installed in the same folder, so do not clean it here.
         Name    = "LabManagerDesktop"
         Project = Join-Path $repoRoot "src\UpdateAgent.LabManager.Desktop\UpdateAgent.LabManager.Desktop.csproj"
         Output  = Join-Path $OutputRoot "labmanager"
@@ -82,6 +83,15 @@ if ($AgentOnly) {
         $_.Name -ne "LabManager" -and $_.Name -ne "LabManagerDesktop"
     })
     Write-Host "Agent-only publish: LabManager and its desktop client will not be published." -ForegroundColor Yellow
+}
+
+# The LabManager server and desktop launcher are installed into one folder.
+# Cleaning between the two publishes would remove the launcher; clean the shared folder once before both.
+if (-not $NoClean -and -not $AgentOnly) {
+    $labManagerOutput = Join-Path $OutputRoot "labmanager"
+    if (Test-Path -LiteralPath $labManagerOutput) {
+        Remove-Item -LiteralPath $labManagerOutput -Recurse -Force
+    }
 }
 
 foreach ($project in $projects) {
@@ -117,7 +127,7 @@ if ($AgentOnly) {
     Write-Host "Next steps:"
     Write-Host "  1) Build the versioned agent output: build.bat"
     Write-Host "  2) Installer (agent only): scripts\build-inno.ps1 -AgentOnly -NoPublish"
-    Write-Host "  3) Student PC: UpdateAgent.Agent-Setup-<version>-x64.exe /VERYSILENT /LabManagerUrl <url>"
+    Write-Host "  3) Student PC: UpdateAgent.Agent-Setup-<version>-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LabManagerUrl=http://<teacher-ip>:5080 /AgentTokenFile=<token-file>"
     Write-Host "  4) Optional on a student PC: publish\cli\UpdateAgent.Cli.exe preflight --confirm-maestro"
     Write-Host "  5) Full runbook: docs\PILOT.md (installers: docs\INSTALLER.md, release: docs\RELEASE.md)"
 } else {
@@ -125,7 +135,7 @@ if ($AgentOnly) {
     Write-Host "  1) Teacher PC: scripts\configure-labmanager.ps1, then start publish\labmanager\UpdateAgent.LabManager.Desktop.exe"
     Write-Host "  2) Installer (recommended): scripts\build-inno.ps1 -> artifacts\inno\*Setup*.exe"
     Write-Host "     Alternative MSI: scripts\build-msi.ps1 -> artifacts\msi\UpdateAgent.Agent-<version>-x64.msi"
-    Write-Host "  3) Student PC (Inno): UpdateAgent.Agent-Setup-<version>-x64.exe /VERYSILENT /LabManagerUrl <url>"
+    Write-Host "  3) Student PC (Inno): UpdateAgent.Agent-Setup-<version>-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LabManagerUrl=http://<teacher-ip>:5080 /AgentTokenFile=<token-file>"
     Write-Host "     Student PC (MSI): scripts\install-agent-msi.ps1 -LabManagerUrl http://<teacher-ip>:5080 -ConfirmMaestro"
     Write-Host "     Student PC (legacy): scripts\install-service.ps1 -LabManagerUrl http://<teacher-ip>:5080"
     Write-Host "  4) Optional on a student PC: publish\cli\UpdateAgent.Cli.exe preflight --confirm-maestro"

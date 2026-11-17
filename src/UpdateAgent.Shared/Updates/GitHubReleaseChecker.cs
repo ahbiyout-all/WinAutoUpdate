@@ -117,10 +117,9 @@ public sealed class GitHubReleaseChecker
             return candidateVersion > currentVersion;
         }
 
-        return !string.Equals(
-            NormalizeVersion(candidate),
-            NormalizeVersion(current),
-            StringComparison.OrdinalIgnoreCase);
+        // 숫자 버전으로 해석할 수 없는 태그는 업데이트로 취급하지 않는다.
+        // (예: release-2026, nightly 등이 잘못된 다운로드 팝업을 띄우지 않도록)
+        return false;
     }
 
     private static bool TryParseVersion(string value, out Version version)

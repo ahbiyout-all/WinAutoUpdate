@@ -1,6 +1,7 @@
 name: Release
 
 # 릴리스는 v<Major.Minor.Build> 태그 또는 수동 실행으로 만든다.
+# 수동 실행에서는 Directory.Build.props의 <Version>만 사용한다(입력으로 버전을 바꾸지 않음).
 # 릴리스 자산에는 설치 파일만 올린다. 해시는 릴리스 노트에 기록한다.
 
 on:
@@ -9,10 +10,6 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version to release (Major.Minor.Build). Empty uses Directory.Build.props.'
-        required: false
-        type: string
       prerelease:
         description: 'Mark this release as a pre-release'
         required: false
@@ -23,23 +20,28 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 defaults:
   run:
     shell: pwsh
 
+env:
+  RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+
 jobs:
   release:
     name: Build installers and publish release
     runs-on: windows-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
@@ -55,56 +57,69 @@ jobs:
           if ($text -notmatch '<Version>\s*([^<]+?)\s*</Version>') {
             throw "No <Version> element found in $propsPath."
           }
-          $propsVersion = $Matches[1].Trim()
-          $version = $propsVersion
-
-          $inputVersion = '${{ inputs.version }}'.Trim()
-          if ($inputVersion) {
-            if ($inputVersion -notmatch '^\d+\.\d+\.\d+$') {
-              throw "Input version must be Major.Minor.Build: $inputVersion"
-            }
-            $version = $inputVersion
-            $text = [regex]::Replace($text, '<Version>\s*[^<]+?\s*</Version>', "<Version>$version</Version>")
-            Set-Content -LiteralPath $propsPath -Value $text -Encoding utf8NoBOM -NoNewline
-          }
-
-          # 태그 push에서는 태그와 소스 버전이 반드시 같아야 한다.
-          if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
-            if ($tagVersion -ne $version) {
-              throw "Tag $env:GITHUB_REF_NAME does not match Directory.Build.props version $version."
-            }
-            $version = $tagVersion
-          }
-
+          $version = $Matches[1].Trim()
           if ($version -notmatch '^\d+\.\d+\.\d+$') {
             throw "Version must be Major.Minor.Build (digits only): $version"
           }
 
+          $tag = "v$version"
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            if ($env:GITHUB_REF_NAME -ne $tag) {
+              throw "Tag $env:GITHUB_REF_NAME does not match Directory.Build.props version $version."
+            }
+          }
+          else {
+            # 수동 실행에서 이미 같은 태그가 다른 커밋을 가리키면 잘못된 릴리스를 막는다.
+            $existingCommit = (& git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>$null).Trim()
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingCommit) -and
+                $existingCommit -ne $env:GITHUB_SHA) {
+              throw "Tag $tag already points to $existingCommit, not to $env:GITHUB_SHA. Update Directory.Build.props instead."
+            }
+          }
+
           Write-Host "Release version: $version"
           "version=$version" >> $env:GITHUB_OUTPUT
-          "tag=v$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Install Inno Setup 6
+        id: inno
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $false
 
-          choco install innosetup --no-progress -y
-          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) {
-            throw "Chocolatey failed to install Inno Setup (exit code $LASTEXITCODE)."
+          $iscc = $null
+          foreach ($candidate in @(
+              (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
+              (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'),
+              (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe')
+          )) {
+            if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate)) {
+              $iscc = $candidate
+              break
+            }
           }
-
-          $iscc = Get-ChildItem -Path @($env:ProgramFiles, ${env:ProgramFiles(x86)}) `
-            -Filter 'ISCC.exe' -Recurse -ErrorAction SilentlyContinue |
-            Select-Object -First 1 -ExpandProperty FullName
 
           if (-not $iscc) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) {
+              throw "Chocolatey failed to install Inno Setup (exit code $LASTEXITCODE)."
+            }
+
+            $iscc = Get-ChildItem -Path @($env:ProgramFiles, ${env:ProgramFiles(x86)}) `
+              -Filter 'ISCC.exe' -Recurse -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+
+          if (-not $iscc -or -not (Test-Path -LiteralPath $iscc)) {
             throw 'ISCC.exe was not found after installing Inno Setup.'
           }
-          Write-Host "ISCC: $iscc"
+
+          $isccVersionText = (& $iscc /? 2>$null | Select-Object -First 1)
+          if ($isccVersionText -notmatch 'Inno Setup\s+6') {
+            throw "Inno Setup 6 compiler is required, found: $isccVersionText"
+          }
+          Write-Host "ISCC: $iscc ($isccVersionText)"
           "iscc=$iscc" >> $env:GITHUB_OUTPUT
-        id: inno
 
       - name: Restore .NET tools
         run: dotnet tool restore
@@ -119,15 +134,19 @@ jobs:
         run: .\scripts\publish.ps1 -Configuration Release
 
       - name: Build Inno Setup installers
-        run: .\scripts\build-inno.ps1 -NoPublish -IsccPath '${{ steps.inno.outputs.iscc }}'
+        env:
+          ISCC_PATH: ${{ steps.inno.outputs.iscc }}
+        run: .\scripts\build-inno.ps1 -NoPublish -IsccPath $env:ISCC_PATH
 
       - name: Build MSI (alternative)
         run: .\scripts\build-msi.ps1
 
       - name: Prepare release notes
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = '${{ steps.version.outputs.version }}'
+          $version = $env:RELEASE_VERSION
 
           $innoInfo = Get-Content -LiteralPath 'artifacts\inno\build-info.json' -Raw | ConvertFrom-Json
           $msiInfo = Get-Content -LiteralPath 'artifacts\msi\build-info.json' -Raw | ConvertFrom-Json
@@ -169,26 +188,51 @@ jobs:
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $false
-          $version = '${{ steps.version.outputs.version }}'
+          $version = $env:RELEASE_VERSION
           $tag = "v$version"
-          $prerelease = '${{ inputs.prerelease }}' -eq 'true'
+          $prerelease = $env:RELEASE_PRERELEASE -eq 'true'
 
-          $innoAssets = @(Get-ChildItem -LiteralPath 'artifacts\inno' -File -Filter '*-Setup-*-x64.exe' |
-            Sort-Object Name | ForEach-Object FullName)
-          $msiAssets = @(Get-ChildItem -LiteralPath 'artifacts\msi' -File -Filter '*.msi' |
-            Sort-Object Name | ForEach-Object FullName)
+          if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+            throw 'GitHub CLI (gh) is required but was not found on the runner.'
+          }
+          & gh --version
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI (gh) failed to start.' }
+
+          # Select only the expected versioned names so stale artifacts cannot be uploaded.
+          $expectedInnoNames = @(
+            "UpdateAgent.Agent-Setup-$version-x64.exe",
+            "UpdateAgent.LabManager-Setup-$version-x64.exe"
+          )
+          $expectedMsiName = "UpdateAgent.Agent-$version-x64.msi"
+
+          $innoAssets = @($expectedInnoNames | ForEach-Object {
+            $path = Join-Path (Join-Path $PWD.Path 'artifacts\inno') $_
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Expected release asset is missing: $path"
+            }
+            (Resolve-Path -LiteralPath $path).Path
+          })
+          $msiPath = Join-Path (Join-Path $PWD.Path 'artifacts\msi') $expectedMsiName
+          if (-not (Test-Path -LiteralPath $msiPath)) {
+            throw "Expected release asset is missing: $msiPath"
+          }
+          $msiAssets = @((Resolve-Path -LiteralPath $msiPath).Path)
           $assets = @($innoAssets + $msiAssets)
 
-          if ($innoAssets.Count -lt 2) {
-            throw "Expected two Inno Setup installers, found $($innoAssets.Count)."
+          if ($innoAssets.Count -ne 2) {
+            throw "Expected exactly two Inno Setup installers, found $($innoAssets.Count)."
+          }
+          if ($msiAssets.Count -ne 1) {
+            throw "Expected exactly one MSI, found $($msiAssets.Count)."
           }
           foreach ($asset in $assets) {
             $extension = [IO.Path]::GetExtension($asset).ToLowerInvariant()
             if ($extension -notin @('.exe', '.msi')) {
-              throw "Unexpected release asset type: $asset"
+              throw "Unexpected release asset: $asset"
             }
           }
 
@@ -196,13 +240,18 @@ jobs:
           $assets | ForEach-Object { Write-Host "  $_" }
 
           # 수동 실행에서는 태그가 없을 수 있으므로 현재 커밋에 태그를 만든다.
-          # git tag --list는 실패해도 stderr를 쓰지 않아 스크립트가 중단되지 않는다.
           $existingTag = (& git tag --list $tag).Trim()
           if (-not $existingTag) {
             git tag $tag
             if ($LASTEXITCODE -ne 0) { throw "Failed to create tag $tag." }
             git push origin "refs/tags/$tag"
             if ($LASTEXITCODE -ne 0) { throw "Failed to push tag $tag." }
+          }
+          else {
+            $tagCommit = (& git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>$null).Trim()
+            if ($tagCommit -ne $env:GITHUB_SHA) {
+              throw "Existing tag $tag points to $tagCommit, not to $env:GITHUB_SHA."
+            }
           }
 
           $releaseTags = @(& gh release list --limit 200 --json tagName |
@@ -212,7 +261,11 @@ jobs:
             Write-Host "Updating existing release $tag."
             gh release upload $tag @assets --clobber
             if ($LASTEXITCODE -ne 0) { throw "Failed to upload assets to $tag." }
-            gh release edit $tag --title "UpdateAgent $version" --notes-file release-notes.md
+
+            $editArgs = @('release', 'edit', $tag, '--title', "UpdateAgent $version",
+              '--notes-file', 'release-notes.md')
+            if ($prerelease) { $editArgs += '--prerelease' } else { $editArgs += '--prerelease=false' }
+            & gh @editArgs
             if ($LASTEXITCODE -ne 0) { throw "Failed to edit release $tag." }
           }
           else {

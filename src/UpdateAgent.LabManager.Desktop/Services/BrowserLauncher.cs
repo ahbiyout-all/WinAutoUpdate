@@ -20,11 +20,28 @@ internal static class BrowserLauncher
             return false;
         }
 
-        var profile = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "UpdateAgent",
-            "LabManager",
-            "browser-profile");
+        var startInfo = BuildStartInfo(browser, url, width, height);
+
+        try
+        {
+            Process.Start(startInfo);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    internal static string GetProfilePath() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "UpdateAgent",
+        "LabManager",
+        "browser-profile");
+
+    internal static ProcessStartInfo BuildStartInfo(string browser, string url, double width, double height)
+    {
+        var profile = GetProfilePath();
         Directory.CreateDirectory(profile);
 
         var startInfo = new ProcessStartInfo(browser)
@@ -37,16 +54,7 @@ internal static class BrowserLauncher
         startInfo.ArgumentList.Add("--no-first-run");
         startInfo.ArgumentList.Add("--no-default-browser-check");
         startInfo.ArgumentList.Add("--disable-search-engine-choice-screen");
-
-        try
-        {
-            Process.Start(startInfo);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+        return startInfo;
     }
 
     /// <summary>Edge를 우선하고, 없으면 Chrome을 사용한다.</summary>

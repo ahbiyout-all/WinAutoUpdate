@@ -5,6 +5,35 @@
 
 ---
 
+## 2026-11-17 — 심층 자아성찰 감사 및 오류 수정 (v0.1.1)
+
+### 목적
+
+- `v0.1.0` 릴리스 이후 발견된 자동 업데이트 URL 오류와 릴리스/인스톨러/런타임 결함 수정.
+- 재발 방지를 위한 회귀 테스트와 빌드 가드 추가.
+
+### 주요 수정
+
+| 영역 | 내용 |
+|---|---|
+| 자동 업데이트 | 저장소 상수를 `ahbiyout-all/WinAutoUpdate`로 고정하고 정확한 최신 릴리스 API URL을 테스트 |
+| 버전 | `Directory.Build.props`를 `0.1.1`로 올려 잘못된 URL이 포함된 `v0.1.0`을 대체 |
+| 인증 | 기본 토큰이면 LabManager 시작을 중단하고, `AllowDefaultTokens`는 로컬 개발 전용 옵션으로 추가 |
+| 작업 상태 | LabManager가 에이전트 체크인의 소유자/종료 상태/시간 순서를 검증 |
+| 오버레이 | 파이프 DACL 명시, 세션 helper 중복 실행 방지, 파이프 연결 끊김 시 오버레이 즉시 숨김 |
+| 인스톨러 | `appsettings.json` 복원을 `InstallDelete`/`[Files]` 이후로 이동, MSI 재부팅 코드/서비스 실패 전파 처리 |
+| 릴리스 | 수동 버전 입력 제거, `env` 기반 값 전달, 태그 커밋/자산 개수/ISCC 6/gh 검증, 단일 concurrency 적용 |
+| 스크립트 | UTF-8 BOM 검증, 공유 게시 폴더 정리, 방화벽 기본/버전 규칙 통일, 닷넷 도구 매니페스트를 `.config/`로 이동 |
+| 테스트 | 66개 xUnit 테스트로 URL, 토큰, 캐시, 브라우저 인자, Unicode STARTUPINFO 회귀 검증 |
+
+### 검증
+
+- `dotnet build UpdateAgent.sln -c Release`: 경고 0, 오류 0.
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --no-build`: 66개 통과.
+- `.iss` 두 파일 모두 UTF-8 BOM 유지.
+
+---
+
 ## 2026-11-17 — 독립 Tauri 데스크톱 앱 스캐폴드 추가
 
 ### 목적
@@ -229,7 +258,7 @@
 
 | 영역 | 내용 |
 |---|---|
-| 공통 상수 | 개발자 `AhBiYout`, 계정 `AhBiYout-all`, 저장소 `UpdateAgent`, 블로그 URL, Releases API, 확인 주기(30분) 추가 |
+| 공통 상수 | 개발자 `AhBiYout`, 계정 `ahbiyout-all`, 저장소 `WinAutoUpdate`, 블로그 URL, Releases API, 확인 주기(30분) 추가 |
 | 빌드 메타데이터 | `Directory.Build.props`의 `Authors/Company/Copyright/RepositoryUrl`을 AhBiYout 기준으로 변경 |
 | 업데이트 모델 | `UpdateAgent.Shared/Updates/AppUpdateInfo.cs` 추가 |
 | GitHub 조회 | `GitHubReleaseChecker` 추가: 최신 릴리스 조회, `v` 접두사 제거, 숫자 버전 비교, 설치 파일 자산 선택 |

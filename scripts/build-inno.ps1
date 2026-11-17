@@ -98,6 +98,15 @@ function Assert-PublishFolder {
     }
 }
 
+function Assert-InnoScriptBom {
+    param([string]$Path)
+
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -lt 3 -or $bytes[0] -ne 0xEF -or $bytes[1] -ne 0xBB -or $bytes[2] -ne 0xBF) {
+        throw "Inno Setup script must be saved as UTF-8 with BOM: $Path"
+    }
+}
+
 function Find-Iscc {
     param([string]$Explicit)
 
@@ -111,9 +120,7 @@ function Find-Iscc {
     $candidates = @(
         (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
         (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"),
-        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
-        (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 7\ISCC.exe"),
-        (Join-Path $env:ProgramFiles "Inno Setup 7\ISCC.exe")
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe")
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 
     foreach ($candidate in $candidates) {
@@ -206,9 +213,15 @@ if ([string]::IsNullOrWhiteSpace($ProductVersion)) {
 $ProductVersion = ConvertTo-ThreePartVersion $ProductVersion
 
 $iscc = Find-Iscc -Explicit $IsccPath
+$isccVersionText = (& $iscc /? 2>$null | Select-Object -First 1)
+if ($isccVersionText -notmatch 'Inno Setup\s+6') {
+    throw "Inno Setup 6 compiler is required (found: $isccVersionText): $iscc"
+}
 
 if (-not (Test-Path -LiteralPath $agentIss)) { throw "Inno script not found: $agentIss" }
 if (-not $AgentOnly -and -not (Test-Path -LiteralPath $labManagerIss)) { throw "Inno script not found: $labManagerIss" }
+Assert-InnoScriptBom -Path $agentIss
+if (-not $AgentOnly) { Assert-InnoScriptBom -Path $labManagerIss }
 if (-not (Test-Path -LiteralPath $noticeRtf)) { throw "License notice not found: $noticeRtf" }
 
 $serviceSource       = Join-Path $PublishRoot "agent\service"

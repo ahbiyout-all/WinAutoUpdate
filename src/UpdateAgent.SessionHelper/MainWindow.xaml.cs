@@ -97,7 +97,7 @@ public partial class MainWindow : Window
         _cursorTimer.Start();
     }
 
-    private void HideOverlay()
+    internal void HideOverlay()
     {
         _topmostTimer.Stop();
         _cursorTimer.Stop();

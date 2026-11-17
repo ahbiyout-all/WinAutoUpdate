@@ -17,7 +17,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.1.1"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -83,6 +83,10 @@ Name: "desktopicon"; Description: "바탕화면에 UpdateAgent LabManager 바로
 Source: "{#StageRoot}\*"; DestDir: "{app}"; Excludes: "appsettings.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#StageRoot}\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
 
+[InstallDelete]
+; 대시보드 정적 파일은 설치 패키지가 항상 최신 상태로 덮어쓴다. appsettings.json은 제외한다.
+Type: filesandordirs; Name: "{app}\wwwroot"
+
 [Icons]
 Name: "{group}\UpdateAgent LabManager"; Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"
 Name: "{group}\UpdateAgent LabManager 제거"; Filename: "{uninstallexe}"
@@ -94,6 +98,9 @@ Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"; Descr
 [Code]
 var
   OldInnoUninstall: String;
+  LabManagerConfigFile: String;
+  LabManagerConfigBackup: String;
+  LabManagerConfigRestoreNeeded: Boolean;
 
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
@@ -145,6 +152,23 @@ begin
     Result := Value;
 end;
 
+function WaitForInnoUninstallComplete: Boolean;
+var
+  I: Integer;
+  KeyExists: Boolean;
+begin
+  Result := True;
+  for I := 0 to 40 do
+  begin
+    KeyExists :=
+      RegKeyExists(HKLM64, UninstallKey + '\{A4D7F1C3-2E85-4B60-9C1A-7F3E5D8B2A94}_is1') or
+      RegKeyExists(HKLM32, UninstallKey + '\{A4D7F1C3-2E85-4B60-9C1A-7F3E5D8B2A94}_is1');
+    if not KeyExists then Exit;
+    Sleep(250);
+  end;
+  Result := not KeyExists;
+end;
+
 function InitializeSetup: Boolean;
 begin
   { 1) 실행 중인 기존 앱을 먼저 강제 종료한다. }
@@ -159,22 +183,25 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Code: Integer;
-  UninstallExe, ConfigFile, BackupFile: String;
-  ConfigSaved: Boolean;
+  UninstallExe: String;
 begin
   Result := '';
   KillProcess('UpdateAgent.LabManager.Desktop.exe');
   KillProcess('UpdateAgent.LabManager.exe');
 
-  { 이전 제거 프로그램이 appsettings.json도 삭제하므로 먼저 백업한다. }
-  ConfigFile := ExpandConstant('{app}\appsettings.json');
-  BackupFile := AddBackslash(GetTempDir) + 'UpdateAgent.LabManager.appsettings.json.bak';
-  ConfigSaved := False;
-  if FileExists(ConfigFile) then
+  { 이전 제거 프로그램/InstallDelete가 appsettings.json을 지우므로 먼저 백업한다. }
+  LabManagerConfigFile := ExpandConstant('{app}\appsettings.json');
+  LabManagerConfigBackup := AddBackslash(GetTempDir) + 'UpdateAgent.LabManager.appsettings.json.bak';
+  LabManagerConfigRestoreNeeded := False;
+  DeleteFile(LabManagerConfigBackup);
+  if FileExists(LabManagerConfigFile) then
   begin
-    ConfigSaved := CopyFile(ConfigFile, BackupFile, False);
-    if not ConfigSaved then
-      Log('Failed to back up existing LabManager appsettings.json');
+    if not CopyFile(LabManagerConfigFile, LabManagerConfigBackup, False) then
+    begin
+      Result := '기존 LabManager appsettings.json 백업에 실패해 설치를 중단합니다.';
+      Exit;
+    end;
+    LabManagerConfigRestoreNeeded := True;
   end;
 
   if OldInnoUninstall <> '' then
@@ -194,15 +221,15 @@ begin
         IntToStr(Code) + ') 설치를 중단합니다.';
       Exit;
     end;
+
+    if not WaitForInnoUninstallComplete then
+    begin
+      Result := '기존 UpdateAgent LabManager 제거가 완료되지 않아 설치를 중단합니다.';
+      Exit;
+    end;
   end;
 
-  if ConfigSaved then
-  begin
-    ForceDirectories(ExtractFileDir(ConfigFile));
-    if not CopyFile(BackupFile, ConfigFile, False) then
-      Log('Failed to restore LabManager appsettings.json');
-    DeleteFile(BackupFile);
-  end;
+  { 설정 복원은 InstallDelete/[Files]가 끝난 뒤 ssPostInstall에서 수행한다. }
 end;
 
 procedure AddFirewallRule(const RuleName, ProgramPath, Description: String);
@@ -229,7 +256,19 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
+  begin
+    { InstallDelete/[Files]가 끝난 뒤에 설정을 복원해야 덮어써지지 않는다. }
+    if LabManagerConfigRestoreNeeded then
+    begin
+      ForceDirectories(ExtractFileDir(LabManagerConfigFile));
+      if not CopyFile(LabManagerConfigBackup, LabManagerConfigFile, True) then
+        RaiseException('기존 LabManager appsettings.json 복원에 실패해 설치를 중단합니다.');
+      DeleteFile(LabManagerConfigBackup);
+      LabManagerConfigRestoreNeeded := False;
+    end;
+
     ApplyFirewallRules;
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

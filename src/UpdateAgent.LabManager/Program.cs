@@ -39,6 +39,35 @@ builder.Host.UseSerilog((context, logger) => logger
 builder.Services.Configure<LabManagerOptions>(
     builder.Configuration.GetSection(LabManagerOptions.SectionName));
 
+// 파일럿 배포에서 기본 토큰이 그대로 사용되면 포트 5080에 접근할 수 있는 누구나
+// 재부팅/작업 시작 API를 호출할 수 있다. 개발용 예외 옵션이 없으면 시작을 중단한다.
+var startupOptions = builder.Configuration
+    .GetSection(LabManagerOptions.SectionName)
+    .Get<LabManagerOptions>() ?? new LabManagerOptions();
+if (!startupOptions.AllowDefaultTokens)
+{
+    var invalidTokens = new List<string>();
+    if (string.IsNullOrWhiteSpace(startupOptions.AdminToken) ||
+        string.Equals(startupOptions.AdminToken, UpdateAgentConstants.DefaultAdminToken, StringComparison.Ordinal))
+    {
+        invalidTokens.Add("AdminToken");
+    }
+
+    if (string.IsNullOrWhiteSpace(startupOptions.AgentToken) ||
+        string.Equals(startupOptions.AgentToken, UpdateAgentConstants.DefaultAgentToken, StringComparison.Ordinal))
+    {
+        invalidTokens.Add("AgentToken");
+    }
+
+    if (invalidTokens.Count > 0)
+    {
+        throw new InvalidOperationException(
+            $"기본/빈 토큰으로 LabManager를 시작할 수 없습니다: {string.Join(", ", invalidTokens)}. " +
+            "scripts\\configure-labmanager.ps1을 실행하거나 appsettings.json의 LabManager 토큰을 변경하세요. " +
+            "로컬 개발에서만 LabManager:AllowDefaultTokens=true를 사용하세요.");
+    }
+}
+
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     var serializer = options.SerializerOptions;
@@ -96,6 +125,28 @@ app.MapGet("/api/admin/update", async (
 
 // ---------------- 에이전트 체크인 ----------------
 
+// 작업 상태의 원본은 LabManager다. 에이전트가 보낸 상태를 무조건 덮어쓰지 않고
+// 소유자/종료 상태/시간 순서를 검증해 지연 체크인이나 위조 상태를 거부한다.
+static bool CanAcceptJobState(LabJobRecord? previous, JobSummary incoming, string agentId)
+{
+    if (previous is null) return true;
+
+    var stored = previous.Summary;
+    if (!string.Equals(stored.AgentId, agentId, StringComparison.OrdinalIgnoreCase) ||
+        !string.Equals(incoming.AgentId, agentId, StringComparison.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    if ((stored.State is UpdateJobState.Completed or UpdateJobState.Failed or UpdateJobState.Cancelled) &&
+        incoming.State is not (UpdateJobState.Completed or UpdateJobState.Failed or UpdateJobState.Cancelled))
+    {
+        return false;
+    }
+
+    return incoming.UpdatedAt >= stored.UpdatedAt;
+}
+
 app.MapPost("/api/agents/checkin", async (
     AgentCheckInRequest request,
     LabStore labStore,
@@ -107,24 +158,35 @@ app.MapPost("/api/agents/checkin", async (
     if (summary is not null)
     {
         var previous = await labStore.GetJobAsync(summary.JobId, cancellationToken);
-
-        if (request.Telemetry.CurrentJobDetail is { } detail)
-        {
-            await labStore.SaveJobAsync(detail, request.Agent.MachineName, cancellationToken);
-        }
-        else
-        {
-            await labStore.SaveJobSummaryAsync(summary, request.Agent.MachineName, cancellationToken);
-        }
-
-        if (previous is null || previous.Summary.State != summary.State)
+        if (!CanAcceptJobState(previous, summary, request.Agent.AgentId))
         {
             await labStore.AddAuditAsync(
                 "agent",
-                "job-state",
+                "job-state-rejected",
                 $"{request.Agent.MachineName}/{summary.JobId}",
-                $"{previous?.Summary.State.ToString() ?? "없음"} → {summary.State} ({summary.Phase})",
+                $"소유자/종료 상태/시간 순서 검증 실패: {summary.State} ({summary.Phase})",
                 cancellationToken);
+        }
+        else
+        {
+            if (request.Telemetry.CurrentJobDetail is { } detail)
+            {
+                await labStore.SaveJobAsync(detail, request.Agent.MachineName, cancellationToken);
+            }
+            else
+            {
+                await labStore.SaveJobSummaryAsync(summary, request.Agent.MachineName, cancellationToken);
+            }
+
+            if (previous is null || previous.Summary.State != summary.State)
+            {
+                await labStore.AddAuditAsync(
+                    "agent",
+                    "job-state",
+                    $"{request.Agent.MachineName}/{summary.JobId}",
+                    $"{previous?.Summary.State.ToString() ?? "없음"} → {summary.State} ({summary.Phase})",
+                    cancellationToken);
+            }
         }
     }
 

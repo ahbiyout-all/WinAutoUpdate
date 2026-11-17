@@ -116,11 +116,8 @@ public sealed class SessionWatcherService : BackgroundService
 
     private bool IsHelperAlive(int sessionId)
     {
-        if (!_launched.TryGetValue(sessionId, out var info))
-        {
-            return false;
-        }
-
+        // 서비스가 재시작되면 _launched가 비어 있지만 이전 helper는 여전히 살아 있을 수 있다.
+        // 항상 실제 프로세스를 확인해 같은 세션에 오버레이가 두 개 뜨는 것을 막는다.
         try
         {
             var processes = System.Diagnostics.Process.GetProcessesByName("UpdateAgent.SessionHelper");

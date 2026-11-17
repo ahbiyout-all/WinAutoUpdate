@@ -126,7 +126,7 @@ C:\ProgramData\UpdateAgent\    ← MSI가 소유하지 않음 (제거해도 보�
 | 항목 | 값 | 비고 |
 |---|---|---|
 | `Name` | `UpdateAgent Agent` | ARP 표시 이름 |
-| `Manufacturer` | `UpdateAgent` | |
+| `Manufacturer` | `AhBiYout` | 작성자/게시자와 일치 |
 | `UpgradeCode` | `{58D1BA8F-C2D1-4A36-B944-063870B8F361}` | **첫 배포 후 절대 변경 금지** |
 | `ProductCode` | `*` (빌드 시 자동 생성) | 빌드마다 새 GUID |
 | `Version` | `$(var.ProductVersion)` | `Directory.Build.props`의 `<Version>`에서 변환 |
@@ -446,8 +446,8 @@ installer\
 artifacts\
   staging\                    ← build-msi.ps1이 만드는 임시 게시물
   msi\
-    UpdateAgent.Agent-0.1.0-x64.msi
-    UpdateAgent.Agent-0.1.0-x64.msi.sha256
+    UpdateAgent.Agent-0.1.1-x64.msi
+    UpdateAgent.Agent-0.1.1-x64.msi.sha256
     build-info.json
 ```
 
@@ -458,7 +458,7 @@ artifacts\
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
-    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.0</ProductVersion>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.1</ProductVersion>
     <PublishRoot Condition="'$(PublishRoot)' == ''">$(MSBuildThisFileDirectory)..\..\publish</PublishRoot>
     <DefineConstants>ProductVersion=$(ProductVersion);PublishRoot=$(PublishRoot)</DefineConstants>
   </PropertyGroup>
@@ -519,7 +519,7 @@ self-contained 게시물이 약 413MB이므로, CAB 압축 후 MSI는 대략 150
 ### 8-6. 재현성
 
 - `WixToolset.Sdk/5.0.2`은 NuGet에서 복원합니다. 오프라인 빌드가 필요하면 패키지를 내부 피드에 캐시합니다.
-- `wix msi validate`는 SDK 빌드가 아니라 **`wix` .NET 도구**가 필요합니다. 저장소 루트의 `dotnet-tools.json`(.NET 10 도구 매니페스트)에 `wix` 5.0.2을 고정하고 `dotnet tool restore` 후 `dotnet wix msi validate ...`로 실행합니다.
+- `wix msi validate`는 SDK 빌드가 아니라 **`wix` .NET 도구**가 필요합니다. 저장소의 `.config/dotnet-tools.json`(.NET 10 도구 매니페스트)에 `wix` 5.0.2을 고정하고 `dotnet tool restore` 후 `dotnet wix msi validate ...`로 실행합니다.
 - .NET 호스트 exe는 언어가 중립(Language=0)이라 ICE60 경고가 발생합니다. 실제 결함이 아니므로 wixproj의 `SuppressIces`와 검증 명령의 `-sice ICE60`으로 억제합니다.
 - `build-msi.ps1`은 `-t:Rebuild`로 빌드해, 게시물 타임스탬프가 오래되어도 이전 MSI를 재사용하지 않도록 합니다.
 - 빌드 산출물에 커밋 해시를 기록해 어떤 소스로 만든 MSI인지 추적합니다.
@@ -715,7 +715,7 @@ msiexec /x ".\UpdateAgent.Agent-0.1.0-x64.msi" /qn /norestart /l*v ".\uninstall.
 
 ### 파일럿 전 추가 확인
 
-- [ ] `dotnet test` 전체 통과 (56개)
+- [ ] `dotnet test` 전체 통과 (66개)
 - [ ] `dotnet build UpdateAgent.sln` 경고 0/오류 0
 - [ ] MSI SHA-256 기록
 - [ ] 서명 검증 (`signtool verify /pa /all`)
@@ -757,7 +757,7 @@ msiexec /x ".\UpdateAgent.Agent-0.1.0-x64.msi" /qn /norestart /l*v ".\uninstall.
 
 | # | 항목 | 상태 |
 |---|---|---|
-| 1 | 코드 변경 (`agent.json`, `AgentVersion`, SessionHelper 폴백) + 단위 테스트 | 완료 (테스트 56개 통과) |
+| 1 | 코드 변경 (`agent.json`, `AgentVersion`, SessionHelper 폴백) + 단위 테스트 | 완료 (테스트 66개 통과) |
 | 2 | WiX 프로젝트 + `Package.wxs` | 완료 |
 | 3 | 정제된 `appsettings.json` 템플릿, `notice.ko.rtf` | 완료 |
 | 3-1 | `ko-KR.wxl` 한국어 WixUI 번역 (Control 테이블 검증) | 완료 |
@@ -771,7 +771,7 @@ msiexec /x ".\UpdateAgent.Agent-0.1.0-x64.msi" /qn /norestart /l*v ".\uninstall.
 알려진 빌드 환경 특이사항:
 
 - WiX 5.0.2는 NuGet에서 자동 복원됩니다. 오프라인 빌드는 내부 피드 캐시가 필요합니다.
-- 검증 도구는 저장소 루트 `dotnet-tools.json`으로 고정되어 있습니다 (`dotnet tool restore`).
+- 검증 도구는 `.config/dotnet-tools.json`으로 고정되어 있습니다 (`dotnet tool restore`).
 - ICE60은 .NET 호스트 exe의 언어 중립 때문에 억제합니다.
 - `ko-KR.wxl` 때문에 MSI는 `installer\...\bin\x64\Release\ko-KR\`에 생성됩니다. `build-msi.ps1`이 찾아서 `artifacts\msi`로 복사합니다.
 - WiX 프로젝트 출력 경로를 직접 확인할 때는 위 하위 폴더를 포함하세요.

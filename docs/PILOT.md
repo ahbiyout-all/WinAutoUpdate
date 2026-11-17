@@ -51,7 +51,7 @@ dotnet build UpdateAgent.sln
 dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj
 ```
 
-기대 결과: 빌드 경고 0/오류 0, 테스트 40개 통과.
+기대 결과: 빌드 경고 0/오류 0, 테스트 66개 통과.
 
 ## 2. 게시
 
@@ -108,21 +108,32 @@ Get-NetIPAddress -AddressFamily IPv4 |
 
 학생 PC에서 접근할 IP를 기록합니다. (예: `192.168.0.10`)
 
-### 3-4. 실행
+### 3-4. 실행 (브라우저 앱 모드)
 
-`appsettings.json`을 읽도록 **게시 폴더에서** 실행합니다.
+3-1에서 설정한 토큰이 `publish\labmanager\appsettings.json`에 있는지 확인합니다.
+기본 토큰(`change-me-*`)이면 서버가 시작되지 않습니다.
+
+`appsettings.json`을 읽도록 **게시 폴더에서** 런처를 실행합니다.
 
 ```powershell
 Set-Location .\publish\labmanager
-.\UpdateAgent.LabManager.exe
+.\UpdateAgent.LabManager.Desktop.exe
 ```
 
+- 런처가 서버가 없으면 `UpdateAgent.LabManager.exe --headless`를 자동 시작합니다.
+- Edge를 우선 감지하고, 없으면 Chrome을 찾아 주소창/툴바 없는 `--app=` 창을 엽니다.
+- 전용 프로필: `%LOCALAPPDATA%\UpdateAgent\LabManager\browser-profile`
+- 관리자 토큰은 해당 프로필의 `localStorage` 키 `ua_admin_token`에 저장됩니다.
+- 업데이트 알림 닫기 상태는 `sessionStorage` 키 `ua_dismissed_update_version`에 저장됩니다.
+- **앱 모드 창을 닫아도 서버는 계속 실행**되어 학생 PC 체크인을 유지합니다.
+  서버를 종료하려면 `UpdateAgent.LabManager.exe` 프로세스를 별도로 종료하세요.
 - 대시보드: `http://localhost:5080`
 - 원격 접속: `http://<교사-PC-IP>:5080`
 - 데이터: `%LOCALAPPDATA%\UpdateAgent\LabManager\labmanager.db`
 - 로그: `%LOCALAPPDATA%\UpdateAgent\LabManager\logs\`
 
 대시보드 우측 상단에 **관리자 토큰**을 입력합니다.
+서버만 띄우려면 `.\UpdateAgent.LabManager.exe`를 직접 실행해도 됩니다.
 
 ## 4. 학생 PC 설치
 
@@ -149,7 +160,7 @@ Phase 0 파일럿에서는 Inno Setup을 먼저 검증하고, 문제가 있으�
 ```powershell
 Set-Location "<복사한 폴더>"
 
-.\UpdateAgent.Agent-Setup-0.1.0-x64.exe `
+.\UpdateAgent.Agent-Setup-0.1.1-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LabManagerUrl=http://<교사-PC-IP>:5080 `
   /AgentTokenFile="<agent-token.txt 경로>"
@@ -179,7 +190,7 @@ Set-Location "<복사한 폴더>"
 
 $env:UPDATEAGENT_AGENT_TOKEN = Get-Content "<agent-token.txt 경로>" -Raw
 .\scripts\install-agent-msi.ps1 `
-  -MsiPath ".\UpdateAgent.Agent-0.1.0-x64.msi" `
+  -MsiPath ".\UpdateAgent.Agent-0.1.1-x64.msi" `
   -LabManagerUrl "http://<교사-PC-IP>:5080" `
   -ConfirmMaestro
 ```

@@ -41,6 +41,7 @@ Edge를 우선, 없으면 Chrome을 찾아 `--app=http://127.0.0.1:5080/` 창을
 | `src/UpdateAgent.LabManager.Desktop` | 교사 PC 런처. Edge/Chrome 감지 후 `--app=` 창으로 대시보드 실행 |
 | `src/UpdateAgent.Cli` | 로컬 CLI (scan/preflight/run/status/maestro/pause/cancel) |
 | `tests/UpdateAgent.Tests` | xUnit 단위 테스트 |
+| `desktop/tauri` | 독립 실험용 Tauri 2 스캐폴드. LabManager/인스톨러/릴리스에는 포함되지 않음 |
 | `installer/InnoSetup` | Inno Setup 6 설치 스크립트 (권장, 학생/교사 PC) |
 | `installer/UpdateAgent.Agent.Installer` | WiX MSI 패키지 (대안, 학생 PC 에이전트) |
 | `scripts/` | 파일럿 게시/설치 프로그램/설정/서비스 설치·제거/방화벽 스크립트 |
@@ -87,7 +88,7 @@ dotnet build UpdateAgent.sln
 dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj
 ```
 
-현재 기준: 빌드 경고 0 / 오류 0, 테스트 56개 통과.
+현재 기준: 빌드 경고 0 / 오류 0, 테스트 66개 통과.
 
 MSI는 솔루션 빌드에 포함되지 않습니다(일반 빌드에 WiX 복원을 강제하지 않기 위해).
 설치 프로그램이 필요하면 `publish.ps1` 후 `build-inno.ps1`(권장) 또는 `build-msi.ps1`을 실행합니다.
@@ -182,6 +183,11 @@ publish\cli
 dotnet run --project src/UpdateAgent.LabManager
 # 기본 주소: http://0.0.0.0:5080, 대시보드: http://localhost:5080
 ```
+
+> 기본 토큰(`change-me-*`)으로는 서버가 시작되지 않습니다. 먼저
+> `configure-labmanager.ps1`을 실행하거나 `LabManager__AdminToken` /
+> `LabManager__AgentToken` 환경 변수를 설정하세요. 로컬 개발에서만
+> `LabManager__AllowDefaultTokens=true`를 사용할 수 있습니다.
 
 - 데이터베이스: `%LOCALAPPDATA%\UpdateAgent\LabManager\labmanager.db`
 - 로그: 같은 폴더의 `logs\`

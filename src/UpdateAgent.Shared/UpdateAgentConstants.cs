@@ -50,11 +50,11 @@ public static class UpdateAgentConstants
     /// <summary>개발자 이름.</summary>
     public const string DeveloperName = "AhBiYout";
 
-    /// <summary>GitHub 계정(개발자명).</summary>
-    public const string GitHubOwner = "AhBiYout-all";
+    /// <summary>GitHub 계정(조직/사용자). 실제 원격과 일치해야 한다.</summary>
+    public const string GitHubOwner = "ahbiyout-all";
 
-    /// <summary>GitHub 저장소 이름. 앱 이름과 동일하게 유지한다.</summary>
-    public const string GitHubRepositoryName = "UpdateAgent";
+    /// <summary>GitHub 저장소 이름. 실제 원격과 일치해야 한다.</summary>
+    public const string GitHubRepositoryName = "WinAutoUpdate";
 
     public static string GitHubRepositoryUrl => $"https://github.com/{GitHubOwner}/{GitHubRepositoryName}";
 
