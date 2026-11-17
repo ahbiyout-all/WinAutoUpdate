@@ -21,7 +21,7 @@
 | 위치 | 반영 방법 |
 |---|---|
 | 어셈블리/파일 버전 | MSBuild가 빌드 시 자동 적용 |
-| LabManager 대시보드 버전 배지 | `UpdateAgentConstants.AgentVersion` |
+| LabManager 데스크톱 콘솔 버전 배지 | `UpdateAgentConstants.AgentVersion` |
 | GitHub API 현재 버전 비교 | `GitHubReleaseChecker` |
 | Inno Setup `AppVersion`/파일 이름 | `scripts\build-inno.ps1` |
 | MSI `ProductVersion`/파일 이름 | `scripts\build-msi.ps1` |
@@ -50,7 +50,7 @@ github-push.ps1
 ```
 
 LabManager는 30분마다(강제 확인 시 즉시) GitHub Releases API를 조회하고,
-새 버전이 있으면 대시보드에 팝업을 띄웁니다.
+새 버전이 있으면 데스크톱 관리 콘솔에 팝업을 띄웁니다. 팝업의 링크는 OS 기본 브라우저로 열립니다.
 
 ## 3. 로컬에서 릴리스하기
 
@@ -178,14 +178,15 @@ UpdateAgent.Agent-<버전>-x64.msi        (대안)
 
 1. LabManager가 `GET https://api.github.com/repos/AhBiYout-all/UpdateAgent/releases/latest`를 호출합니다.
 2. 현재 버전과 태그를 숫자로 비교합니다.
-3. 새 버전이면 대시보드에 팝업을 표시합니다.
+3. 새 버전이면 데스크톱 관리 콘솔에 팝업을 표시합니다.
    - 현재/최신 버전
    - 릴리스 노트
    - 자산 이름/크기
-   - GitHub 저장소/릴리스/블로그 링크
-   - `업데이트 다운로드` 버튼(자산 URL)
-4. 사용자가 닫으면 해당 버전은 세션 동안 다시 표시하지 않습니다.
-5. 30분마다 다시 확인하며, 대시보드의 새로고침/강제 확인으로 즉시 조회할 수 있습니다.
+   - GitHub 저장소/릴리스 링크
+   - `업데이트 내려받기` 버튼(자산 URL)
+   - 링크는 OS 기본 브라우저로 열리며 앱 안에 브라우저를 띄우지 않습니다.
+4. 사용자가 `나중에`를 누르면 해당 버전은 `desktop-settings.json`에 기록되어 다시 표시하지 않습니다.
+5. 30분마다 다시 확인하며, 상단 버전 배지를 누르면 즉시 강제 확인할 수 있습니다.
 
 업데이트 확인은 **읽기 전용**입니다. 자동으로 설치 파일을 내려받아 실행하지 않으며,
 교사가 다운로드 버튼을 눌러 설치 파일을 받은 뒤 직접 실행합니다.
@@ -194,7 +195,7 @@ UpdateAgent.Agent-<버전>-x64.msi        (대안)
 
 | 증상 | 원인 | 해결 |
 |---|---|---|
-| 대시보드에 업데이트가 안 뜸 | 저장소가 비공개 | 공개 저장소로 전환하거나 API 토큰 지원 추가(2단계) |
+| 데스크톱 콘솔에 업데이트가 안 뜸 | 저장소가 비공개 | 공개 저장소로 전환하거나 API 토큰 지원 추가(2단계) |
 | "확인 실패"만 표시 | 네트워크/프록시/GitHub API 차단 | 교사 PC에서 `https://api.github.com` 접속 확인 |
 | 최신 버전인데 팝업이 뜸 | `Directory.Build.props` 버전이 태그보다 낮음 | 버전을 올리고 새 태그로 릴리스 |
 | `.msi`가 다운로드됨 | 릴리스에 `*Setup*.exe`가 없음 | Inno Setup 설치 파일을 릴리스에 첨부 |
@@ -234,6 +235,6 @@ UpdateAgent.Agent-<버전>-x64.msi        (대안)
 
 - [ ] GitHub Release에 Inno Setup 파일 2개가 있는가
 - [ ] 태그(`v<버전>`)와 `Directory.Build.props` 버전이 같은가
-- [ ] LabManager 대시보드에서 새 버전 팝업이 뜨는가
+- [ ] LabManager 데스크톱 콘솔에서 새 버전 팝업이 뜨는가
 - [ ] 다운로드 버튼이 올바른 자산을 가리키는가
 - [ ] `docs/WORKLOG.md`에 릴리스 내용을 기록했는가

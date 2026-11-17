@@ -3,9 +3,9 @@
 Publishes the UpdateAgent LabManager, Service, SessionHelper and CLI for a pilot deployment.
 
 .DESCRIPTION
-Produces four self-contained (or framework-dependent) folders:
+Produces four self-contained (or framework-dependent) folders from five projects:
 
-  publish\labmanager          Teacher PC web dashboard/API
+  publish\labmanager          Teacher PC headless API + native WPF desktop client
   publish\agent\service       Student PC Windows service
   publish\agent\sessionhelper Student PC overlay helper (WPF)
   publish\cli                 Optional local CLI for scan/preflight/status/maestro
@@ -46,33 +46,46 @@ $projects = @(
         Name    = "LabManager"
         Project = Join-Path $repoRoot "src\UpdateAgent.LabManager\UpdateAgent.LabManager.csproj"
         Output  = Join-Path $OutputRoot "labmanager"
+        Clean   = $true
+    },
+    [pscustomobject]@{
+        # 두 실행 파일을 같은 폴더에 설치해야 하므로 이 게시에서는 출력을 비우지 않는다.
+        Name    = "LabManagerDesktop"
+        Project = Join-Path $repoRoot "src\UpdateAgent.LabManager.Desktop\UpdateAgent.LabManager.Desktop.csproj"
+        Output  = Join-Path $OutputRoot "labmanager"
+        Clean   = $false
     },
     [pscustomobject]@{
         Name    = "Service"
         Project = Join-Path $repoRoot "src\UpdateAgent.Service\UpdateAgent.Service.csproj"
         Output  = Join-Path $OutputRoot "agent\service"
+        Clean   = $true
     },
     [pscustomobject]@{
         Name    = "SessionHelper"
         Project = Join-Path $repoRoot "src\UpdateAgent.SessionHelper\UpdateAgent.SessionHelper.csproj"
         Output  = Join-Path $OutputRoot "agent\sessionhelper"
+        Clean   = $true
     },
     [pscustomobject]@{
         Name    = "Cli"
         Project = Join-Path $repoRoot "src\UpdateAgent.Cli\UpdateAgent.Cli.csproj"
         Output  = Join-Path $OutputRoot "cli"
+        Clean   = $true
     }
 )
 
 $selfContained = if ($FrameworkDependent) { "false" } else { "true" }
 
 if ($AgentOnly) {
-    $projects = @($projects | Where-Object { $_.Name -ne "LabManager" })
-    Write-Host "Agent-only publish: LabManager will not be published." -ForegroundColor Yellow
+    $projects = @($projects | Where-Object {
+        $_.Name -ne "LabManager" -and $_.Name -ne "LabManagerDesktop"
+    })
+    Write-Host "Agent-only publish: LabManager and its desktop client will not be published." -ForegroundColor Yellow
 }
 
 foreach ($project in $projects) {
-    if (-not $NoClean -and (Test-Path -LiteralPath $project.Output)) {
+    if (-not $NoClean -and $project.Clean -and (Test-Path -LiteralPath $project.Output)) {
         Remove-Item -LiteralPath $project.Output -Recurse -Force
     }
     New-Item -ItemType Directory -Force -Path $project.Output | Out-Null
@@ -109,7 +122,7 @@ if ($AgentOnly) {
     Write-Host "  5) Full runbook: docs\PILOT.md (installers: docs\INSTALLER.md, release: docs\RELEASE.md)"
 } else {
     Write-Host "Next steps:"
-    Write-Host "  1) Teacher PC: scripts\configure-labmanager.ps1, then start publish\labmanager\UpdateAgent.LabManager.exe"
+    Write-Host "  1) Teacher PC: scripts\configure-labmanager.ps1, then start publish\labmanager\UpdateAgent.LabManager.Desktop.exe"
     Write-Host "  2) Installer (recommended): scripts\build-inno.ps1 -> artifacts\inno\*Setup*.exe"
     Write-Host "     Alternative MSI: scripts\build-msi.ps1 -> artifacts\msi\UpdateAgent.Agent-<version>-x64.msi"
     Write-Host "  3) Student PC (Inno): UpdateAgent.Agent-Setup-<version>-x64.exe /VERYSILENT /LabManagerUrl <url>"

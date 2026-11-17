@@ -145,7 +145,8 @@ function Get-BlockedEntries {
         ".lnk", ".url"
     )
     $blockedFolders = @("docs", "doc", "samples", "examples", "portable")
-    $blockedNames = @("web.config")
+    # 웹 UI 제거 후 남는 빈 정적 자산 매니페스트도 설치하지 않는다.
+    $blockedNames = @("web.config", "updateagent.labmanager.staticwebassets.endpoints.json")
 
     $blocked = New-Object System.Collections.Generic.List[string]
 
@@ -242,6 +243,7 @@ Assert-PublishFolder $sessionHelperSource "UpdateAgent.SessionHelper.exe"
 Assert-PublishFolder $cliSource "UpdateAgent.Cli.exe"
 if (-not $AgentOnly) {
     Assert-PublishFolder $labManagerSource "UpdateAgent.LabManager.exe"
+    Assert-PublishFolder $labManagerSource "UpdateAgent.LabManager.Desktop.exe"
 }
 
 $buildTarget = if ($AgentOnly) { "agent" } else { "agent+labmanager" }
@@ -306,8 +308,8 @@ if (-not $SkipValidation) {
     if (-not $AgentOnly) {
         Assert-IncludedFileSet -Root $labManagerStage -Label "LabManager" -RequiredFiles @(
             "UpdateAgent.LabManager.exe",
-            "appsettings.json",
-            "wwwroot\index.html"
+            "UpdateAgent.LabManager.Desktop.exe",
+            "appsettings.json"
         )
     }
 }

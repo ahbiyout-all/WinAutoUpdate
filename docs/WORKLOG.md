@@ -5,6 +5,56 @@
 
 ---
 
+## 2026-11-17 — 브라우저 대시보드 제거 및 네이티브 WPF 관리 콘솔 도입
+
+### 목적
+
+- 교사용 화면을 WebView2/브라우저 프레임 없이 네이티브 WPF 앱으로 제공.
+- LabManager는 헤드리스 HTTP API만 담당하고, 상태는 서버가 계속 원본으로 유지.
+- 창 닫기 = 앱 종료, 외부 링크는 OS 기본 브라우저로만 열기.
+
+### 변경
+
+| 파일 | 내용 |
+|---|---|
+| `src/UpdateAgent.LabManager.Desktop/` | 신규 WPF 프로젝트. 메인 창/다이얼로그/API 클라이언트/DPAPI 설정/서버 자동 시작 |
+| `src/UpdateAgent.LabManager/Program.cs` | `--headless`/`--no-window` 플래그 필터, `UseDefaultFiles`/`UseStaticFiles` 제거 |
+| `src/UpdateAgent.LabManager/wwwroot/` | 브라우저 대시보드(`index.html`, `app.js`, `styles.css`) 완전 삭제 |
+| `scripts/publish.ps1` | Desktop 프로젝트를 `publish\labmanager`에 함께 게시, `-AgentOnly`에서 제외 |
+| `scripts/build-inno.ps1` | Desktop exe 필수 파일 검사, 빈 정적 자산 매니페스트 차단 |
+| `installer/InnoSetup/UpdateAgent.LabManager.iss` | 바로가기/[Run]/아이콘을 Desktop exe로 변경, 두 LabManager 프로세스 종료, 레거시 `wwwroot` 삭제 |
+| `README.md`, `docs/INSTALLER.md`, `docs/RELEASE.md` | 네이티브 콘솔, DPAPI 토큰, 헤드리스 서버, 기본 브라우저 링크 반영 |
+
+### 주요 동작
+
+- 데스크톱 앱이 로컬 API 서버를 준비한다. 없으면 같은 폴더의 `UpdateAgent.LabManager.exe --headless`를 실행하고,
+  종료 시 자신이 시작한 프로세스만 정리한다.
+- 관리자 토큰은 `X-Admin-Token` 헤더로 전달하고, DPAPI로 암호화해
+  `%LOCALAPPDATA%\UpdateAgent\LabManager\admin-token.bin`에 저장한다.
+- 5초 폴링으로 요약 카드/에이전트/작업/감사 로그를 갱신하고, 30분 간격으로 GitHub Releases를 확인한다.
+- 작업 시작/상세/Maestro 확인/토큰/업데이트 다이얼로그와 토스트를 네이티브 창으로 구현했다.
+
+### 런타임 스모크 테스트에서 발견한 문제와 수정
+
+| 증상 | 원인 | 수정 |
+|---|---|---|
+| 앱 시작 직후 "LabManager 서버에 연결할 수 없습니다" 표시 | 일부 환경에서 `localhost` DNS 해석이 약 2.1초 걸려 2초 헬스체크 타임아웃 초과 (`127.0.0.1`은 2ms) | 헬스체크 타임아웃을 6초로 늘리고 로컬 주소는 `127.0.0.1`로 확인. API 클라이언트도 HTTP `localhost`를 `127.0.0.1`로 정규화 |
+| 메인 창이 뜨자마자 앱이 크래시 (`InvalidOperationException: TwoWay … 읽기 전용 속성 'JobProgress'`) | `ProgressBar.Value`가 기본 TwoWay 바인딩인데 `JobProgress`/`Progress`가 읽기 전용 | 두 ProgressBar 바인딩에 `Mode=OneWay` 명시 |
+
+### 검증
+
+- `dotnet build UpdateAgent.sln -c Release`: 경고 0개, 오류 0개.
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --no-build`: 56개 통과.
+- `scripts\publish.ps1`: LabManager 폴더에 두 exe 생성, `wwwroot` 없음 확인.
+- `scripts\build-inno.ps1`: Agent/LabManager 설치 파일 2개 빌드 성공.
+- `.iss` 두 파일 모두 UTF-8 BOM 유지 확인.
+- 데스크톱 앱 실행: 제목 `UpdateAgent · 교사 관리 콘솔`, v0.1.0 배지, 통계 카드/에이전트/작업/감사 탭 렌더링, 연결 오류 없음.
+- 서버가 없을 때 자동 시작, 창 닫기 시 앱과 자동 시작 서버 종료 확인.
+- 서버가 이미 실행 중이면 재사용하고 창을 닫아도 서버를 유지함을 확인.
+- 헤드리스 API 스모크 테스트: `/api/health`, `/api/admin/overview|agents|jobs|audit|update` 응답 확인.
+
+---
+
 ## 2026-11-16 — build.bat 및 에이전트 전용 빌드 경로
 
 ### 목적

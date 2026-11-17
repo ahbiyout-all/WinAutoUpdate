@@ -11,7 +11,15 @@ using UpdateAgent.Shared;
 using UpdateAgent.Shared.Models;
 using UpdateAgent.Shared.Serialization;
 
-var builder = WebApplication.CreateBuilder(args);
+// --headless/--no-window는 데스크톱 클라이언트가 서버를 조용히 띄울 때 전달하는 플래그다.
+// 웹 UI는 제거되었으므로 이 서버는 항상 헤드리스 API만 제공한다.
+var hostArgs = args
+    .Where(argument =>
+        !argument.StartsWith("--headless", StringComparison.OrdinalIgnoreCase) &&
+        !argument.StartsWith("--no-window", StringComparison.OrdinalIgnoreCase))
+    .ToArray();
+
+var builder = WebApplication.CreateBuilder(hostArgs);
 
 builder.Host.UseSerilog((context, logger) => logger
     .ReadFrom.Configuration(context.Configuration)
@@ -59,9 +67,7 @@ app.UseSerilogRequestLogging(options =>
     options.MessageTemplate = "{RequestMethod} {RequestPath} → {StatusCode} ({Elapsed:0.0} ms)";
 });
 
-app.UseDefaultFiles();
-app.UseStaticFiles();
-
+// 브라우저 대시보드(wwwroot)는 제거되었다. 교사용 화면은 네이티브 WPF 데스크톱 앱이 담당한다.
 app.UseMiddleware<TokenAuthMiddleware>();
 
 var store = app.Services.GetRequiredService<LabStore>();

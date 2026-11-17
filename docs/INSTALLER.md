@@ -67,21 +67,28 @@ C:\ProgramData\UpdateAgent\
 
 ```text
 C:\Program Files\UpdateAgent\LabManager\
-  UpdateAgent.LabManager.exe + 런타임 DLL
-  appsettings.json    관리자/에이전트 토큰, 수신 URL
-  wwwroot\            대시보드(index.html, app.js, styles.css)
+  UpdateAgent.LabManager.Desktop.exe  네이티브 WPF 관리 콘솔 (바로가기 대상)
+  UpdateAgent.LabManager.exe          헤드리스 HTTP API 서버 + 런타임 DLL
+  appsettings.json                    관리자/에이전트 토큰, 수신 URL
   unins000.exe
 ```
 
+- 교사용 화면은 네이티브 WPF 앱입니다. WebView2/브라우저 프레임/`wwwroot`를 사용하지 않습니다.
+- 데스크톱 앱은 서버가 없으면 `UpdateAgent.LabManager.exe --headless`를 자동 실행하고,
+  종료 시 자신이 띄운 서버만 정리합니다. 이미 실행 중인 서버는 재사용합니다.
+- 관리자 토큰은 브라우저 저장소가 아니라 DPAPI로 암호화되어
+  `%LOCALAPPDATA%\UpdateAgent\LabManager\admin-token.bin`에 저장됩니다.
+  설정/창 위치는 같은 폴더의 `desktop-settings.json`에 저장됩니다.
 - `appsettings.json`은 신규 설치 시에만 생성되며, 업그레이드 시 기존 설정을 덮어쓰지 않습니다.
-- 대시보드/API 기본 포트: **5080/TCP**
+- API 기본 포트: **5080/TCP**
 
 ## 4. 설치 진행 순서
 
 요구된 순서를 그대로 따릅니다.
 
 1. **기존 앱 강제 종료**
-   - `taskkill /F`로 SessionHelper/CLI/Service(또는 LabManager) 프로세스를 종료합니다.
+   - `taskkill /F`로 SessionHelper/CLI/Service 프로세스를 종료합니다.
+   - LabManager는 `UpdateAgent.LabManager.Desktop.exe`와 `UpdateAgent.LabManager.exe`를 모두 종료합니다.
    - Agent는 `sc stop UpdateAgentService`를 먼저 실행합니다.
 2. **기존 설치 확인**
    - Inno Setup 설치 키와 MSI 등록 정보를 모두 검사합니다.
@@ -98,7 +105,8 @@ C:\Program Files\UpdateAgent\LabManager\
    - 서비스 등록/갱신, 방화벽 규칙 등록, 선택적 `agent.json` 작성.
 7. **앱 실행**
    - Agent: 서비스를 시작하고 마지막 화면에서 `UpdateAgent 상태 확인`을 실행할 수 있습니다.
-   - LabManager: 설치 완료 후 LabManager를 실행할 수 있습니다.
+   - LabManager: 설치 완료 후 **데스크톱 관리 콘솔**(`UpdateAgent.LabManager.Desktop.exe`)을 실행합니다.
+     바탕화면/시작 메뉴 바로가기도 데스크톱 콘솔을 가리킵니다.
 
 ## 5. 기존 설치 처리
 
@@ -139,8 +147,10 @@ C:\Program Files\UpdateAgent\LabManager\
 .\UpdateAgent.LabManager-Setup-0.1.0-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
-설치 후 `C:\Program Files\UpdateAgent\LabManager\appsettings.json`에서
-`AdminToken`/`AgentToken`을 변경하고 LabManager를 재시작하세요.
+설치 후 `C:\Program Files\UpdateAgent\LabManager\appsettings.json`의
+`AgentToken`을 에이전트와 동일하게 변경하세요. 관리자 토큰(`AdminToken`)은 서버 설정이면서
+데스크톱 콘솔 첫 실행 시 입력하는 값이기도 합니다. 콘솔에서 **토큰** 버튼으로 변경할 수 있으며,
+입력한 값은 DPAPI로 암호화되어 사용자 프로필에 저장됩니다.
 
 ### 설치 로그
 
@@ -173,21 +183,23 @@ C:\Program Files\UpdateAgent\LabManager\
 - 확장자: `.pdb`, `.xml`, `.md`, `.txt`, `.rtf`, `.pdf`, `.doc`, `.docx`,
   `.log`, `.tmp`, `.msi`, `.cab`, `.zip`, `.7z`, `.rar`, `.lnk`, `.url`
 - 폴더: `docs`, `doc`, `samples`, `examples`, `portable`
-- 파일: `web.config`, `appsettings.Development.json`
+- 파일: `web.config`, `appsettings.Development.json`,
+  `UpdateAgent.LabManager.staticwebassets.endpoints.json`(웹 UI 제거 후 남는 빈 매니페스트)
 
 검증 항목:
 
 - 위 패턴이 하나라도 남아 있으면 오류.
 - Agent 필수 파일: `Service\UpdateAgent.Service.exe`, `Service\appsettings.json`,
   `SessionHelper\UpdateAgent.SessionHelper.exe`, `Cli\UpdateAgent.Cli.exe`
-- LabManager 필수 파일: `UpdateAgent.LabManager.exe`, `appsettings.json`, `wwwroot\index.html`
+- LabManager 필수 파일: `UpdateAgent.LabManager.exe`, `UpdateAgent.LabManager.Desktop.exe`, `appsettings.json`
+- LabManager에 `wwwroot`가 남아 있으면 오류(이전 버전 웹 자산은 설치 시 삭제).
 
-최근 빌드 기준 포함 파일:
+최근 빌드 기준 포함 파일(WPF 런타임/리소스 포함으로 크기 증가):
 
 | 제품 | 파일 수 | 스테이징 크기 |
 |---|---|---|
 | Agent | 853 | 304.9 MB |
-| LabManager | 361 | 108.3 MB |
+| LabManager | 데스크톱 앱 포함 | WPF 런타임 DLL/리소스 포함 |
 
 ## 9. 빌드 방법
 
@@ -249,6 +261,9 @@ build\agent\<버전>\
 - Agent 제거 시 서비스와 방화벽 규칙을 함께 제거합니다.
 - `C:\ProgramData\UpdateAgent`는 제거 후에도 남습니다. 완전 삭제는 수동으로 폴더를 지웁니다.
 - LabManager의 `appsettings.json`은 업그레이드 시 유지됩니다.
+- 데스크톱 콘솔의 DPAPI 토큰(`admin-token.bin`)과 `desktop-settings.json`은
+  `%LOCALAPPDATA%`에 있어 설치/제거 영향을 받지 않습니다.
+- 이전 버전의 `wwwroot` 폴더는 설치 시 자동 삭제됩니다.
 
 ## 11. MSI와의 관계
 
@@ -271,6 +286,10 @@ build\agent\<버전>\
 - [ ] 업그레이드 후 `ProgramData\UpdateAgent\agent.json`이 유지됨
 - [ ] 제거 시 서비스/방화벽 규칙/파일이 제거되고 ProgramData는 남음
 - [ ] MSI 설치 후 Inno 설치 시 MSI가 자동 제거됨
+- [ ] LabManager 설치 후 바탕화면/시작 메뉴 바로가기가 데스크톱 콘솔을 실행함
+- [ ] 데스크톱 콘솔 첫 실행 시 토큰 입력창이 표시되고 DPAPI 파일이 생성됨
+- [ ] 서버가 없을 때 데스크톱 콘솔이 헤드리스 서버를 자동 시작하고, 창 닫기 시 함께 종료됨
+- [ ] 설치 폴더에 `wwwroot`가 없음
 
 ## 13. 알려진 제약
 

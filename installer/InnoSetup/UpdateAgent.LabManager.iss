@@ -60,7 +60,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.14393
 Uninstallable=yes
 UninstallDisplayName=UpdateAgent LabManager {#AppVersion}
-UninstallDisplayIcon={app}\UpdateAgent.LabManager.exe
+UninstallDisplayIcon={app}\UpdateAgent.LabManager.Desktop.exe
 CloseApplications=no
 RestartApplications=no
 RestartIfNeededByRun=no
@@ -77,21 +77,22 @@ Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 Name: "desktopicon"; Description: "바탕화면에 UpdateAgent LabManager 바로가기 만들기"; GroupDescription: "바로가기:"; Flags: checkedonce
 
 [Files]
-; 설치 폴더에는 실행 파일과 wwwroot만 둔다. 문서/심볼/압축 파일은 스테이징에서 제거된다.
+; 헤드리스 API 서버와 네이티브 WPF 데스크톱 클라이언트를 같은 폴더에 설치한다.
+; 문서/심볼/압축 파일은 스테이징에서 제거된다.
 Source: "{#StageRoot}\*"; DestDir: "{app}"; Excludes: "appsettings.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#StageRoot}\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
 
 [InstallDelete]
-; 이전 버전의 정적 웹 자산이 남지 않도록 교체한다(설정 파일은 유지).
+; 이전 버전의 정적 웹 자산(브라우저 대시보드)이 남지 않도록 정리한다(설정 파일은 유지).
 Type: filesandordirs; Name: "{app}\wwwroot"
 
 [Icons]
-Name: "{group}\UpdateAgent LabManager"; Filename: "{app}\UpdateAgent.LabManager.exe"; WorkingDir: "{app}"
+Name: "{group}\UpdateAgent LabManager"; Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"
 Name: "{group}\UpdateAgent LabManager 제거"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\UpdateAgent LabManager"; Filename: "{app}\UpdateAgent.LabManager.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\UpdateAgent LabManager"; Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\UpdateAgent.LabManager.exe"; WorkingDir: "{app}"; Description: "UpdateAgent LabManager 실행"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"; Description: "UpdateAgent LabManager 실행"; Flags: postinstall nowait skipifsilent
 
 [Code]
 var
@@ -154,6 +155,7 @@ var
   MessageText: String;
 begin
   { 1) 실행 중인 기존 앱을 먼저 강제 종료한다. }
+  KillProcess('UpdateAgent.LabManager.Desktop.exe');
   KillProcess('UpdateAgent.LabManager.exe');
 
   OldInnoUninstall := FindInnoUninstallString;
@@ -194,6 +196,7 @@ var
   UninstallExe: String;
 begin
   Result := '';
+  KillProcess('UpdateAgent.LabManager.Desktop.exe');
   KillProcess('UpdateAgent.LabManager.exe');
 
   if RemoveOldInstall and (OldInnoUninstall <> '') then
@@ -241,6 +244,7 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
   begin
+    KillProcess('UpdateAgent.LabManager.Desktop.exe');
     KillProcess('UpdateAgent.LabManager.exe');
     RunHidden(ExpandConstant('{sys}\netsh.exe'),
       'advfirewall firewall delete rule name=all group="' + FirewallGroup + '"');
