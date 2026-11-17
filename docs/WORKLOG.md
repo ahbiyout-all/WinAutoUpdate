@@ -5,6 +5,38 @@
 
 ---
 
+## 2026-11-17 — SessionHelper 오버레이 실행 실패 수정 / 설치 시 선(先)제거
+
+### 목적
+
+- 학생 PC에서 서비스가 `SessionHelper 실행` 로그를 1분마다 남기지만 실제 오버레이 프로세스가 남지 않는 문제 수정.
+- 설치 프로그램을 실행하면 기존 설치를 묻지 않고 먼저 제거한 뒤 설치하도록 변경.
+
+### 오버레이 원인
+
+- `SessionLauncher`는 `CreateProcessAsUserW`(`CharSet.Unicode`)를 호출하면서 `STARTUPINFO` 구조체에는
+  `CharSet`을 지정하지 않아 `lpDesktop`이 ANSI로 마셜링됨.
+- 그 결과 `winsta0\default`가 깨진 문자열로 전달되어 프로세스는 생성 직후 종료.
+- 서비스는 성공 로그만 남기고 `IsHelperAlive()`가 프로세스를 찾지 못해 60초 간격으로 재시도.
+- 같은 exe를 사용자 세션에서 수동 실행하면 정상적으로 유지되는 것으로 확인.
+
+### 변경
+
+| 파일 | 내용 |
+|---|---|
+| `src/UpdateAgent.Core/Sessions/SessionLauncher.cs` | `StartupInfo`에 `CharSet.Unicode` 지정, 불필요한 `CREATE_NEW_CONSOLE` 제거 |
+| `installer/InnoSetup/UpdateAgent.Agent.iss` | Inno/MSI 기존 설치를 무인 제거, 실패 시 설치 중단, `appsettings.json` 백업/복원 |
+| `installer/InnoSetup/UpdateAgent.LabManager.iss` | Inno 기존 설치를 무인 제거, 실패 시 설치 중단, `appsettings.json` 백업/복원 |
+| `docs/INSTALLER.md`, `docs/AI-WORK-INSTRUCTIONS.md` | 선제거 흐름과 실패 정책 반영 |
+
+### 검증
+
+- `dotnet build UpdateAgent.sln -c Release`: 경고 0개, 오류 0개.
+- 동일 exe 수동 실행(`--session 1`): 프로세스 유지 확인.
+- 설치된 서비스 재시작 및 로그 확인은 관리자 권한이 있는 PC/VM에서 재설치 후 수행 필요.
+
+---
+
 ## 2026-11-17 — 브라우저 앱 모드 대시보드로 전환 (최종)
 
 ### 목적

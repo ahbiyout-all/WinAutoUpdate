@@ -90,12 +90,13 @@ C:\Program Files\UpdateAgent\LabManager\
    - `taskkill /F`로 SessionHelper/CLI/Service 프로세스를 종료합니다.
    - LabManager는 `UpdateAgent.LabManager.Desktop.exe`와 `UpdateAgent.LabManager.exe`를 모두 종료합니다.
    - Agent는 `sc stop UpdateAgentService`를 먼저 실행합니다.
-2. **기존 설치 확인**
-   - Inno Setup 설치 키와 MSI 등록 정보를 모두 검사합니다.
-   - 있으면 `예: 삭제 후 설치 / 아니오: 덮어쓰기 / 취소`를 묻습니다.
-   - 무인 설치(`/VERYSILENT`)에서는 묻지 않고 제거 후 설치합니다.
-3. **라이선스 고지**
+2. **라이선스 고지**
    - `installer\UpdateAgent.Agent.Installer\payload\notice.ko.rtf`를 표시합니다.
+3. **기존 설치 자동 제거 (설치 직전)**
+   - Inno Setup 설치 키와 MSI 등록 정보를 모두 검사합니다.
+   - 기존 설치가 있으면 **묻지 않고** 이전 제거 프로그램을 무인 실행해 먼저 제거합니다.
+   - 제거 전 `appsettings.json`을 임시 폴더에 백업하고, 제거 후 복원합니다.
+   - 제거가 실패하면 새 설치를 중단하고 오류를 표시합니다.
 4. **설치**
    - 개별 파일을 `Program Files`에 복사합니다.
    - Agent는 `[InstallDelete]`로 이전 버전의 Service/SessionHelper/Cli 폴더를 정리한 뒤 복사합니다.
@@ -112,14 +113,16 @@ C:\Program Files\UpdateAgent\LabManager\
 
 | 기존 상태 | 동작 |
 |---|---|
-| Inno Setup Agent/LabManager 설치됨 | 삭제 후 설치 또는 덮어쓰기 선택 |
-| WiX MSI Agent 설치됨 | MSI 제품을 `msiexec /x ... /qn`으로 자동 제거 후 Inno 설치 |
+| Inno Setup Agent/LabManager 설치됨 | 이전 제거 프로그램을 무인 실행해 제거한 뒤 새로 설치 |
+| WiX MSI Agent 설치됨 | MSI 제품을 `msiexec /x ... /qn`으로 자동 제거한 뒤 Inno 설치 |
 | 레거시 스크립트 설치(`C:\ProgramData\UpdateAgent\app`) | 감지 후 안내만 표시, 필요 시 수동 제거 |
-| 무인 설치 | 항상 제거 후 설치(설정 데이터는 보존) |
+| 모든 경우(대화형/무인) | 묻지 않고 항상 제거 후 설치(설정 데이터는 보존) |
 
-- "덮어쓰기"는 `ProgramData\UpdateAgent`의 설정을 유지하면서 설치 파일만 교체합니다.
-- "삭제 후 설치"는 이전 Inno 제거 프로그램을 무인 실행한 뒤 새로 설치합니다.
-- 이전 버전 제거가 실패하면 덮어쓰기로 계속 진행하고 메시지를 표시합니다.
+- 제거 직전 `appsettings.json`을 `%TEMP%`에 백업하고, 제거가 끝나면 복원합니다.
+  - Agent: `C:\Program Files\UpdateAgent\Service\appsettings.json`
+  - LabManager: `C:\Program Files\UpdateAgent\LabManager\appsettings.json`
+- `C:\ProgramData\UpdateAgent\agent.json`은 제거 대상이 아니므로 그대로 유지됩니다.
+- 이전 버전 제거가 실패하면 오류를 표시하고 **새 설치를 중단합니다.** 덮어쓰기로 이어가지 않습니다.
 
 ## 6. 무인 설치
 
@@ -257,11 +260,12 @@ build\agent\<버전>\
 
 ## 10. 업그레이드와 제거
 
-- 업그레이드: 새 설치 파일을 실행하면 AppID 기준으로 기존 설치를 인식합니다.
+- 업그레이드: 새 설치 파일을 실행하면 AppID/MSI 등록 정보를 기준으로 기존 설치를 찾아
+  묻지 않고 먼저 제거한 뒤 설치합니다. 실패하면 설치를 중단하고 오류를 표시합니다.
 - 제거: 설정 → 앱 → `UpdateAgent Agent <버전>` / `UpdateAgent LabManager <버전>` → 제거.
 - Agent 제거 시 서비스와 방화벽 규칙을 함께 제거합니다.
 - `C:\ProgramData\UpdateAgent`는 제거 후에도 남습니다. 완전 삭제는 수동으로 폴더를 지웁니다.
-- LabManager의 `appsettings.json`은 업그레이드 시 유지됩니다.
+- LabManager의 `appsettings.json`은 업그레이드 시 백업/복원으로 유지됩니다.
 - 앱 모드 브라우저 프로필(`browser-profile`)과 `desktop-settings.json`은
   `%LOCALAPPDATA%`에 있어 설치/제거 영향을 받지 않습니다.
 - `wwwroot` 대시보드는 설치 시 항상 최신 파일로 덮어써집니다.
@@ -282,9 +286,10 @@ build\agent\<버전>\
 - [ ] 바탕화면 바로가기 체크/해제가 동작함
 - [ ] 설치 완료 후 서비스가 `Running`
 - [ ] 방화벽 규칙 2개(기본/버전)가 그룹과 함께 등록됨
-- [ ] 기존 설치 위에 실행 시 삭제/덮어쓰기/취소 프롬프트가 표시됨
+- [ ] 기존 설치 위에 실행 시 묻지 않고 이전 버전이 자동 제거된 뒤 설치됨
 - [ ] `/VERYSILENT` 설치가 프롬프트 없이 완료됨
-- [ ] 업그레이드 후 `ProgramData\UpdateAgent\agent.json`이 유지됨
+- [ ] 이전 제거가 실패하면 오류가 표시되고 설치가 중단됨
+- [ ] 업그레이드 후 `ProgramData\UpdateAgent\agent.json`과 `appsettings.json`이 유지됨
 - [ ] 제거 시 서비스/방화벽 규칙/파일이 제거되고 ProgramData는 남음
 - [ ] MSI 설치 후 Inno 설치 시 MSI가 자동 제거됨
 - [ ] LabManager 설치 후 바탕화면/시작 메뉴 바로가기가 런처를 실행함

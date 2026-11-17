@@ -3,8 +3,8 @@
 ;
 ;  설치 흐름
 ;    1) 실행 중인 기존 앱 강제 종료
-;    2) 기존 설치 감지 시 삭제/덮어쓰기/취소 확인
-;    3) 라이선스 고지
+;    2) 라이선스 고지
+;    3) 설치 직전 기존 설치 자동 감지 후 무인 제거(설정 파일은 백업/복원)
 ;    4) 개별 파일(Unpacked Multi-File) 설치
 ;    5) 바탕화면 바로가기 선택
 ;    6) 방화벽 규칙(기본 이름/버전 이름) 등록
@@ -93,7 +93,6 @@ Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"; Descr
 
 [Code]
 var
-  RemoveOldInstall: Boolean;
   OldInnoUninstall: String;
 
 const
@@ -147,66 +146,62 @@ begin
 end;
 
 function InitializeSetup: Boolean;
-var
-  Choice: Integer;
-  MessageText: String;
 begin
   { 1) 실행 중인 기존 앱을 먼저 강제 종료한다. }
   KillProcess('UpdateAgent.LabManager.Desktop.exe');
   KillProcess('UpdateAgent.LabManager.exe');
 
+  { 2) 기존 설치는 선택 없이 PrepareToInstall에서 항상 제거한다. }
   OldInnoUninstall := FindInnoUninstallString;
-
-  if OldInnoUninstall = '' then
-  begin
-    Result := True;
-    Exit;
-  end;
-
-  if WizardSilent then
-  begin
-    RemoveOldInstall := True;
-    Result := True;
-    Exit;
-  end;
-
-  MessageText :=
-    '이 PC에는 UpdateAgent LabManager가 이미 설치되어 있습니다.' + #13#10 + #13#10 +
-    '예: 기존 버전을 삭제한 뒤 새로 설치합니다.' + #13#10 +
-    '아니오: 기존 파일 위에 덮어씁니다(설정 파일 유지).' + #13#10 +
-    '취소: 설치를 중단합니다.';
-
-  { 2) 기존 앱이 있으면 삭제/덮어쓰기/취소를 묻는다. }
-  Choice := MsgBox(MessageText, mbConfirmation, MB_YESNOCANCEL);
-
-  case Choice of
-    IDYES: begin RemoveOldInstall := True; Result := True; end;
-    IDNO: begin RemoveOldInstall := False; Result := True; end;
-  else
-    Result := False;
-  end;
+  Result := True;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Code: Integer;
-  UninstallExe: String;
+  UninstallExe, ConfigFile, BackupFile: String;
+  ConfigSaved: Boolean;
 begin
   Result := '';
   KillProcess('UpdateAgent.LabManager.Desktop.exe');
   KillProcess('UpdateAgent.LabManager.exe');
 
-  if RemoveOldInstall and (OldInnoUninstall <> '') then
+  { 이전 제거 프로그램이 appsettings.json도 삭제하므로 먼저 백업한다. }
+  ConfigFile := ExpandConstant('{app}\appsettings.json');
+  BackupFile := AddBackslash(GetTempDir) + 'UpdateAgent.LabManager.appsettings.json.bak';
+  ConfigSaved := False;
+  if FileExists(ConfigFile) then
+  begin
+    ConfigSaved := CopyFile(ConfigFile, BackupFile, False);
+    if not ConfigSaved then
+      Log('Failed to back up existing LabManager appsettings.json');
+  end;
+
+  if OldInnoUninstall <> '' then
   begin
     UninstallExe := ExtractExePath(OldInnoUninstall);
-    if (UninstallExe <> '') and FileExists(UninstallExe) then
+    if (UninstallExe = '') or not FileExists(UninstallExe) then
     begin
-      Exec(UninstallExe, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '',
-        SW_HIDE, ewWaitUntilTerminated, Code);
-      if (Code <> 0) and not WizardSilent then
-        MsgBox('기존 버전 제거에 실패하여 덮어쓰기로 진행합니다. (code ' + IntToStr(Code) + ')',
-          mbInformation, MB_OK);
+      Result := '기존 UpdateAgent LabManager 제거 프로그램을 찾을 수 없어 설치를 중단합니다.';
+      Exit;
     end;
+
+    Code := -1;
+    if not Exec(UninstallExe, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '',
+        SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+    begin
+      Result := '기존 UpdateAgent LabManager 제거에 실패했습니다. (code ' +
+        IntToStr(Code) + ') 설치를 중단합니다.';
+      Exit;
+    end;
+  end;
+
+  if ConfigSaved then
+  begin
+    ForceDirectories(ExtractFileDir(ConfigFile));
+    if not CopyFile(BackupFile, ConfigFile, False) then
+      Log('Failed to restore LabManager appsettings.json');
+    DeleteFile(BackupFile);
   end;
 end;
 

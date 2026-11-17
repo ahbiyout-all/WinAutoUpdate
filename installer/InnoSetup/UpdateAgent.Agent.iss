@@ -3,8 +3,8 @@
 ;
 ;  설치 흐름
 ;    1) 실행 중인 기존 앱 강제 종료(서비스 중지 포함)
-;    2) 기존 설치 감지 시 삭제/덮어쓰기/취소 확인
-;    3) 라이선스 고지
+;    2) 라이선스 고지
+;    3) 설치 직전 기존 설치 자동 감지 후 무인 제거(Inno/MSI, 설정 파일은 백업/복원)
 ;    4) 개별 파일(Unpacked Multi-File) 설치
 ;    5) 바탕화면 바로가기 선택
 ;    6) 서비스 등록 + 방화벽 규칙(기본 이름/버전 이름) 등록
@@ -101,7 +101,6 @@ Filename: "{cmd}"; Parameters: "/k ""{app}\Cli\UpdateAgent.Cli.exe"" status"; Wo
 
 [Code]
 var
-  RemoveOldInstall: Boolean;
   OldInnoUninstall: String;
   OldMsiProduct: String;
 
@@ -243,9 +242,6 @@ begin
 end;
 
 function InitializeSetup: Boolean;
-var
-  Choice: Integer;
-  MessageText: String;
 begin
   { 1) 실행 중인 기존 앱을 먼저 강제 종료한다. }
   KillProcess('UpdateAgent.SessionHelper.exe');
@@ -253,44 +249,17 @@ begin
   RunHidden(ExpandConstant('{sys}\sc.exe'), 'stop ' + ServiceName);
   KillProcess('UpdateAgent.Service.exe');
 
+  { 2) 기존 설치는 선택 없이 PrepareToInstall에서 항상 제거한다. }
   OldInnoUninstall := FindInnoUninstallString;
   OldMsiProduct := FindMsiProductCode;
-
-  if (OldInnoUninstall = '') and (OldMsiProduct = '') then
-  begin
-    Result := True;
-    Exit;
-  end;
-
-  { 무인 설치에서는 묻지 않고 항상 깨끗하게 제거 후 설치한다. }
-  if WizardSilent then
-  begin
-    RemoveOldInstall := True;
-    Result := True;
-    Exit;
-  end;
-
-  MessageText :=
-    '이 PC에는 UpdateAgent Agent가 이미 설치되어 있습니다.' + #13#10 + #13#10 +
-    '예: 기존 버전을 삭제한 뒤 새로 설치합니다.' + #13#10 +
-    '아니오: 기존 파일 위에 덮어씁니다(ProgramData 설정 유지).' + #13#10 +
-    '취소: 설치를 중단합니다.';
-
-  Choice := MsgBox(MessageText, mbConfirmation, MB_YESNOCANCEL);
-
-  { 2) 기존 앱이 있으면 삭제/덮어쓰기/취소를 묻는다. }
-  case Choice of
-    IDYES: begin RemoveOldInstall := True; Result := True; end;
-    IDNO: begin RemoveOldInstall := False; Result := True; end;
-  else
-    Result := False;
-  end;
+  Result := True;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Code: Integer;
-  UninstallExe: String;
+  UninstallExe, ConfigFile, BackupFile: String;
+  ConfigSaved: Boolean;
 begin
   Result := '';
 
@@ -300,29 +269,57 @@ begin
   Sleep(1200);
   KillProcess('UpdateAgent.Service.exe');
 
+  { 이전 제거 프로그램이 appsettings.json도 삭제하므로 먼저 백업한다. }
+  ConfigFile := ExpandConstant('{app}\Service\appsettings.json');
+  BackupFile := AddBackslash(GetTempDir) + 'UpdateAgent.Agent.appsettings.json.bak';
+  ConfigSaved := False;
+  if FileExists(ConfigFile) then
+  begin
+    ConfigSaved := CopyFile(ConfigFile, BackupFile, False);
+    if not ConfigSaved then
+      Log('Failed to back up existing Agent appsettings.json');
+  end;
+
   { MSI로 설치된 제품이 있으면 Inno 설치와 공존할 수 없으므로 항상 제거한다. }
   if OldMsiProduct <> '' then
   begin
-    RunHidden(ExpandConstant('{sys}\msiexec.exe'),
-      '/x ' + OldMsiProduct + ' /qn /norestart');
+    Code := -1;
+    if not Exec(ExpandConstant('{sys}\msiexec.exe'),
+        '/x ' + OldMsiProduct + ' /qn /norestart', '',
+        SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+    begin
+      Result := '기존 WiX MSI UpdateAgent Agent 제거에 실패했습니다. (code ' +
+        IntToStr(Code) + ') 설치를 중단합니다.';
+      Exit;
+    end;
     Sleep(1200);
   end;
 
-  if RemoveOldInstall and (OldInnoUninstall <> '') then
+  if OldInnoUninstall <> '' then
   begin
     UninstallExe := ExtractExePath(OldInnoUninstall);
-    if (UninstallExe <> '') and FileExists(UninstallExe) then
+    if (UninstallExe = '') or not FileExists(UninstallExe) then
     begin
-      Exec(UninstallExe, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '',
-        SW_HIDE, ewWaitUntilTerminated, Code);
-      if Code <> 0 then
-      begin
-        { 제거가 실패해도 덮어쓰기로 계속 진행한다(설정은 ProgramData에 보존). }
-        if not WizardSilent then
-          MsgBox('기존 버전 제거에 실패하여 덮어쓰기로 진행합니다. (code ' + IntToStr(Code) + ')',
-            mbInformation, MB_OK);
-      end;
+      Result := '기존 UpdateAgent Agent 제거 프로그램을 찾을 수 없어 설치를 중단합니다.';
+      Exit;
     end;
+
+    Code := -1;
+    if not Exec(UninstallExe, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '',
+        SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+    begin
+      Result := '기존 UpdateAgent Agent 제거에 실패했습니다. (code ' +
+        IntToStr(Code) + ') 설치를 중단합니다.';
+      Exit;
+    end;
+  end;
+
+  if ConfigSaved then
+  begin
+    ForceDirectories(ExtractFileDir(ConfigFile));
+    if not CopyFile(BackupFile, ConfigFile, False) then
+      Log('Failed to restore Agent appsettings.json');
+    DeleteFile(BackupFile);
   end;
 end;
 

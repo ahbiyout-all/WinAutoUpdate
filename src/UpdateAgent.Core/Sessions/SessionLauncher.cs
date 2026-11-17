@@ -12,7 +12,6 @@ public sealed class SessionLauncher
 {
     private const uint TokenAllAccess = 0x000F01FF;
     private const uint CreateUnicodeEnvironment = 0x00000400;
-    private const uint CreateNewConsole = 0x00000010;
 
     public bool TryLaunch(int sessionId, string executablePath, string arguments, out string error)
     {
@@ -53,7 +52,7 @@ public sealed class SessionLauncher
                     IntPtr.Zero,
                     IntPtr.Zero,
                     false,
-                    CreateUnicodeEnvironment | CreateNewConsole,
+                    CreateUnicodeEnvironment,
                     environment,
                     Path.GetDirectoryName(executablePath),
                     ref startupInfo,
@@ -100,7 +99,9 @@ public sealed class SessionLauncher
     private const int SecurityImpersonation = 2;
     private const int TokenPrimary = 1;
 
-    [StructLayout(LayoutKind.Sequential)]
+    // CreateProcessAsUserW(CharSet.Unicode)와 맞추지 않으면 lpDesktop이 ANSI로 마셜링되어
+    // "winsta0\default"가 깨지고, 생성된 프로세스가 즉시 종료된다.
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct StartupInfo
     {
         public int cb;
