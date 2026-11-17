@@ -5,6 +5,29 @@
 
 ---
 
+## 2026-11-17 — 독립 Tauri 데스크톱 앱 스캐폴드 추가
+
+### 목적
+
+- 기존 UpdateAgent .NET 솔루션과 연결하지 않는 별도 Tauri 2 데스크톱 앱 기본 템플릿 제공.
+- 교사 대시보드의 `--app=` 모드를 대체하지 않으며, WebView2 사용 결정도 변경하지 않음.
+
+### 변경
+
+| 파일 | 내용 |
+|---|---|
+| `desktop/tauri/` | Vite + Tauri 2 기본 템플릿(`index.html`, `src/`, `vite.config.js`, `package.json`) |
+| `desktop/tauri/src-tauri/` | `Cargo.toml`, `build.rs`, `tauri.conf.json`, capabilities, placeholder 아이콘, Rust 진입점 |
+| `.gitignore` | 허용 목록에 `desktop/tauri` 추가, `node_modules`/`dist`/`target`은 제외 |
+
+### 검증
+
+- `npm install`, `npm run build` 성공.
+- `cargo check` 성공(Tauri 2.12, Windows WebView2).
+- `UpdateAgent.sln`, 인스톨러, 릴리스 산출물에는 영향 없음.
+
+---
+
 ## 2026-11-17 — SessionHelper 오버레이 실행 실패 수정 / 설치 시 선(先)제거
 
 ### 목적

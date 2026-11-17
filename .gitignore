@@ -93,7 +93,31 @@ scripts/github-push.bat
 !installer/**/*.json
 !installer/**/*.rtf
 
-# 10) Final safety net: never upload build output or local deployment folders,
+# 10) Independent Tauri scaffold (not part of the .NET solution or releases).
+!desktop/
+!desktop/tauri/
+!desktop/tauri/.gitignore
+!desktop/tauri/*.html
+!desktop/tauri/*.js
+!desktop/tauri/*.json
+!desktop/tauri/*.md
+!desktop/tauri/src/
+!desktop/tauri/src/*.css
+!desktop/tauri/src/*.js
+!desktop/tauri/src-tauri/
+!desktop/tauri/src-tauri/.gitignore
+!desktop/tauri/src-tauri/*.json
+!desktop/tauri/src-tauri/*.rs
+!desktop/tauri/src-tauri/*.toml
+!desktop/tauri/src-tauri/Cargo.lock
+!desktop/tauri/src-tauri/capabilities/
+!desktop/tauri/src-tauri/capabilities/*.json
+!desktop/tauri/src-tauri/icons/
+!desktop/tauri/src-tauri/icons/*.ico
+!desktop/tauri/src-tauri/src/
+!desktop/tauri/src-tauri/src/*.rs
+
+# 11) Final safety net: never upload build output or local deployment folders,
 #     even when they live under an included tree such as src/ or installer/.
 [Bb]in/
 [Oo]bj/
