@@ -3,7 +3,7 @@
 컴퓨터실(랩) 환경을 위한 Windows Update 자동화 에이전트 + 교사용 관리 서버입니다.
 
 - 교사 PC에서 랩 전체(약 50대)의 업데이트 작업을 한 번에 시작합니다.
-- 교사용 관리 콘솔은 **네이티브 WPF 데스크톱 앱**입니다. WebView2/브라우저 프레임을 사용하지 않습니다.
+- 교사용 관리 콘솔은 시스템에 설치된 **Edge 또는 Chrome의 `--app=` 단독 창 모드**로 실행됩니다. 주소창/툴바가 없는 별도 창이며, WebView2는 사용하지 않습니다.
 - 학생 PC는 서비스로 동작하며, 업데이트 설치·재부팅·재개를 스스로 이어서 수행합니다.
 - 작업 중에는 선택적으로 전체화면 입력 잠금 오버레이와 진행률을 표시합니다.
 - Maestro Network 7은 **수동 모드**로만 연동합니다. 앱이 Maestro 설정을 변경하지 않습니다.
@@ -13,22 +13,23 @@
 
 ```
 [교사 PC]                                        [학생 PC × N]
-UpdateAgent.LabManager.Desktop (WPF)                UpdateAgent.Service (SYSTEM)
-  - 네이티브 관리 콘솔 (한국어)                       - WUA 스캔/다운로드/설치
-  - 창 닫기 = 앱 종료                               - 재부팅/재개 상태 머신
+UpdateAgent.LabManager.Desktop (런처)               UpdateAgent.Service (SYSTEM)
+  - Edge/Chrome 감지 후 --app= 단독 창 실행            - WUA 스캔/다운로드/설치
+  - 창 없이 종료, 서버는 계속 실행                    - 재부팅/재개 상태 머신
         │ 로컬 HTTP API                             - Maestro 마커 검증
         ▼                                           - 원격 명령 실행
-UpdateAgent.LabManager (헤드리스)  <─ HTTP 체크인 ──  └─ UpdateAgent.SessionHelper (WPF)
-  - ASP.NET Core Minimal API                             전체화면 오버레이 + 진행률
+UpdateAgent.LabManager (ASP.NET Core) <─ HTTP 체크인 ─ └─ UpdateAgent.SessionHelper (WPF)
+  - wwwroot 대시보드 + Minimal API                     전체화면 오버레이 + 진행률
   - SQLite (작업 원본)
   - Wake-on-LAN
   - 토큰 인증
-```
 
-데스크톱 앱은 로컬 API 서버가 없으면 같은 폴더의 `UpdateAgent.LabManager.exe`를
-`--headless`로 자동 실행하고, 앱을 닫을 때 자신이 띄운 서버만 함께 종료합니다.
-이미 실행 중인 서버는 재사용하며 종료하지 않습니다.
-GitHub 업데이트 확인/릴리스 링크는 OS 기본 브라우저로 열리며, 앱 안에 브라우저를 포함하지 않습니다.
+런처(`UpdateAgent.LabManager.Desktop.exe`)는 창을 띄우지 않고 로컬 API 서버를 준비한 뒤
+Edge를 우선, 없으면 Chrome을 찾아 `--app=http://127.0.0.1:5080/` 창을 엽니다.
+서버가 없으면 같은 폴더의 `UpdateAgent.LabManager.exe --headless`를 자동 실행합니다.
+앱 모드 창을 닫아도 서버는 계속 실행되어 학생 PC 체크인을 유지합니다.
+전용 브라우저 프로필(`%LOCALAPPDATA%\UpdateAgent\LabManager\browser-profile`)을 사용하므로
+일반 브라우저 창/탭과 섞이지 않으며, 관리자 토큰은 해당 프로필의 localStorage에 저장됩니다.
 
 | 경로 | 설명 |
 |---|---|
@@ -36,8 +37,8 @@ GitHub 업데이트 확인/릴리스 링크는 OS 기본 브라우저로 열리�
 | `src/UpdateAgent.Core` | WUA 연동, 정책 평가, 사전 점검, SQLite 저장소, 재부팅/재개, Maestro 수동 검증, 오버레이 파이프 |
 | `src/UpdateAgent.Service` | 학생 PC Windows 서비스 (SYSTEM). 체크인/텔레메트리/원격 명령 |
 | `src/UpdateAgent.SessionHelper` | 사용자 세션에 표시되는 전체화면 진행 오버레이 (WPF) |
-| `src/UpdateAgent.LabManager` | 교사 PC 헤드리스 HTTP API + SQLite + WoL (웹 UI 없음) |
-| `src/UpdateAgent.LabManager.Desktop` | 교사 PC 네이티브 WPF 관리 콘솔 (WebView2/브라우저 없음) |
+| `src/UpdateAgent.LabManager` | 교사 PC 웹 대시보드(wwwroot) + HTTP API + SQLite + WoL |
+| `src/UpdateAgent.LabManager.Desktop` | 교사 PC 런처. Edge/Chrome 감지 후 `--app=` 창으로 대시보드 실행 |
 | `src/UpdateAgent.Cli` | 로컬 CLI (scan/preflight/run/status/maestro/pause/cancel) |
 | `tests/UpdateAgent.Tests` | xUnit 단위 테스트 |
 | `installer/InnoSetup` | Inno Setup 6 설치 스크립트 (권장, 학생/교사 PC) |
@@ -73,9 +74,10 @@ GitHub 업데이트 확인/릴리스 링크는 OS 기본 브라우저로 열리�
 
 ### 교사 PC
 
-- .NET 10 ASP.NET Core Runtime + .NET 10 Desktop Runtime(WPF) (프레임워크 종속 배포 시)
+- .NET 10 ASP.NET Core Runtime + .NET 10 Desktop Runtime(WPF 런처) (프레임워크 종속 배포 시)
+- Microsoft Edge 또는 Google Chrome (앱 모드 창)
 - TCP 5080 인바운드 허용 (학생 PC → 교사 PC)
-- 관리자 토큰은 DPAPI로 암호화되어 `%LOCALAPPDATA%\UpdateAgent\LabManager\admin-token.bin`에 저장됩니다.
+- 관리자 토큰은 전용 브라우저 프로필의 localStorage에 저장됩니다.
 - 학생 PC의 MAC 주소 사전 등록 (Wake-on-LAN 사용 시)
 
 ## 빌드 및 테스트
@@ -169,22 +171,22 @@ publish\cli
 
 학생 PC에서는 `publish\cli\UpdateAgent.Cli.exe`로 사전 점검과 상태 확인을 할 수 있습니다.
 서비스가 실행 중일 때는 `scan`, `preflight`, `status`, `maestro`만 사용하고,
-작업 제어(`run`/`resume`/`pause`/`cancel`)는 데스크톱 관리 콘솔을 사용하세요.
+작업 제어(`run`/`resume`/`pause`/`cancel`)는 LabManager 대시보드를 사용하세요.
 
 ## 실행
 
-### 1. 교사 PC — LabManager (네이티브 데스크톱)
+### 1. 교사 PC — LabManager (브라우저 앱 모드)
 
 ```powershell
-# 헤드리스 API 서버만 먼저 띄우고 싶을 때
+# API 서버만 먼저 띄우고 싶을 때
 dotnet run --project src/UpdateAgent.LabManager
-# 기본 주소: http://0.0.0.0:5080 (브라우저 대시보드는 없음)
+# 기본 주소: http://0.0.0.0:5080, 대시보드: http://localhost:5080
 ```
 
 - 데이터베이스: `%LOCALAPPDATA%\UpdateAgent\LabManager\labmanager.db`
 - 로그: 같은 폴더의 `logs\`
-- 데스크톱 앱이 관리자 토큰을 DPAPI로 암호화해 저장하므로 브라우저 저장소(localStorage)는 사용하지 않습니다.
-- 데스크톱 앱을 닫으면 앱이 종료되고, 앱이 시작한 헤드리스 서버도 함께 정리됩니다.
+- 관리자 토큰은 앱 모드 브라우저 프로필의 localStorage에 저장됩니다(첫 실행 시 입력).
+- 앱 모드 창을 닫아도 서버는 계속 실행됩니다.
 
 실제 배포용으로는 파일럿 키트를 사용합니다.
 
@@ -195,8 +197,8 @@ dotnet run --project src/UpdateAgent.LabManager
 
 Set-Location .\publish\labmanager
 .\UpdateAgent.LabManager.Desktop.exe
-# 서버가 없으면 데스크톱 앱이 UpdateAgent.LabManager.exe --headless로 자동 시작합니다.
-# 첫 실행 시 관리자 토큰 입력창이 나타납니다.
+# 서버가 없으면 런처가 UpdateAgent.LabManager.exe --headless를 자동 시작합니다.
+# Edge를 우선 감지하고, 없으면 Chrome을 찾아 주소창/툴바 없는 --app= 창을 엽니다.
 ```
 
 ### 2. 학생 PC — Service
@@ -278,7 +280,7 @@ dotnet run --project src/UpdateAgent.Cli -- maestro
 
 버전의 단일 소스는 `Directory.Build.props`의 `<Version>`입니다.
 GitHub 저장소(`AhBiYout-all/UpdateAgent`)의 최신 릴리스를 조회해 새 버전이 있으면
-LabManager 데스크톱 관리 콘솔에 업데이트 팝업을 표시합니다. 설치 파일은 릴리스 자산에서만 받습니다.
+LabManager 대시보드에 업데이트 팝업을 표시합니다. 설치 파일은 릴리스 자산에서만 받습니다.
 
 ```powershell
 # 로컬 릴리스: 버전 올림 -> 빌드/테스트 -> 비밀값 검사 -> 커밋/태그/push
@@ -299,7 +301,7 @@ LabManager 데스크톱 관리 콘솔에 업데이트 팝업을 표시합니다.
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
-| `AdminToken` | `change-me-admin-token` | 관리자 API/데스크톱 콘솔 토큰 |
+| `AdminToken` | `change-me-admin-token` | 관리자 API/대시보드 토큰 |
 | `AgentToken` | `change-me-agent-token` | 에이전트 체크인 토큰 |
 | `DatabasePath` | `%LOCALAPPDATA%\UpdateAgent\LabManager\labmanager.db` | SQLite 경로 |
 | `OnlineThresholdSeconds` | `90` | 온라인 판정 기준 |
@@ -341,7 +343,7 @@ $env:Agent__AgentToken = "<강력한-토큰>"
   토큰 비교는 고정 시간 해시 비교를 사용합니다.
 - `/api/health`만 인증 없이 공개됩니다.
 - **기본 토큰은 파일럿 전 반드시 변경하세요.** 모든 학생 PC에 동일한 에이전트 토큰을 배포합니다.
-- LabManager API와 데스크톱 콘솔은 랩 LAN에서만 사용하고 외부에 노출하지 마세요.
+- LabManager API와 대시보드는 랩 LAN에서만 사용하고 외부에 노출하지 마세요.
 - 학생 PC가 로컬 관리자인 환경에서는 완전한 변조 방지가 불가능합니다.
 - 배포 전 코드 서명 인증서 적용을 권장합니다.
 
@@ -350,9 +352,9 @@ $env:Agent__AgentToken = "<강력한-토큰>"
 이 앱은 Maestro의 설정/서비스/Windows Update 기능을 변경하지 않습니다.
 
 1. 작업 전: Maestro에서 **매 부팅 자동 복구 → 수동 복구/해제**로 전환합니다.
-2. 데스크톱 콘솔의 작업 시작 창에서 **Maestro 복원 보호 해제 확인**을 체크하고 작업을 시작합니다.
+2. 대시보드의 작업 시작 창에서 **Maestro 복원 보호 해제 확인**을 체크하고 작업을 시작합니다.
 3. 업데이트/재부팅이 끝나면 Maestro에서 **현재 상태 저장 → 자동 복구 재설정**을 수행합니다.
-4. 데스크톱 콘솔의 작업 상세에서 **보호 해제 확인**, **상태 저장 + 보호 재활성화 확인**을 기록합니다.
+4. 대시보드의 작업 상세에서 **보호 해제 확인**, **상태 저장 + 보호 재활성화 확인**을 기록합니다.
 
 앱은 체크리스트와 마커 파일(`resume-marker.json` + 보조 마커)로 재부팅 후 상태를 검증합니다.
 Maestro UI/API 자동화는 2단계로 미뤄져 있습니다.
@@ -362,7 +364,7 @@ Maestro UI/API 자동화는 2단계로 미뤄져 있습니다.
 배포 전에 아래 항목을 순서대로 확인합니다. 상세 절차와 롤백 방법은 [`docs/PILOT.md`](docs/PILOT.md)에 있습니다.
 
 - [ ] `dotnet build UpdateAgent.sln` 경고 0/오류 0, `dotnet test` 전체 통과
-- [ ] 데스크톱 콘솔 실행: 로컬 서버 자동 시작, 토큰 저장/로드, 5초 갱신, 작업/에이전트/감사 탭, 창 닫기 시 종료 확인
+- [ ] 런처 실행: Edge/Chrome 감지, `--app=` 단독 창, 로컬 서버 자동 시작, 대시보드 로드, 토큰 저장/로드, 창 닫기 후 서버 유지 확인
 - [ ] 대표 PC 1대에서 `Cli scan`: 보안/품질 업데이트가 선택되고 드라이버/정의 업데이트는 제외되는지 확인
 - [ ] `Cli preflight --confirm-maestro`: 관리자 권한, 디스크, 전원, 네트워크, WSUS, Maestro, WU 사용 여부 점검 결과 확인
 - [ ] `Cli run --dry-run`: 스캔 → 설치(모의) → 완료 전이가 정상인지 확인

@@ -77,14 +77,11 @@ Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 Name: "desktopicon"; Description: "바탕화면에 UpdateAgent LabManager 바로가기 만들기"; GroupDescription: "바로가기:"; Flags: checkedonce
 
 [Files]
-; 헤드리스 API 서버와 네이티브 WPF 데스크톱 클라이언트를 같은 폴더에 설치한다.
+; 헤드리스 API 서버와 브라우저 앱 모드 런처를 같은 폴더에 설치한다.
+; wwwroot(대시보드)도 서버가 제공하므로 함께 설치된다.
 ; 문서/심볼/압축 파일은 스테이징에서 제거된다.
 Source: "{#StageRoot}\*"; DestDir: "{app}"; Excludes: "appsettings.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#StageRoot}\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
-
-[InstallDelete]
-; 이전 버전의 정적 웹 자산(브라우저 대시보드)이 남지 않도록 정리한다(설정 파일은 유지).
-Type: filesandordirs; Name: "{app}\wwwroot"
 
 [Icons]
 Name: "{group}\UpdateAgent LabManager"; Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"

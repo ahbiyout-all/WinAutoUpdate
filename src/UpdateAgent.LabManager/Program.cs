@@ -11,8 +11,8 @@ using UpdateAgent.Shared;
 using UpdateAgent.Shared.Models;
 using UpdateAgent.Shared.Serialization;
 
-// --headless/--no-window는 데스크톱 클라이언트가 서버를 조용히 띄울 때 전달하는 플래그다.
-// 웹 UI는 제거되었으므로 이 서버는 항상 헤드리스 API만 제공한다.
+// --headless/--no-window는 런처가 서버를 조용히 띄울 때 전달하는 플래그다.
+// 서버는 웹 대시보드와 API를 함께 제공하고, 교사용 창은 브라우저 앱 모드로 연다.
 var hostArgs = args
     .Where(argument =>
         !argument.StartsWith("--headless", StringComparison.OrdinalIgnoreCase) &&
@@ -67,7 +67,9 @@ app.UseSerilogRequestLogging(options =>
     options.MessageTemplate = "{RequestMethod} {RequestPath} → {StatusCode} ({Elapsed:0.0} ms)";
 });
 
-// 브라우저 대시보드(wwwroot)는 제거되었다. 교사용 화면은 네이티브 WPF 데스크톱 앱이 담당한다.
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.UseMiddleware<TokenAuthMiddleware>();
 
 var store = app.Services.GetRequiredService<LabStore>();

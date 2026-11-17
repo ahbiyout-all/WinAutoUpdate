@@ -142,10 +142,10 @@ function Get-BlockedEntries {
     $blockedExtensions = @(
         ".pdb", ".xml", ".md", ".txt", ".rtf", ".pdf", ".doc", ".docx",
         ".log", ".tmp", ".msi", ".msix", ".cab", ".zip", ".7z", ".rar",
-        ".lnk", ".url"
+        ".lnk", ".url", ".br", ".gz"
     )
     $blockedFolders = @("docs", "doc", "samples", "examples", "portable")
-    # 웹 UI 제거 후 남는 빈 정적 자산 매니페스트도 설치하지 않는다.
+    # UseStaticFiles가 원본 파일을 제공하므로 빌드가 만든 정적 자산 매니페스트는 설치하지 않는다.
     $blockedNames = @("web.config", "updateagent.labmanager.staticwebassets.endpoints.json")
 
     $blocked = New-Object System.Collections.Generic.List[string]
@@ -309,6 +309,7 @@ if (-not $SkipValidation) {
         Assert-IncludedFileSet -Root $labManagerStage -Label "LabManager" -RequiredFiles @(
             "UpdateAgent.LabManager.exe",
             "UpdateAgent.LabManager.Desktop.exe",
+            "wwwroot\index.html",
             "appsettings.json"
         )
     }

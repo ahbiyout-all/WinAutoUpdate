@@ -5,7 +5,46 @@
 
 ---
 
-## 2026-11-17 — 브라우저 대시보드 제거 및 네이티브 WPF 관리 콘솔 도입
+## 2026-11-17 — 브라우저 앱 모드 대시보드로 전환 (최종)
+
+### 목적
+
+- 네이티브 WPF 콘솔 대신 시스템에 설치된 Edge/Chrome의 `--app=` 단독 창을 교사용 대시보드로 사용.
+- 주소창/툴바가 없는 별도 창을 제공하되 WebView2/내장 브라우저 프레임은 사용하지 않음.
+- 앱 창을 닫아도 로컬 API 서버는 계속 실행해 학생 PC 체크인을 유지.
+
+### 변경
+
+| 파일 | 내용 |
+|---|---|
+| `src/UpdateAgent.LabManager/wwwroot/` | `3997a4d`의 웹 대시보드(`index.html`, `app.js`, `styles.css`) 복원 |
+| `src/UpdateAgent.LabManager/Program.cs` | `UseDefaultFiles`/`UseStaticFiles` 복원, `--headless`/`--no-window` 필터 유지 |
+| `src/UpdateAgent.LabManager.Desktop/` | WPF UI 제거, 창 없는 런처로 변경 |
+| `src/UpdateAgent.LabManager.Desktop/Services/BrowserLauncher.cs` | Edge 우선 감지, Chrome 폴백, `--app=`/전용 프로필 실행 |
+| `src/UpdateAgent.LabManager.Desktop/Services/DesktopSettings.cs` | DPAPI 토큰 로직 제거, 대시보드 URL/창 크기 설정만 유지 |
+| `scripts/publish.ps1` | LabManager 게시에 `wwwroot` 포함 |
+| `scripts/build-inno.ps1` | `.br`/`.gz` 차단, `wwwroot\index.html` 필수 확인 |
+| `installer/InnoSetup/UpdateAgent.LabManager.iss` | 런처 바로가기 유지, `wwwroot` InstallDelete 제거 |
+| `README.md`, `docs/INSTALLER.md`, `docs/RELEASE.md` | 앱 모드, localStorage 토큰, 서버 유지 정책 반영 |
+
+### 주요 동작
+
+- 런처는 창 없이 로컬 서버 health를 확인하고, 없으면 `UpdateAgent.LabManager.exe --headless`를 시작한다.
+- Edge를 우선, 없으면 Chrome을 찾아 `--app=http://127.0.0.1:5080/` 창을 연다.
+- 전용 프로필(`%LOCALAPPDATA%\UpdateAgent\LabManager\browser-profile`)을 사용하며 관리자 토큰은 localStorage에 저장한다.
+- 외부 링크는 `target="_blank"`로 기본 브라우저에서 연다.
+- 앱 모드 창을 닫아도 서버는 의도적으로 종료하지 않는다.
+
+### 검증
+
+- `dotnet build UpdateAgent.sln -c Release`: 경고 0개, 오류 0개.
+- `scripts\publish.ps1`: `publish\labmanager\wwwroot`에 `index.html`, `app.js`, `styles.css` 생성 확인.
+- 스모크 테스트: 런처가 Edge 앱 모드 창을 열고 종료해도 서버가 계속 수신 중임을 확인.
+- HTTP 확인: `/`(10406 bytes), `/app.js`(30045 bytes), `/styles.css`(12982 bytes), `/api/health` 모두 200.
+
+---
+
+## 2026-11-17 — 브라우저 대시보드 제거 및 네이티브 WPF 관리 콘솔 도입 (이후 철회)
 
 ### 목적
 
@@ -45,7 +84,7 @@
 
 - `dotnet build UpdateAgent.sln -c Release`: 경고 0개, 오류 0개.
 - `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --no-build`: 56개 통과.
-- `scripts\publish.ps1`: LabManager 폴더에 두 exe 생성, `wwwroot` 없음 확인.
+- `scripts\publish.ps1`: LabManager 폴더에 두 exe 생성, `wwwroot` 없음 확인 (이후 앱 모드 전환으로 철회).
 - `scripts\build-inno.ps1`: Agent/LabManager 설치 파일 2개 빌드 성공.
 - `.iss` 두 파일 모두 UTF-8 BOM 유지 확인.
 - 데스크톱 앱 실행: 제목 `UpdateAgent · 교사 관리 콘솔`, v0.1.0 배지, 통계 카드/에이전트/작업/감사 탭 렌더링, 연결 오류 없음.

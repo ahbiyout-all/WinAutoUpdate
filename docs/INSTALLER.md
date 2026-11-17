@@ -67,20 +67,20 @@ C:\ProgramData\UpdateAgent\
 
 ```text
 C:\Program Files\UpdateAgent\LabManager\
-  UpdateAgent.LabManager.Desktop.exe  네이티브 WPF 관리 콘솔 (바로가기 대상)
-  UpdateAgent.LabManager.exe          헤드리스 HTTP API 서버 + 런타임 DLL
+  UpdateAgent.LabManager.Desktop.exe  브라우저 앱 모드 런처 (바로가기 대상)
+  UpdateAgent.LabManager.exe          HTTP API 서버 + 런타임 DLL
+  wwwroot\                            대시보드(index.html, app.js, styles.css)
   appsettings.json                    관리자/에이전트 토큰, 수신 URL
   unins000.exe
 ```
 
-- 교사용 화면은 네이티브 WPF 앱입니다. WebView2/브라우저 프레임/`wwwroot`를 사용하지 않습니다.
-- 데스크톱 앱은 서버가 없으면 `UpdateAgent.LabManager.exe --headless`를 자동 실행하고,
-  종료 시 자신이 띄운 서버만 정리합니다. 이미 실행 중인 서버는 재사용합니다.
-- 관리자 토큰은 브라우저 저장소가 아니라 DPAPI로 암호화되어
-  `%LOCALAPPDATA%\UpdateAgent\LabManager\admin-token.bin`에 저장됩니다.
-  설정/창 위치는 같은 폴더의 `desktop-settings.json`에 저장됩니다.
+- 교사용 화면은 시스템의 Edge/Chrome을 `--app=` 단독 창 모드로 실행합니다. WebView2는 사용하지 않습니다.
+- 런처는 창 없이 동작하며, 서버가 없으면 `UpdateAgent.LabManager.exe --headless`를 자동 실행합니다.
+  이미 실행 중인 서버는 재사용합니다. 앱 모드 창을 닫아도 서버는 계속 실행됩니다.
+- 관리자 토큰은 전용 브라우저 프로필(`%LOCALAPPDATA%\UpdateAgent\LabManager\browser-profile`)의
+  localStorage에 저장됩니다. 런처 설정은 같은 폴더의 `desktop-settings.json`에 저장됩니다.
 - `appsettings.json`은 신규 설치 시에만 생성되며, 업그레이드 시 기존 설정을 덮어쓰지 않습니다.
-- API 기본 포트: **5080/TCP**
+- API/대시보드 기본 포트: **5080/TCP**
 
 ## 4. 설치 진행 순서
 
@@ -105,8 +105,8 @@ C:\Program Files\UpdateAgent\LabManager\
    - 서비스 등록/갱신, 방화벽 규칙 등록, 선택적 `agent.json` 작성.
 7. **앱 실행**
    - Agent: 서비스를 시작하고 마지막 화면에서 `UpdateAgent 상태 확인`을 실행할 수 있습니다.
-   - LabManager: 설치 완료 후 **데스크톱 관리 콘솔**(`UpdateAgent.LabManager.Desktop.exe`)을 실행합니다.
-     바탕화면/시작 메뉴 바로가기도 데스크톱 콘솔을 가리킵니다.
+   - LabManager: 설치 완료 후 **런처**(`UpdateAgent.LabManager.Desktop.exe`)를 실행합니다.
+     바로가기도 런처를 가리키며, 런처가 Edge/Chrome 앱 모드 창으로 대시보드를 엽니다.
 
 ## 5. 기존 설치 처리
 
@@ -149,8 +149,8 @@ C:\Program Files\UpdateAgent\LabManager\
 
 설치 후 `C:\Program Files\UpdateAgent\LabManager\appsettings.json`의
 `AgentToken`을 에이전트와 동일하게 변경하세요. 관리자 토큰(`AdminToken`)은 서버 설정이면서
-데스크톱 콘솔 첫 실행 시 입력하는 값이기도 합니다. 콘솔에서 **토큰** 버튼으로 변경할 수 있으며,
-입력한 값은 DPAPI로 암호화되어 사용자 프로필에 저장됩니다.
+대시보드 첫 실행 시 입력하는 값이기도 합니다. 대시보드의 **토큰** 버튼으로 변경할 수 있으며,
+입력한 값은 앱 모드 브라우저 프로필의 localStorage에 저장됩니다.
 
 ### 설치 로그
 
@@ -181,18 +181,19 @@ C:\Program Files\UpdateAgent\LabManager\
 `scripts\build-inno.ps1`은 스테이징 단계에서 다음을 제거하고, 남아 있으면 빌드를 실패시킵니다.
 
 - 확장자: `.pdb`, `.xml`, `.md`, `.txt`, `.rtf`, `.pdf`, `.doc`, `.docx`,
-  `.log`, `.tmp`, `.msi`, `.cab`, `.zip`, `.7z`, `.rar`, `.lnk`, `.url`
+  `.log`, `.tmp`, `.msi`, `.cab`, `.zip`, `.7z`, `.rar`, `.lnk`, `.url`, `.br`, `.gz`
 - 폴더: `docs`, `doc`, `samples`, `examples`, `portable`
 - 파일: `web.config`, `appsettings.Development.json`,
-  `UpdateAgent.LabManager.staticwebassets.endpoints.json`(웹 UI 제거 후 남는 빈 매니페스트)
+  `UpdateAgent.LabManager.staticwebassets.endpoints.json`(`UseStaticFiles`가 사용하지 않는 빌드 매니페스트)
+  및 `.br`/`.gz` 압축 정적 자산
 
 검증 항목:
 
 - 위 패턴이 하나라도 남아 있으면 오류.
 - Agent 필수 파일: `Service\UpdateAgent.Service.exe`, `Service\appsettings.json`,
   `SessionHelper\UpdateAgent.SessionHelper.exe`, `Cli\UpdateAgent.Cli.exe`
-- LabManager 필수 파일: `UpdateAgent.LabManager.exe`, `UpdateAgent.LabManager.Desktop.exe`, `appsettings.json`
-- LabManager에 `wwwroot`가 남아 있으면 오류(이전 버전 웹 자산은 설치 시 삭제).
+- LabManager 필수 파일: `UpdateAgent.LabManager.exe`, `UpdateAgent.LabManager.Desktop.exe`,
+  `wwwroot\index.html`, `appsettings.json`
 
 최근 빌드 기준 포함 파일(WPF 런타임/리소스 포함으로 크기 증가):
 
@@ -261,9 +262,9 @@ build\agent\<버전>\
 - Agent 제거 시 서비스와 방화벽 규칙을 함께 제거합니다.
 - `C:\ProgramData\UpdateAgent`는 제거 후에도 남습니다. 완전 삭제는 수동으로 폴더를 지웁니다.
 - LabManager의 `appsettings.json`은 업그레이드 시 유지됩니다.
-- 데스크톱 콘솔의 DPAPI 토큰(`admin-token.bin`)과 `desktop-settings.json`은
+- 앱 모드 브라우저 프로필(`browser-profile`)과 `desktop-settings.json`은
   `%LOCALAPPDATA%`에 있어 설치/제거 영향을 받지 않습니다.
-- 이전 버전의 `wwwroot` 폴더는 설치 시 자동 삭제됩니다.
+- `wwwroot` 대시보드는 설치 시 항상 최신 파일로 덮어써집니다.
 
 ## 11. MSI와의 관계
 
@@ -286,10 +287,11 @@ build\agent\<버전>\
 - [ ] 업그레이드 후 `ProgramData\UpdateAgent\agent.json`이 유지됨
 - [ ] 제거 시 서비스/방화벽 규칙/파일이 제거되고 ProgramData는 남음
 - [ ] MSI 설치 후 Inno 설치 시 MSI가 자동 제거됨
-- [ ] LabManager 설치 후 바탕화면/시작 메뉴 바로가기가 데스크톱 콘솔을 실행함
-- [ ] 데스크톱 콘솔 첫 실행 시 토큰 입력창이 표시되고 DPAPI 파일이 생성됨
-- [ ] 서버가 없을 때 데스크톱 콘솔이 헤드리스 서버를 자동 시작하고, 창 닫기 시 함께 종료됨
-- [ ] 설치 폴더에 `wwwroot`가 없음
+- [ ] LabManager 설치 후 바탕화면/시작 메뉴 바로가기가 런처를 실행함
+- [ ] 런처가 Edge/Chrome을 감지해 주소창/툴바 없는 `--app=` 창을 염
+- [ ] 대시보드 첫 실행 시 토큰 입력창이 표시되고 브라우저 프로필에 저장됨
+- [ ] 서버가 없을 때 런처가 헤드리스 서버를 자동 시작하고, 앱 창을 닫아도 서버가 유지됨
+- [ ] 설치 폴더에 `wwwroot\index.html`이 있음
 
 ## 13. 알려진 제약
 

@@ -1,31 +1,26 @@
 using System.Windows;
 using UpdateAgent.LabManager.Desktop.Services;
-using UpdateAgent.LabManager.Desktop.Views;
 
 namespace UpdateAgent.LabManager.Desktop;
 
 /// <summary>
-/// 네이티브 WPF 데스크톱 클라이언트 진입점.
-/// 창을 닫으면 ShutdownMode에 의해 앱이 종료되고, 이 앱이 띄운 서버도 함께 정리된다.
+/// 교사용 런처. 창을 띄우지 않고 로컬 LabManager 서버를 준비한 뒤
+/// Edge/Chrome의 --app= 단독 창 모드로 대시보드를 연다.
+/// 서버는 앱 모드 창을 닫아도 계속 실행되어 학생 PC 체크인을 유지한다.
 /// </summary>
 public partial class App : Application
 {
-    public static DesktopSettings Settings { get; private set; } = null!;
-    public static ApiClient Api { get; private set; } = null!;
-    public static LabManagerServer Server { get; private set; } = null!;
-
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
-        Settings = new DesktopSettings();
-        Api = new ApiClient(Settings);
-        Server = new LabManagerServer(Settings);
+        var settings = new DesktopSettings();
+        var server = new LabManagerServer(settings);
 
         bool ready;
         try
         {
-            ready = await Server.EnsureRunningAsync();
+            ready = await server.EnsureRunningAsync();
         }
         catch
         {
@@ -34,37 +29,26 @@ public partial class App : Application
 
         if (!ready)
         {
-            MessageBox.Show(
-                $"LabManager 서버에 연결할 수 없습니다.\n\n주소: {Settings.ServerUrl}\n\n" +
-                "서버가 실행 중인지 확인한 뒤 앱을 다시 실행하세요.",
-                "UpdateAgent LabManager",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            ShowError(
+                $"LabManager 서버에 연결할 수 없습니다.\n\n주소: {settings.ServerUrl}\n\n" +
+                "서버가 실행 중인지 확인한 뒤 다시 실행하세요.");
             Shutdown();
             return;
         }
 
-        if (!Settings.HasAdminToken)
+        if (!BrowserLauncher.OpenDashboard(settings.DashboardUrl, settings.Window.Width, settings.Window.Height))
         {
-            var tokenDialog = new TokenDialog(requireToken: true);
-            if (tokenDialog.ShowDialog() != true)
-            {
-                Shutdown();
-                return;
-            }
-
-            Api.RefreshConfiguration();
+            ShowError(
+                "Microsoft Edge 또는 Google Chrome을 찾을 수 없습니다.\n\n" +
+                "브라우저를 설치한 뒤 다시 실행하세요.");
+            Shutdown();
+            return;
         }
 
-        var window = new MainWindow();
-        MainWindow = window;
-        window.Show();
+        // 의도적으로 Stop()을 호출하지 않는다. 서버는 백그라운드에 남는다.
+        Shutdown();
     }
 
-    protected override void OnExit(ExitEventArgs e)
-    {
-        Server?.Stop();
-        Settings?.Save();
-        base.OnExit(e);
-    }
+    private static void ShowError(string message) =>
+        MessageBox.Show(message, "UpdateAgent LabManager", MessageBoxButton.OK, MessageBoxImage.Error);
 }
