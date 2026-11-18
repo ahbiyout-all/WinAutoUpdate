@@ -24,6 +24,13 @@ public sealed record JobSummary
     public DateTimeOffset? PauseUntil { get; init; }
     public DateTimeOffset StartedAt { get; init; } = DateTimeOffset.Now;
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.Now;
+
+    /// <summary>
+    /// 에이전트가 보고한 원본 UpdatedAt. 서버 수신 시각으로 UpdatedAt을 덮어쓴 뒤에도
+    /// 시간 순서 검증을 같은 시계로 수행하기 위해 보관한다.
+    /// </summary>
+    public DateTimeOffset? ReportedAt { get; init; }
+
     public DateTimeOffset? CompletedAt { get; init; }
     public string? LastError { get; init; }
 

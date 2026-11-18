@@ -172,9 +172,13 @@ jobs:
           $lines.Add('')
           $lines.Add('## 설치 방법')
           $lines.Add('')
-          $lines.Add('- 학생 PC: `UpdateAgent.Agent-Setup-<버전>-x64.exe` 실행')
-          $lines.Add('- 교사 PC: `UpdateAgent.LabManager-Setup-<버전>-x64.exe` 실행')
-          $lines.Add('- 무인 설치: `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`')
+          $lines.Add(('- 학생 PC: `UpdateAgent.Agent-Setup-{0}-x64.exe` 실행' -f $version))
+          $lines.Add(('- 교사 PC: `UpdateAgent.LabManager-Setup-{0}-x64.exe` 실행' -f $version))
+          $lines.Add('- 학생 PC 전체 무인 설치:')
+          $lines.Add('```powershell')
+          $lines.Add(('.\UpdateAgent.Agent-Setup-{0}-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LabManagerUrl=http://<teacher-ip>:5080 /AgentTokenFile=<token-file>' -f $version))
+          $lines.Add('```')
+          $lines.Add('- 토큰은 명령줄에 직접 쓰지 않고 `/AgentTokenFile`로 전달합니다.')
           $lines.Add('- 전체 안내: https://github.com/ahbiyout-all/WinAutoUpdate/blob/master/docs/INSTALLER.md')
           $lines.Add('')
           $lines.Add('## 참고')
@@ -259,6 +263,19 @@ jobs:
 
           if ($releaseTags -contains $tag) {
             Write-Host "Updating existing release $tag."
+
+            # 이전 버전 등 기대하지 않는 자산은 업로드 전에 제거한다.
+            $expectedNames = @($expectedInnoNames + $expectedMsiName)
+            $currentAssets = @(& gh release view $tag --json assets --jq '.assets[].name' |
+              Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            if ($LASTEXITCODE -ne 0) { throw "Failed to list assets for $tag." }
+            foreach ($stale in $currentAssets) {
+              if ($stale -notin $expectedNames) {
+                & gh release delete-asset $tag $stale --yes
+                if ($LASTEXITCODE -ne 0) { throw "Failed to delete stale asset '$stale' from $tag." }
+              }
+            }
+
             gh release upload $tag @assets --clobber
             if ($LASTEXITCODE -ne 0) { throw "Failed to upload assets to $tag." }
 

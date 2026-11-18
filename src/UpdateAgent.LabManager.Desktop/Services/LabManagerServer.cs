@@ -8,7 +8,7 @@ namespace UpdateAgent.LabManager.Desktop.Services;
 /// 데스크톱 창이 로컬 LabManager API 서버를 준비한다.
 /// 이미 실행 중이면 재사용하고, 로컬 주소인데 서버가 없으면 같은 폴더의
 /// UpdateAgent.LabManager.exe를 --headless로 조용히 띄운다.
-/// 데스크톱이 띄운 서버는 앱 종료 시 함께 종료한다.
+/// 데스크톱이 띄운 서버는 런처/앱 창이 닫힌 뒤에도 프로세스가 계속 살아 있다.
 /// </summary>
 public sealed class LabManagerServer
 {

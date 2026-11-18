@@ -88,7 +88,7 @@ dotnet build UpdateAgent.sln
 dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj
 ```
 
-현재 기준: 빌드 경고 0 / 오류 0, 테스트 66개 통과.
+현재 기준: 빌드 경고 0 / 오류 0, 테스트 89개 통과.
 
 MSI는 솔루션 빌드에 포함되지 않습니다(일반 빌드에 WiX 복원을 강제하지 않기 위해).
 설치 프로그램이 필요하면 `publish.ps1` 후 `build-inno.ps1`(권장) 또는 `build-msi.ps1`을 실행합니다.
@@ -295,7 +295,7 @@ LabManager 대시보드에 업데이트 팝업을 표시합니다. 설치 파일
 # 태그(v*) push 시 GitHub Actions가 설치 파일을 빌드해 Release에 첨부
 ```
 
-- 릴리스 자산은 Inno Setup 설치 파일 2개(`*Setup*.exe`)와 선택적 MSI만 허용합니다.
+- 릴리스 자산은 Inno Setup 설치 파일 2개(`*Setup*.exe`)와 MSI 1개, 총 3개만 허용합니다.
 - SHA-256은 릴리스 노트에 기록합니다.
 - 상세 절차와 문제 해결: [`docs/RELEASE.md`](docs/RELEASE.md)
 

@@ -1,6 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <InternalsVisibleTo Include="UpdateAgent.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\UpdateAgent.Shared\UpdateAgent.Shared.csproj" />
     <ProjectReference Include="..\UpdateAgent.Core\UpdateAgent.Core.csproj" />
   </ItemGroup>

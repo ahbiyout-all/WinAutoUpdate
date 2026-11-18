@@ -130,10 +130,10 @@ C:\Program Files\UpdateAgent\LabManager\
 
 ```powershell
 # 가장 단순한 무인 설치(설정은 나중에 configure-agent.ps1로 적용)
-.\UpdateAgent.Agent-Setup-0.1.1-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+.\UpdateAgent.Agent-Setup-0.1.2-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # 설치와 동시에 LabManager URL/토큰 적용(토큰은 파일로 전달)
-.\UpdateAgent.Agent-Setup-0.1.1-x64.exe `
+.\UpdateAgent.Agent-Setup-0.1.2-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LabManagerUrl=http://192.168.0.10:5080 `
   /AgentTokenFile=C:\pilot-agent-token.txt
@@ -147,7 +147,7 @@ C:\Program Files\UpdateAgent\LabManager\
 ### 교사 PC
 
 ```powershell
-.\UpdateAgent.LabManager-Setup-0.1.1-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+.\UpdateAgent.LabManager-Setup-0.1.2-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 설치 후 `C:\Program Files\UpdateAgent\LabManager\appsettings.json`의
@@ -166,13 +166,17 @@ C:\Program Files\UpdateAgent\LabManager\
 설치 단계에서 조용히(`netsh advfirewall`, 창 숨김) 등록합니다.
 **기본 이름과 버전이 붙은 이름을 모두** 등록합니다.
 
-| 제품 | 규칙 이름 | 대상 |
-|---|---|---|
-| Agent | `UpdateAgent Agent` | `...\UpdateAgent\Service\UpdateAgent.Service.exe` |
-| Agent | `UpdateAgent Agent <버전>` | 동일 |
-| LabManager | `UpdateAgent LabManager` | `...\UpdateAgent\LabManager\UpdateAgent.LabManager.exe` |
-| LabManager | `UpdateAgent LabManager <버전>` | 동일 |
+| 제품 | 규칙 이름 | 대상 | 프로필 |
+|---|---|---|---|
+| Agent | `UpdateAgent Agent` | `...\UpdateAgent\Service\UpdateAgent.Service.exe` | 전체 |
+| Agent | `UpdateAgent Agent <버전>` | 동일 | 전체 |
+| LabManager | `UpdateAgent LabManager` | 인바운드 TCP 5080(포트 규칙) | Domain/Private |
+| LabManager | `UpdateAgent LabManager <버전>` | 동일 | Domain/Private |
 
+- LabManager는 프로그램 경로가 아니라 **TCP 포트 규칙**으로 등록합니다. 인스톨러와
+  `scripts\allow-labmanager.ps1` 모두 설치된 `appsettings.json`의 `Urls`/`ListenUrl`에서
+  포트를 읽되 없으면 5080을 사용합니다. Public 프로필은 차단 상태로 유지합니다.
+- 설치 후 포트를 변경했다면 `scripts\allow-labmanager.ps1`을 다시 실행해 규칙을 갱신하세요.
 - 모든 규칙은 그룹(`UpdateAgent`, `UpdateAgent LabManager`)으로 묶습니다.
 - 설치/업그레이드 시 그룹 단위로 이전 규칙을 먼저 삭제하므로, 이전 버전의
   `UpdateAgent Agent 0.0.9` 같은 규칙이 남지 않습니다.
@@ -303,6 +307,6 @@ build\agent\<버전>\
 
 - 설치 파일은 파일럿 단계에서 **코드 서명이 없습니다.** SmartScreen 경고가 표시될 수 있습니다.
 - Inno Setup은 Windows 전용입니다(macOS/Linux/모바일 설치 파일을 만들지 않습니다).
-- `UpdateAgent.Agent-Setup`은 x64 Windows 10 1607 이상 / Server 2016 이상을 요구합니다.
+- `UpdateAgent.Agent-Setup`의 지원 범위는 Windows 11 / Windows 10 22H2(ESU) / Windows Server 2016–2025입니다. Inno Setup의 `MinVersion=10.0.14393`은 설치 프로그램 실행의 최소 요건일 뿐 지원 정책을 의미하지 않습니다.
 - 서비스 시작은 설치 직후 수행되지만, 그룹 정책/보안 프로그램이 차단하면
   `services.msc`에서 수동으로 시작해야 할 수 있습니다.

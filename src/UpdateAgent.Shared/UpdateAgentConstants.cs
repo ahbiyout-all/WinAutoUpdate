@@ -12,6 +12,9 @@ public static class UpdateAgentConstants
     /// <summary>에이전트 버전. Directory.Build.props의 Version에서 생성된다.</summary>
     public static string AgentVersion { get; } = ResolveAgentVersion();
 
+    /// <summary>LabManager도 에이전트와 동일한 단일 버전을 사용한다.</summary>
+    public static string LabManagerVersion => AgentVersion;
+
     /// <summary>서비스 ↔ SessionHelper 명명된 파이프.</summary>
     public const string OverlayPipeName = "UpdateAgent.Overlay.v1";
 

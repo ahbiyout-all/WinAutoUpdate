@@ -40,7 +40,7 @@ public sealed class UpdateCheckService
             }
 
             var checker = new GitHubReleaseChecker(_httpClientFactory.CreateClient("github"));
-            var result = await checker.CheckAsync(cancellationToken).ConfigureAwait(false);
+            var result = await checker.CheckAsync(UpdateProduct.LabManager, cancellationToken).ConfigureAwait(false);
             _cached = result;
 
             if (result.CheckSucceeded)

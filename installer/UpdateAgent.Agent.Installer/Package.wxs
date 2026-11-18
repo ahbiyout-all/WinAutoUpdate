@@ -89,12 +89,14 @@
                                     File="AgentServiceExe"
                                     Profile="all"
                                     Scope="any"
+                                    Grouping="UpdateAgent"
                                     Description="UpdateAgent Service (all networks)" />
         <firewall:FirewallException Id="FirewallRuleVersionedName"
                                     Name="UpdateAgent Agent $(var.ProductVersion)"
                                     File="AgentServiceExe"
                                     Profile="all"
                                     Scope="any"
+                                    Grouping="UpdateAgent"
                                     Description="UpdateAgent Service (versioned rule)" />
       </Component>
     </ComponentGroup>

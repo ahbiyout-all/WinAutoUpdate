@@ -14,7 +14,7 @@ public sealed class SessionWatcherService : BackgroundService
     private readonly SessionLauncher _launcher;
     private readonly IOptionsMonitor<AgentOptions> _options;
     private readonly ILogger<SessionWatcherService> _logger;
-    private readonly Dictionary<int, (int ProcessId, DateTimeOffset StartedAt)> _launched = new();
+    private readonly Dictionary<int, DateTimeOffset> _launched = new();
     private readonly Dictionary<int, DateTimeOffset> _lastAttempt = new();
 
     public SessionWatcherService(
@@ -65,9 +65,12 @@ public sealed class SessionWatcherService : BackgroundService
             return;
         }
 
+        // 이름이 바뀐 헬퍼도 같은 프로세스로 인식해야 중복 실행되지 않는다.
+        var processName = Path.GetFileNameWithoutExtension(executable);
+
         foreach (var session in _probe.GetInteractiveSessions())
         {
-            if (IsHelperAlive(session.SessionId))
+            if (IsHelperAlive(session.SessionId, processName))
             {
                 continue;
             }
@@ -88,7 +91,7 @@ public sealed class SessionWatcherService : BackgroundService
 
             if (ok)
             {
-                _launched[session.SessionId] = (0, DateTimeOffset.Now);
+                _launched[session.SessionId] = DateTimeOffset.Now;
                 _logger.LogInformation(
                     "SessionHelper 실행: session={SessionId}, user={User}",
                     session.SessionId,
@@ -114,13 +117,13 @@ public sealed class SessionWatcherService : BackgroundService
         }
     }
 
-    private bool IsHelperAlive(int sessionId)
+    private bool IsHelperAlive(int sessionId, string processName)
     {
         // 서비스가 재시작되면 _launched가 비어 있지만 이전 helper는 여전히 살아 있을 수 있다.
         // 항상 실제 프로세스를 확인해 같은 세션에 오버레이가 두 개 뜨는 것을 막는다.
         try
         {
-            var processes = System.Diagnostics.Process.GetProcessesByName("UpdateAgent.SessionHelper");
+            var processes = System.Diagnostics.Process.GetProcessesByName(processName);
             var alive = processes.Any(p =>
             {
                 try

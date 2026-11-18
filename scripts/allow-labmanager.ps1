@@ -5,15 +5,16 @@ Opens or removes the Windows Firewall rules for the LabManager on the teacher PC
 .DESCRIPTION
 Creates the default and version-appended rules with the same group and names as
 the LabManager installer: "UpdateAgent LabManager" and
-"UpdateAgent LabManager <version>". Inbound TCP 5080 (default) is allowed from
-Private and Domain networks. Public networks stay blocked. Run on the teacher PC
-as administrator.
+"UpdateAgent LabManager <version>". Inbound TCP is allowed from Private and
+Domain networks; Public networks stay blocked. The port comes from the installed
+or published appsettings.json (Urls/ListenUrl) when available, otherwise 5080.
+Run on the teacher PC as administrator.
 
 .EXAMPLE
 .\scripts\allow-labmanager.ps1
 
 .EXAMPLE
-.\scripts\allow-labmanager.ps1 -Port 5080 -ProductVersion 0.1.1
+.\scripts\allow-labmanager.ps1 -Port 5080 -ProductVersion 0.1.2
 
 .EXAMPLE
 .\scripts\allow-labmanager.ps1 -Remove
@@ -46,7 +47,47 @@ function Get-ProductVersion {
     return $Matches[1].Trim()
 }
 
+function Get-ConfiguredLabManagerPort {
+    $configPaths = @()
+    foreach ($root in @(${env:ProgramFiles}, ${env:ProgramFiles(x86)})) {
+        if ([string]::IsNullOrWhiteSpace($root)) { continue }
+        $configPaths += (Join-Path $root "UpdateAgent\LabManager\appsettings.json")
+    }
+    $configPaths += (Join-Path $repoRoot "publish\labmanager\appsettings.json")
+
+    foreach ($configPath in $configPaths) {
+        if ([string]::IsNullOrWhiteSpace($configPath) -or -not (Test-Path -LiteralPath $configPath)) {
+            continue
+        }
+        try {
+            $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        }
+        catch {
+            continue
+        }
+
+        foreach ($listenValue in @($config.Urls, $config.ListenUrl)) {
+            if ([string]::IsNullOrWhiteSpace([string]$listenValue)) { continue }
+            foreach ($entry in ([string]$listenValue -split '[;,\s]+')) {
+                $match = [regex]::Match($entry, '^(?:https?://)?.*:(\d+)/?$')
+                if (-not $match.Success) { continue }
+                $parsed = 0
+                if ([int]::TryParse($match.Groups[1].Value, [ref]$parsed) -and
+                    $parsed -gt 0 -and $parsed -le 65535) {
+                    return $parsed
+                }
+            }
+        }
+    }
+    return 5080
+}
+
 Assert-Administrator
+
+# Only an explicit -Port overrides the configured value.
+if (-not $PSBoundParameters.ContainsKey('Port')) {
+    $Port = Get-ConfiguredLabManagerPort
+}
 
 if ([string]::IsNullOrWhiteSpace($ProductVersion)) {
     $ProductVersion = Get-ProductVersion

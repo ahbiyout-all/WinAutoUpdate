@@ -22,9 +22,17 @@ public sealed class GitHubReleaseChecker
         _httpClient = httpClient;
     }
 
-    public async Task<AppUpdateInfo> CheckAsync(CancellationToken cancellationToken = default)
+    /// <summary>기본 호출은 에이전트용이다. LabManager는 명시적으로 제품을 지정한다.</summary>
+    public Task<AppUpdateInfo> CheckAsync(CancellationToken cancellationToken = default) =>
+        CheckAsync(UpdateProduct.Agent, cancellationToken);
+
+    public async Task<AppUpdateInfo> CheckAsync(
+        UpdateProduct product,
+        CancellationToken cancellationToken = default)
     {
-        var current = UpdateAgentConstants.AgentVersion;
+        var current = product == UpdateProduct.LabManager
+            ? UpdateAgentConstants.LabManagerVersion
+            : UpdateAgentConstants.AgentVersion;
 
         try
         {
@@ -58,14 +66,22 @@ public sealed class GitHubReleaseChecker
             var latest = NormalizeVersion(release.TagName);
 
             // 릴리스에는 설치 파일만 첨부한다.
-            // Inno Setup(.exe)을 우선 사용하고, 없으면 MSI, 그래도 없으면 첫 자산을 쓴다.
+            // 같은 릴리스를 에이전트/LabManager가 공유하므로 제품 접두사로 자산을 먼저 고른다.
+            // 제품 자산이 없으면 전체 자산에서 Inno Setup(.exe) → MSI → 첫 자산 순으로 고른다.
             var assets = release.Assets ?? [];
+            var prefix = product == UpdateProduct.LabManager
+                ? "UpdateAgent.LabManager-"
+                : "UpdateAgent.Agent-";
+            var productAssets = assets
+                .Where(a => a.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var candidates = productAssets.Count > 0 ? productAssets : assets;
             var asset =
-                assets.FirstOrDefault(a =>
+                candidates.FirstOrDefault(a =>
                     a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) &&
                     a.Name.Contains("Setup", StringComparison.OrdinalIgnoreCase))
-                ?? assets.FirstOrDefault(a => a.Name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase))
-                ?? assets.FirstOrDefault();
+                ?? candidates.FirstOrDefault(a => a.Name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase))
+                ?? candidates.FirstOrDefault();
 
             return new AppUpdateInfo
             {

@@ -46,15 +46,17 @@ var startupOptions = builder.Configuration
     .Get<LabManagerOptions>() ?? new LabManagerOptions();
 if (!startupOptions.AllowDefaultTokens)
 {
+    var adminToken = startupOptions.AdminToken?.Trim();
+    var agentToken = startupOptions.AgentToken?.Trim();
     var invalidTokens = new List<string>();
-    if (string.IsNullOrWhiteSpace(startupOptions.AdminToken) ||
-        string.Equals(startupOptions.AdminToken, UpdateAgentConstants.DefaultAdminToken, StringComparison.Ordinal))
+    if (string.IsNullOrWhiteSpace(adminToken) ||
+        string.Equals(adminToken, UpdateAgentConstants.DefaultAdminToken.Trim(), StringComparison.OrdinalIgnoreCase))
     {
         invalidTokens.Add("AdminToken");
     }
 
-    if (string.IsNullOrWhiteSpace(startupOptions.AgentToken) ||
-        string.Equals(startupOptions.AgentToken, UpdateAgentConstants.DefaultAgentToken, StringComparison.Ordinal))
+    if (string.IsNullOrWhiteSpace(agentToken) ||
+        string.Equals(agentToken, UpdateAgentConstants.DefaultAgentToken.Trim(), StringComparison.OrdinalIgnoreCase))
     {
         invalidTokens.Add("AgentToken");
     }
@@ -125,40 +127,31 @@ app.MapGet("/api/admin/update", async (
 
 // ---------------- 에이전트 체크인 ----------------
 
-// 작업 상태의 원본은 LabManager다. 에이전트가 보낸 상태를 무조건 덮어쓰지 않고
-// 소유자/종료 상태/시간 순서를 검증해 지연 체크인이나 위조 상태를 거부한다.
-static bool CanAcceptJobState(LabJobRecord? previous, JobSummary incoming, string agentId)
-{
-    if (previous is null) return true;
-
-    var stored = previous.Summary;
-    if (!string.Equals(stored.AgentId, agentId, StringComparison.OrdinalIgnoreCase) ||
-        !string.Equals(incoming.AgentId, agentId, StringComparison.OrdinalIgnoreCase))
-    {
-        return false;
-    }
-
-    if ((stored.State is UpdateJobState.Completed or UpdateJobState.Failed or UpdateJobState.Cancelled) &&
-        incoming.State is not (UpdateJobState.Completed or UpdateJobState.Failed or UpdateJobState.Cancelled))
-    {
-        return false;
-    }
-
-    return incoming.UpdatedAt >= stored.UpdatedAt;
-}
-
 app.MapPost("/api/agents/checkin", async (
     AgentCheckInRequest request,
     LabStore labStore,
     CancellationToken cancellationToken) =>
 {
+    if (!JobStateGuard.AgentIdsMatch(request.Agent.AgentId, request.Telemetry.AgentId))
+    {
+        await labStore.AddAuditAsync(
+            "agent",
+            "job-state-rejected",
+            $"{request.Agent.MachineName}/{request.Telemetry.AgentId}",
+            "에이전트 정보와 텔레메트리의 에이전트 ID 불일치",
+            cancellationToken);
+        return Results.BadRequest(new { error = "에이전트 ID가 일치하지 않습니다." });
+    }
+
     await labStore.UpsertAgentAsync(request.Agent, request.Telemetry, cancellationToken);
 
+    // 상태 검증과 저장에 사용하는 시각은 서버 수신 시각이다.
+    var receivedAt = DateTimeOffset.UtcNow;
     var summary = request.Telemetry.CurrentJob;
     if (summary is not null)
     {
         var previous = await labStore.GetJobAsync(summary.JobId, cancellationToken);
-        if (!CanAcceptJobState(previous, summary, request.Agent.AgentId))
+        if (!JobStateGuard.CanAccept(previous?.Summary, summary, request.Agent.AgentId, receivedAt))
         {
             await labStore.AddAuditAsync(
                 "agent",
@@ -167,24 +160,39 @@ app.MapPost("/api/agents/checkin", async (
                 $"소유자/종료 상태/시간 순서 검증 실패: {summary.State} ({summary.Phase})",
                 cancellationToken);
         }
+        else if (request.Telemetry.CurrentJobDetail is { } mismatchedDetail &&
+                 !JobStateGuard.DetailSummaryMatches(summary, mismatchedDetail.Summary))
+        {
+            await labStore.AddAuditAsync(
+                "agent",
+                "job-state-rejected",
+                $"{request.Agent.MachineName}/{summary.JobId}",
+                $"작업 상세 요약 불일치: {mismatchedDetail.Summary.State}",
+                cancellationToken);
+        }
         else
         {
+            var validated = JobStateGuard.Normalize(summary, receivedAt);
             if (request.Telemetry.CurrentJobDetail is { } detail)
             {
-                await labStore.SaveJobAsync(detail, request.Agent.MachineName, cancellationToken);
+                // 상세의 요약은 검증된 요약으로 교체해 별도로 위조된 값이 저장되지 않게 한다.
+                await labStore.SaveJobAsync(
+                    detail with { Summary = validated },
+                    request.Agent.MachineName,
+                    cancellationToken);
             }
             else
             {
-                await labStore.SaveJobSummaryAsync(summary, request.Agent.MachineName, cancellationToken);
+                await labStore.SaveJobSummaryAsync(validated, request.Agent.MachineName, cancellationToken);
             }
 
-            if (previous is null || previous.Summary.State != summary.State)
+            if (previous is null || previous.Summary.State != validated.State)
             {
                 await labStore.AddAuditAsync(
                     "agent",
                     "job-state",
-                    $"{request.Agent.MachineName}/{summary.JobId}",
-                    $"{previous?.Summary.State.ToString() ?? "없음"} → {summary.State} ({summary.Phase})",
+                    $"{request.Agent.MachineName}/{validated.JobId}",
+                    $"{previous?.Summary.State.ToString() ?? "없음"} → {validated.State} ({validated.Phase})",
                     cancellationToken);
             }
         }
@@ -455,6 +463,7 @@ app.MapPost("/api/admin/jobs/start", async (
             Message = "교사가 업데이트 작업을 배정했습니다.",
             StartedAt = now,
             UpdatedAt = now,
+            ReportedAt = now,
             MaxRebootCount = policy.MaxRebootCount,
             RequiresMaestroAttention = policy.RequireMaestroManualConfirmation,
         }, agent.Agent.MachineName, cancellationToken);
@@ -611,6 +620,7 @@ static async Task FailJobForRejectedCommandAsync(
         Message = result.Message,
         LastError = result.Message,
         UpdatedAt = now,
+        ReportedAt = now,
         CompletedAt = now,
     };
 

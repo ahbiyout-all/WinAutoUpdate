@@ -50,4 +50,4 @@ desktop\tauri\
 
 - 네트워크 요청, 토큰, 설정 파일을 사용하지 않습니다.
 - 기존 `UpdateAgent.sln`, `scripts\publish.ps1`, `scripts\build-inno.ps1`은 변경하지 않습니다.
-- 릴리스 산출물은 여전히 `artifacts\inno\*Setup*.exe` 두 개뿐입니다.
+- 릴리스 산출물은 Inno Setup 설치 파일 2개(`artifacts\inno\*Setup*.exe`)와 MSI 1개(`artifacts\msi\*.msi`), 총 3개입니다.

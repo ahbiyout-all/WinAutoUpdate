@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\src\UpdateAgent.Shared\UpdateAgent.Shared.csproj" />
     <ProjectReference Include="..\..\src\UpdateAgent.Core\UpdateAgent.Core.csproj" />
     <ProjectReference Include="..\..\src\UpdateAgent.Service\UpdateAgent.Service.csproj" />
+    <ProjectReference Include="..\..\src\UpdateAgent.SessionHelper\UpdateAgent.SessionHelper.csproj" />
     <ProjectReference Include="..\..\src\UpdateAgent.LabManager\UpdateAgent.LabManager.csproj" />
     <ProjectReference Include="..\..\src\UpdateAgent.LabManager.Desktop\UpdateAgent.LabManager.Desktop.csproj" />
   </ItemGroup>

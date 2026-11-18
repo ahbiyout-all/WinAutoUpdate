@@ -19,7 +19,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.1"
+  #define AppVersion "0.1.2"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -106,6 +106,8 @@ var
   AgentConfigFile: String;
   AgentConfigBackup: String;
   AgentConfigRestoreNeeded: Boolean;
+  AgentConfigWriteFailed: Boolean;
+  ServiceRecoveryDisabled: Boolean;
 
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
@@ -123,6 +125,65 @@ end;
 procedure KillProcess(const ImageName: String);
 begin
   RunHidden(ExpandConstant('{sys}\taskkill.exe'), '/F /IM "' + ImageName + '" /T');
+end;
+
+procedure DisableServiceRecovery;
+var
+  Sc: String;
+begin
+  { Stop the SCM from restarting the service while it is being killed. }
+  Sc := ExpandConstant('{sys}\sc.exe');
+  RunHidden(Sc, 'failure ' + ServiceName + ' reset= 0 actions= none');
+  RunHidden(Sc, 'failureflag ' + ServiceName + ' 0');
+  ServiceRecoveryDisabled := True;
+end;
+
+procedure RestoreServiceRecovery;
+var
+  Sc: String;
+begin
+  if not ServiceRecoveryDisabled then Exit;
+  Sc := ExpandConstant('{sys}\sc.exe');
+  RunHidden(Sc, 'failure ' + ServiceName +
+    ' reset= 86400 actions= restart/60000/restart/60000/restart/60000');
+  RunHidden(Sc, 'failureflag ' + ServiceName + ' 1');
+  ServiceRecoveryDisabled := False;
+end;
+
+function WaitForServiceStopped: Boolean;
+var
+  I, J: Integer;
+  Sc, Cmd, StatusFile: String;
+  Lines: TArrayOfString;
+begin
+  Result := True;
+  Sc := ExpandConstant('{sys}\sc.exe');
+  StatusFile := AddBackslash(GetTempDir) + 'UpdateAgent.Service.status.txt';
+  for I := 0 to 10 do
+  begin
+    DeleteFile(StatusFile);
+    Cmd := '/c ""' + Sc + '" query ' + ServiceName + ' > "' + StatusFile + '" 2>&1"';
+    RunHidden(ExpandConstant('{sys}\cmd.exe'), Cmd);
+    if not LoadStringsFromFile(StatusFile, Lines) then Exit;
+    for J := 0 to GetArrayLength(Lines) - 1 do
+    begin
+      { Parse the numeric state: labels and state names are localized. }
+      if Pos('1060', Lines[J]) > 0 then
+      begin
+        DeleteFile(StatusFile);
+        Exit;
+      end;
+      if (Pos(': 1 ', Lines[J]) > 0) or (Pos('STOPPED', Uppercase(Lines[J])) > 0) then
+      begin
+        DeleteFile(StatusFile);
+        Exit;
+      end;
+    end;
+    Sleep(500);
+  end;
+  Result := False;
+  Log('UpdateAgentService did not report STOPPED after the forced kill.');
+  DeleteFile(StatusFile);
 end;
 
 function ExtractGuid(const S: String): String;
@@ -221,16 +282,35 @@ begin
     Result := FindMsiProductCodeIn(HKLM32);
 end;
 
+function CmdParamExists(const Prefix: String): Boolean;
+var
+  I: Integer;
+  UpperPrefix, Param: String;
+begin
+  Result := False;
+  UpperPrefix := Uppercase(Prefix);
+  for I := 1 to ParamCount do
+  begin
+    Param := Uppercase(RemoveQuotes(ParamStr(I)));
+    if Pos(UpperPrefix, Param) = 1 then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
 function CmdParamValue(const Prefix: String): String;
 var
   I: Integer;
-  Param: String;
+  Param, UpperPrefix: String;
 begin
   Result := '';
+  UpperPrefix := Uppercase(Prefix);
   for I := 1 to ParamCount do
   begin
-    Param := ParamStr(I);
-    if Pos(Prefix, Param) = 1 then
+    Param := RemoveQuotes(ParamStr(I));
+    if Pos(UpperPrefix, Uppercase(Param)) = 1 then
     begin
       Result := Copy(Param, Length(Prefix) + 1, Length(Param));
       Exit;
@@ -264,11 +344,13 @@ end;
 
 function InitializeSetup: Boolean;
 begin
-  { 1) 실행 중인 기존 앱을 먼저 강제 종료한다. }
+  { 1) Disable SCM recovery, then force-close the existing apps. }
+  DisableServiceRecovery;
   KillProcess('UpdateAgent.SessionHelper.exe');
   KillProcess('UpdateAgent.Cli.exe');
   RunHidden(ExpandConstant('{sys}\sc.exe'), 'stop ' + ServiceName);
   KillProcess('UpdateAgent.Service.exe');
+  WaitForServiceStopped;
 
   { 2) 기존 설치는 선택 없이 PrepareToInstall에서 항상 제거한다. }
   OldInnoUninstall := FindInnoUninstallString;
@@ -283,11 +365,14 @@ var
 begin
   Result := '';
 
+  { Keep SCM restarts disabled across the forced kill during upgrade too. }
+  DisableServiceRecovery;
   KillProcess('UpdateAgent.SessionHelper.exe');
   KillProcess('UpdateAgent.Cli.exe');
   RunHidden(ExpandConstant('{sys}\sc.exe'), 'stop ' + ServiceName);
   Sleep(1200);
   KillProcess('UpdateAgent.Service.exe');
+  WaitForServiceStopped;
 
   { 이전 제거 프로그램/InstallDelete가 appsettings.json을 지우므로 먼저 백업한다. }
   AgentConfigFile := ExpandConstant('{app}\Service\appsettings.json');
@@ -324,7 +409,13 @@ begin
         IntToStr(Code) + ') 설치를 중단합니다.';
       Exit;
     end;
-    if Code in [3010, 1641] then NeedsRestart := True;
+    if Code in [3010, 1641] then
+    begin
+      NeedsRestart := True;
+      Result := '기존 WiX MSI UpdateAgent Agent 제거에 재부팅이 필요합니다. ' +
+        'PC를 재부팅한 뒤 설치를 다시 실행해 주세요.';
+      Exit;
+    end;
     Sleep(1200);
   end;
 
@@ -379,8 +470,10 @@ begin
   end;
 
   RunHidden(Sc, 'description ' + ServiceName + ' "Windows Update automation agent for computer labs"');
+  { Restore the SCM failure recovery disabled before the forced kill. }
   RunHidden(Sc, 'failure ' + ServiceName + ' reset= 86400 actions= restart/60000/restart/60000/restart/60000');
   RunHidden(Sc, 'failureflag ' + ServiceName + ' 1');
+  ServiceRecoveryDisabled := False;
   Result := True;
 end;
 
@@ -414,21 +507,28 @@ var
   Url, TokenFile, Token, ConfigPath, SessionHelper: String;
   TokenLines: TArrayOfString;
   Lines: TArrayOfString;
+  UrlRequested, TokenFileRequested: Boolean;
 begin
+  AgentConfigWriteFailed := False;
+  UrlRequested := CmdParamExists('/LabManagerUrl=');
+  TokenFileRequested := CmdParamExists('/AgentTokenFile=');
+  if (not UrlRequested) and (not TokenFileRequested) then Exit;
+
   Url := Trim(CmdParamValue('/LabManagerUrl='));
   TokenFile := Trim(CmdParamValue('/AgentTokenFile='));
-  if (Url = '') and (TokenFile = '') then Exit;
-
-  if (Url = '') or (TokenFile = '') then
+  if (not UrlRequested) or (not TokenFileRequested) or (Url = '') or (TokenFile = '') then
   begin
+    AgentConfigWriteFailed := True;
     if not WizardSilent then
       MsgBox('/LabManagerUrl과 /AgentTokenFile은 함께 지정해야 합니다. 설정 파일을 쓰지 않습니다.',
-        mbInformation, MB_OK);
+        mbError, MB_OK);
     Exit;
   end;
 
+  { The token is read from a file only; it is never accepted on the command line. }
   if (not LoadStringsFromFile(TokenFile, TokenLines)) or (GetArrayLength(TokenLines) = 0) then
   begin
+    AgentConfigWriteFailed := True;
     if not WizardSilent then
       MsgBox('에이전트 토큰 파일을 읽을 수 없습니다: ' + TokenFile, mbError, MB_OK);
     Exit;
@@ -438,7 +538,13 @@ begin
   if (Length(Token) > 0) and (Token[1] = #65279) then
     Delete(Token, 1, 1);
   Token := Trim(Token);
-  if Token = '' then Exit;
+  if Token = '' then
+  begin
+    AgentConfigWriteFailed := True;
+    if not WizardSilent then
+      MsgBox('에이전트 토큰 파일이 비어 있습니다: ' + TokenFile, mbError, MB_OK);
+    Exit;
+  end;
 
   ConfigPath := ExpandConstant('{commonappdata}\UpdateAgent\agent.json');
   SessionHelper := ExpandConstant('{app}\SessionHelper\UpdateAgent.SessionHelper.exe');
@@ -452,9 +558,18 @@ begin
   Lines[4] := '    "SessionHelperPath": "' + JsonEscape(SessionHelper) + '"';
   Lines[5] := '  }' + #13#10 + '}';
 
-  if SaveStringsToUTF8File(ConfigPath, Lines, False) then
-    RunHidden(ExpandConstant('{sys}\icacls.exe'),
-      '"' + ConfigPath + '" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)"');
+  { Inno Pascal cannot pre-create a file with a restricted DACL before writing it,
+    so agent.json is briefly created with inherited (world-readable) permissions.
+    The ACL is tightened immediately after the write; this small window is accepted. }
+  if not SaveStringsToUTF8File(ConfigPath, Lines, False) then
+  begin
+    AgentConfigWriteFailed := True;
+    if not WizardSilent then
+      MsgBox('에이전트 설정 파일을 쓸 수 없습니다: ' + ConfigPath, mbError, MB_OK);
+    Exit;
+  end;
+  RunHidden(ExpandConstant('{sys}\icacls.exe'),
+    '"' + ConfigPath + '" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)"');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -478,6 +593,9 @@ begin
 
     ApplyFirewallRules;
     WriteAgentConfigIfRequested;
+    if AgentConfigWriteFailed then
+      RaiseException('에이전트 설정 파일을 기록하지 못해 설치를 중단합니다. ' +
+        '명령줄 인자(/LabManagerUrl, /AgentTokenFile)와 토큰 파일을 확인하세요.');
 
     Code := RunHidden(ExpandConstant('{sys}\sc.exe'), 'start ' + ServiceName);
     if (Code <> 0) and (Code <> 1056) then
@@ -489,14 +607,23 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
   begin
+    { Keep the SCM from restarting the service while it is being killed. }
+    DisableServiceRecovery;
     RunHidden(ExpandConstant('{sys}\sc.exe'), 'stop ' + ServiceName);
     KillProcess('UpdateAgent.SessionHelper.exe');
     KillProcess('UpdateAgent.Cli.exe');
     KillProcess('UpdateAgent.Service.exe');
+    WaitForServiceStopped;
     RunHidden(ExpandConstant('{sys}\netsh.exe'),
       'advfirewall firewall delete rule name=all group="' + FirewallGroup + '"');
   end;
 
   if CurUninstallStep = usPostUninstall then
     RunHidden(ExpandConstant('{sys}\sc.exe'), 'delete ' + ServiceName);
+end;
+
+procedure DeinitializeSetup;
+begin
+  { Restore SCM recovery if the install aborted before ssPostInstall. }
+  RestoreServiceRecovery;
 end;

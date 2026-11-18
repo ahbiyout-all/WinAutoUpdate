@@ -36,7 +36,10 @@ public sealed class SessionLauncher
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "DuplicateTokenEx 실패");
             }
 
-            CreateEnvironmentBlock(out environment, primaryToken, false);
+            if (!CreateEnvironmentBlock(out environment, primaryToken, false))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateEnvironmentBlock 실패");
+            }
 
             var startupInfo = new StartupInfo
             {

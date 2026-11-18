@@ -176,16 +176,16 @@ internal sealed class KeyboardBlocker : IDisposable
     private const int WmKeyDown = 0x0100;
     private const int WmSysKeyDown = 0x0104;
 
-    private const int VkTab = 0x09;
-    private const int VkEscape = 0x1B;
-    private const int VkF4 = 0x73;
-    private const int VkLWin = 0x5B;
-    private const int VkRWin = 0x5C;
-    private const int VkShift = 0x10;
-    private const int VkControl = 0x11;
-    private const int VkMenu = 0x12;
-    private const int VkD = 0x44;
-    private const int VkM = 0x4D;
+    internal const int VkTab = 0x09;
+    internal const int VkEscape = 0x1B;
+    internal const int VkF4 = 0x73;
+    internal const int VkLWin = 0x5B;
+    internal const int VkRWin = 0x5C;
+    internal const int VkShift = 0x10;
+    internal const int VkControl = 0x11;
+    internal const int VkMenu = 0x12;
+    internal const int VkD = 0x44;
+    internal const int VkM = 0x4D;
 
     private readonly NativeMethods.LowLevelKeyboardProc _proc;
     private IntPtr _hook;
@@ -204,6 +204,7 @@ internal sealed class KeyboardBlocker : IDisposable
             var info = Marshal.PtrToStructure<NativeMethods.KbdLlHookStruct>(lParam);
             if (ShouldBlock(info.vkCode))
             {
+                // 반환값 1: 메시지를 삼킨다(저수준 훅만 사용하며 BlockInput은 하지 않는다).
                 return new IntPtr(1);
             }
         }
@@ -211,21 +212,26 @@ internal sealed class KeyboardBlocker : IDisposable
         return NativeMethods.CallNextHookEx(_hook, nCode, wParam, lParam);
     }
 
-    private static bool ShouldBlock(int vk)
+    private static bool ShouldBlock(int vk) =>
+        ShouldBlockKey(
+            vk,
+            IsDown(VkMenu),
+            IsDown(VkControl),
+            IsDown(VkShift),
+            IsDown(VkLWin) || IsDown(VkRWin));
+
+    /// <summary>키와 보조키 상태만으로 차단 여부를 판단한다(훅 콜백과 테스트가 공유).</summary>
+    internal static bool ShouldBlockKey(int vk, bool alt, bool ctrl, bool shift, bool win)
     {
         // Windows 키 자체를 막아 시작 메뉴/단축키를 차단한다.
         if (vk is VkLWin or VkRWin) return true;
-
-        var alt = IsDown(VkMenu);
-        var ctrl = IsDown(VkControl);
-        var shift = IsDown(VkShift);
-        var win = IsDown(VkLWin) || IsDown(VkRWin);
 
         // Alt+F4, Alt+Tab, Alt+Esc, Ctrl+Esc, Ctrl+Shift+Esc
         if (vk == VkF4 && alt) return true;
         if (vk == VkTab && alt) return true;
         if (vk == VkEscape && alt) return true;
-        if (vk == VkEscape && ctrl) return true;
+        if (vk == VkEscape && ctrl && !shift) return true;
+        if (vk == VkEscape && ctrl && shift) return true;
 
         // Win+D(바탕 화면), Win+M(최소화)
         if (win && vk is VkD or VkM) return true;

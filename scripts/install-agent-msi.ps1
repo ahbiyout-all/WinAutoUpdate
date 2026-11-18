@@ -24,7 +24,7 @@ $env:UPDATEAGENT_AGENT_TOKEN = Read-Host -AsSecureString
 
 .EXAMPLE
 .\scripts\install-agent-msi.ps1 `
-  -MsiPath ".\artifacts\msi\UpdateAgent.Agent-0.1.1-x64.msi" `
+  -MsiPath ".\artifacts\msi\UpdateAgent.Agent-0.1.2-x64.msi" `
   -LabManagerUrl "http://192.168.0.10:5080" `
   -AgentTokenFile ".\pilot-agent-token.txt" `
   -ConfirmMaestro -Quiet
@@ -222,6 +222,25 @@ function Remove-InstalledAgent {
             if ($removeProcess.ExitCode -ne 0 -and $removeProcess.ExitCode -ne 3010 -and $removeProcess.ExitCode -ne 1641) {
                 throw "Could not remove the existing Inno installation (exit code $($removeProcess.ExitCode))."
             }
+
+            # Inno may keep deleting from a temporary copy after the process exits.
+            $innoUninstallKeys = @(
+                "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{6F0C2E8A-9B3D-4A71-8E52-1C7D4B9A3F60}_is1",
+                "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\{6F0C2E8A-9B3D-4A71-8E52-1C7D4B9A3F60}_is1"
+            )
+            for ($i = 0; $i -lt 30; $i++) {
+                $stillRegistered = $false
+                foreach ($key in $innoUninstallKeys) {
+                    if (Test-Path -LiteralPath $key) { $stillRegistered = $true; break }
+                }
+                if (-not $stillRegistered) { break }
+                Start-Sleep -Seconds 1
+            }
+            foreach ($key in $innoUninstallKeys) {
+                if (Test-Path -LiteralPath $key) {
+                    throw "Timed out waiting for the existing Inno installation to finish uninstalling. Registry key still exists: $key"
+                }
+            }
             continue
         }
 
@@ -340,8 +359,8 @@ if (-not [Uri]::TryCreate($LabManagerUrl, [UriKind]::Absolute, [ref]$uri) -or
 }
 
 $tokenProvided =
-    $PSBoundParameters.ContainsKey('AgentToken') -or
-    $PSBoundParameters.ContainsKey('AgentTokenFile') -or
+    -not [string]::IsNullOrWhiteSpace($AgentToken) -or
+    -not [string]::IsNullOrWhiteSpace($AgentTokenFile) -or
     -not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_AGENT_TOKEN)
 
 if ($tokenProvided) {

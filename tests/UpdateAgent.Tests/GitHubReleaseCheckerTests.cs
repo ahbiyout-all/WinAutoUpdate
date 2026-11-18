@@ -42,7 +42,7 @@ public sealed class GitHubReleaseCheckerTests
         using var handler = new StubHandler("{}", HttpStatusCode.NotFound);
         using var http = new HttpClient(handler);
 
-        await new GitHubReleaseChecker(http).CheckAsync();
+        await new GitHubReleaseChecker(http).CheckAsync(UpdateProduct.Agent);
 
         Assert.Equal(
             "https://api.github.com/repos/ahbiyout-all/WinAutoUpdate/releases/latest",
@@ -67,7 +67,7 @@ public sealed class GitHubReleaseCheckerTests
         """;
 
         using var http = new HttpClient(new StubHandler(json, HttpStatusCode.OK));
-        var info = await new GitHubReleaseChecker(http).CheckAsync();
+        var info = await new GitHubReleaseChecker(http).CheckAsync(UpdateProduct.Agent);
 
         Assert.True(info.CheckSucceeded);
         Assert.True(info.UpdateAvailable);
@@ -94,7 +94,7 @@ public sealed class GitHubReleaseCheckerTests
         """;
 
         using var http = new HttpClient(new StubHandler(json, HttpStatusCode.OK));
-        var info = await new GitHubReleaseChecker(http).CheckAsync();
+        var info = await new GitHubReleaseChecker(http).CheckAsync(UpdateProduct.Agent);
 
         Assert.True(info.UpdateAvailable);
         Assert.Equal("UpdateAgent.Agent-Setup-9.9.9-x64.exe", info.AssetName);
@@ -102,10 +102,67 @@ public sealed class GitHubReleaseCheckerTests
     }
 
     [Fact]
+    public async Task CheckAsync_SelectsTheRequestedProductSetupFromMixedAssets()
+    {
+        const string json = """
+        {
+          "tag_name": "v9.9.9",
+          "assets": [
+            { "name": "UpdateAgent.Agent-9.9.9-x64.msi", "browser_download_url": "https://example.test/agent.msi", "size": 10 },
+            { "name": "UpdateAgent.LabManager-Setup-9.9.9-x64.exe", "browser_download_url": "https://example.test/labmanager-setup.exe", "size": 20 },
+            { "name": "UpdateAgent.Agent-Setup-9.9.9-x64.exe", "browser_download_url": "https://example.test/agent-setup.exe", "size": 30 },
+            { "name": "UpdateAgent.LabManager-9.9.9-x64.msi", "browser_download_url": "https://example.test/labmanager.msi", "size": 40 }
+          ]
+        }
+        """;
+
+        using var labHandler = new StubHandler(json, HttpStatusCode.OK);
+        using var labHttp = new HttpClient(labHandler);
+        var lab = await new GitHubReleaseChecker(labHttp).CheckAsync(UpdateProduct.LabManager);
+
+        using var agentHandler = new StubHandler(json, HttpStatusCode.OK);
+        using var agentHttp = new HttpClient(agentHandler);
+        var agent = await new GitHubReleaseChecker(agentHttp).CheckAsync(UpdateProduct.Agent);
+
+        Assert.True(lab.CheckSucceeded);
+        Assert.True(agent.CheckSucceeded);
+        Assert.Equal("UpdateAgent.LabManager-Setup-9.9.9-x64.exe", lab.AssetName);
+        Assert.Equal("https://example.test/labmanager-setup.exe", lab.AssetUrl);
+        Assert.Equal("UpdateAgent.Agent-Setup-9.9.9-x64.exe", agent.AssetName);
+        Assert.Equal("https://example.test/agent-setup.exe", agent.AssetUrl);
+        Assert.Equal(
+            "https://api.github.com/repos/ahbiyout-all/WinAutoUpdate/releases/latest",
+            labHandler.RequestUri?.ToString());
+        Assert.Equal(
+            "https://api.github.com/repos/ahbiyout-all/WinAutoUpdate/releases/latest",
+            agentHandler.RequestUri?.ToString());
+    }
+
+    [Fact]
+    public async Task CheckAsync_FallsBackToProductAssetWhenNoInstallerExists()
+    {
+        const string json = """
+        {
+          "tag_name": "v9.9.9",
+          "assets": [
+            { "name": "UpdateAgent.Agent-Setup-9.9.9-x64.exe", "browser_download_url": "https://example.test/agent-setup.exe", "size": 10 },
+            { "name": "UpdateAgent.LabManager-9.9.9-x64.sha256", "browser_download_url": "https://example.test/labmanager.sha256", "size": 20 }
+          ]
+        }
+        """;
+
+        using var http = new HttpClient(new StubHandler(json, HttpStatusCode.OK));
+        var info = await new GitHubReleaseChecker(http).CheckAsync(UpdateProduct.LabManager);
+
+        Assert.True(info.CheckSucceeded);
+        Assert.Equal("UpdateAgent.LabManager-9.9.9-x64.sha256", info.AssetName);
+    }
+
+    [Fact]
     public async Task CheckAsync_ReportsFailureOnHttpError()
     {
         using var http = new HttpClient(new StubHandler("{}", HttpStatusCode.NotFound));
-        var info = await new GitHubReleaseChecker(http).CheckAsync();
+        var info = await new GitHubReleaseChecker(http).CheckAsync(UpdateProduct.Agent);
 
         Assert.False(info.CheckSucceeded);
         Assert.False(info.UpdateAvailable);
@@ -116,7 +173,7 @@ public sealed class GitHubReleaseCheckerTests
     public async Task CheckAsync_ReportsFailureOnInvalidJson()
     {
         using var http = new HttpClient(new StubHandler("{not-json", HttpStatusCode.OK));
-        var info = await new GitHubReleaseChecker(http).CheckAsync();
+        var info = await new GitHubReleaseChecker(http).CheckAsync(UpdateProduct.Agent);
 
         Assert.False(info.CheckSucceeded);
         Assert.NotNull(info.Error);

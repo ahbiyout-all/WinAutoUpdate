@@ -24,6 +24,9 @@ public sealed class OverlayPipeServer : IAsyncDisposable
 
     public int ConnectedClients => _clients.Count;
 
+    /// <summary>새 헬퍼가 연결되면 현재 진행 상태로 화면을 다시 맞추기 위한 알림.</summary>
+    public event Action? ClientConnected;
+
     public void Start()
     {
         _acceptLoop ??= Task.Run(() => AcceptLoopAsync(_cts.Token));
@@ -74,6 +77,15 @@ public sealed class OverlayPipeServer : IAsyncDisposable
                 var id = Guid.NewGuid();
                 var connection = new ClientConnection(pipe);
                 _clients[id] = connection;
+                try
+                {
+                    ClientConnected?.Invoke();
+                }
+                catch
+                {
+                    // 구독자의 실패가 파이프 수용 루프를 중단하지 않게 한다.
+                }
+
                 _ = Task.Run(() => HandleClientAsync(id, connection, cancellationToken), cancellationToken);
             }
             catch (OperationCanceledException)

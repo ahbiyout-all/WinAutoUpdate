@@ -80,7 +80,37 @@ public sealed class Worker : BackgroundService
         await _commands.InitializeAsync(stoppingToken);
         await LoadFirstSeenAsync(stoppingToken);
 
+        void OnOverlayClientConnected()
+        {
+            // 헬퍼는 재연결 후 오버레이를 숨긴 상태이므로 현재 작업 상태로 다시 그린다.
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _overlaySink.ResyncAsync(stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "오버레이 재연결 동기화 실패");
+                }
+            }, CancellationToken.None);
+        }
+
+        _overlayPipe.ClientConnected += OnOverlayClientConnected;
         _overlayPipe.Start();
+
+        try
+        {
+            await _overlaySink.ResyncAsync(stoppingToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogDebug(ex, "오버레이 초기 동기화 실패");
+        }
+
         _ = _sessionWatcher.StartAsync(stoppingToken);
 
         if (_options.CurrentValue.ResumeOnStartup)
@@ -119,6 +149,8 @@ public sealed class Worker : BackgroundService
         }
         finally
         {
+            _overlayPipe.ClientConnected -= OnOverlayClientConnected;
+
             try
             {
                 await _sessionWatcher.StopAsync(CancellationToken.None);

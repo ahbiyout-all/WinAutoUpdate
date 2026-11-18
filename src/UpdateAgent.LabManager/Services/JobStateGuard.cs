@@ -1,0 +1,52 @@
+using UpdateAgent.Shared.Models;
+
+namespace UpdateAgent.LabManager.Services;
+
+/// <summary>
+/// 작업 상태의 원본은 LabManager다. 에이전트가 보낸 상태의 소유자/종료 상태/시간 순서를
+/// 검증하고, 서버가 받은 시각으로 UpdatedAt을 정규화한다.
+/// </summary>
+internal static class JobStateGuard
+{
+    public static bool AgentIdsMatch(string agentId, string telemetryAgentId) =>
+        string.Equals(agentId, telemetryAgentId, StringComparison.OrdinalIgnoreCase);
+
+    public static bool CanAccept(
+        JobSummary? stored,
+        JobSummary incoming,
+        string agentId,
+        DateTimeOffset receivedAt)
+    {
+        if (!AgentIdsMatch(agentId, incoming.AgentId)) return false;
+
+        if (stored is null)
+        {
+            // 새 작업이 완료/실패/취소 상태로 들어오는 것은 허용하지 않는다.
+            return !incoming.IsTerminal;
+        }
+
+        if (!AgentIdsMatch(stored.AgentId, agentId)) return false;
+        if (stored.IsTerminal) return false;
+
+        // 다른 시계끼리 비교하지 않는다. 보고 시각은 보고 시끼리, 수신 시각은 수신 시끼리 비교한다.
+        var incomingReportedAt = incoming.ReportedAt ?? incoming.UpdatedAt;
+        var storedReportedAt = stored.ReportedAt ?? stored.UpdatedAt;
+        if (incomingReportedAt < storedReportedAt) return false;
+        if (receivedAt < stored.UpdatedAt) return false;
+
+        return true;
+    }
+
+    /// <summary>상세에 포함된 요약이 검증 대상 요약과 같은 작업/상태인지 확인한다.</summary>
+    public static bool DetailSummaryMatches(JobSummary summary, JobSummary detailSummary) =>
+        AgentIdsMatch(summary.JobId, detailSummary.JobId) &&
+        summary.State == detailSummary.State;
+
+    /// <summary>서버 수신 시각을 기록하고 에이전트 보고 시각은 ReportedAt에 보관한다.</summary>
+    public static JobSummary Normalize(JobSummary incoming, DateTimeOffset receivedAt) =>
+        incoming with
+        {
+            ReportedAt = incoming.ReportedAt ?? incoming.UpdatedAt,
+            UpdatedAt = receivedAt,
+        };
+}

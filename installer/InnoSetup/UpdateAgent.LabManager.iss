@@ -17,7 +17,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.1"
+  #define AppVersion "0.1.2"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -84,8 +84,11 @@ Source: "{#StageRoot}\*"; DestDir: "{app}"; Excludes: "appsettings.json"; Flags:
 Source: "{#StageRoot}\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
 
 [InstallDelete]
-; 대시보드 정적 파일은 설치 패키지가 항상 최신 상태로 덮어쓴다. appsettings.json은 제외한다.
+; Remove all stale files and directories from earlier upgrades, not just wwwroot.
+; appsettings.json is backed up in PrepareToInstall and restored in ssPostInstall;
+; the backup in the temp folder is not touched by these entries.
 Type: filesandordirs; Name: "{app}\wwwroot"
+Type: filesandordirs; Name: "{app}\*"
 
 [Icons]
 Name: "{group}\UpdateAgent LabManager"; Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"
@@ -101,6 +104,7 @@ var
   LabManagerConfigFile: String;
   LabManagerConfigBackup: String;
   LabManagerConfigRestoreNeeded: Boolean;
+  FirewallPort: String;
 
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
@@ -232,25 +236,100 @@ begin
   { 설정 복원은 InstallDelete/[Files]가 끝난 뒤 ssPostInstall에서 수행한다. }
 end;
 
-procedure AddFirewallRule(const RuleName, ProgramPath, Description: String);
+function ExtractPortFromUrlLine(const Line: String): String;
+var
+  ProtocolPos, StartPos, BreakPos, ColonPos, I: Integer;
 begin
+  Result := '';
+  ProtocolPos := Pos('http://', Line);
+  if ProtocolPos > 0 then
+    StartPos := ProtocolPos + 7
+  else
+  begin
+    ProtocolPos := Pos('https://', Line);
+    if ProtocolPos = 0 then Exit;
+    StartPos := ProtocolPos + 8;
+  end;
+
+  BreakPos := Length(Line) + 1;
+  ColonPos := 0;
+  for I := StartPos to Length(Line) do
+  begin
+    if (Line[I] = '/') or (Line[I] = '"') then
+    begin
+      BreakPos := I;
+      Break;
+    end;
+    if Line[I] = ':' then ColonPos := I;
+  end;
+  if ColonPos = 0 then Exit;
+
+  Result := Copy(Line, ColonPos + 1, BreakPos - ColonPos - 1);
+  I := 1;
+  while I <= Length(Result) do
+  begin
+    if (Result[I] < '0') or (Result[I] > '9') then
+    begin
+      Result := '';
+      Exit;
+    end;
+    Inc(I);
+  end;
+  if (Length(Result) = 0) or (Length(Result) > 5) or
+     ((Length(Result) = 5) and (Result > '65535')) then
+    Result := '';
+end;
+
+function GetConfiguredFirewallPort: String;
+var
+  Lines: TStringList;
+  I: Integer;
+  Candidate: String;
+begin
+  Result := '5080';
+  if LabManagerConfigFile = '' then
+    LabManagerConfigFile := ExpandConstant('{app}\appsettings.json');
+  if not FileExists(LabManagerConfigFile) then Exit;
+
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(LabManagerConfigFile);
+    for I := 0 to Lines.Count - 1 do
+    begin
+      if (Pos('"Urls"', Lines.Strings[I]) > 0) or
+         (Pos('"ListenUrl"', Lines.Strings[I]) > 0) then
+      begin
+        Candidate := ExtractPortFromUrlLine(Lines.Strings[I]);
+        if Candidate <> '' then
+        begin
+          Result := Candidate;
+          Exit;
+        end;
+      end;
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
+procedure AddFirewallRule(const RuleName, Description: String);
+begin
+  { Port-based rule aligned with scripts\allow-labmanager.ps1; Public stays blocked. }
   RunHidden(ExpandConstant('{sys}\netsh.exe'),
     'advfirewall firewall add rule name="' + RuleName +
-    '" dir=in action=allow program="' + ProgramPath +
-    '" enable=yes profile=any group="' + FirewallGroup +
+    '" dir=in action=allow protocol=TCP localport=' + FirewallPort +
+    ' enable=yes profile=domain,private group="' + FirewallGroup +
     '" description="' + Description + '"');
 end;
 
 procedure ApplyFirewallRules;
-var
-  AppExe: String;
 begin
-  AppExe := ExpandConstant('{app}\UpdateAgent.LabManager.exe');
-
+  { 복원된 appsettings.json의 포트를 사용한다. 설정이 없으면 5080. }
+  FirewallPort := GetConfiguredFirewallPort;
   RunHidden(ExpandConstant('{sys}\netsh.exe'),
     'advfirewall firewall delete rule name=all group="' + FirewallGroup + '"');
-  AddFirewallRule('UpdateAgent LabManager', AppExe, 'UpdateAgent LabManager dashboard/API');
-  AddFirewallRule('UpdateAgent LabManager {#AppVersion}', AppExe, 'UpdateAgent LabManager (versioned rule)');
+  AddFirewallRule('UpdateAgent LabManager', 'UpdateAgent LabManager dashboard/API');
+  AddFirewallRule('UpdateAgent LabManager {#AppVersion}', 'UpdateAgent LabManager (versioned rule)');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
