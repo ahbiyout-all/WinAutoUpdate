@@ -16,7 +16,7 @@ Run from a normal PowerShell prompt. WiX 5.0.2 is restored from NuGet.
 .\scripts\build-msi.ps1
 
 .EXAMPLE
-.\scripts\build-msi.ps1 -ProductVersion 0.1.5 -SkipValidate
+.\scripts\build-msi.ps1 -ProductVersion 0.1.6 -SkipValidate
 
 .EXAMPLE
 .\scripts\build-msi.ps1 -Sign -CertificateThumbprint "ABC123..." -TimestampUrl "http://timestamp.digicert.com"

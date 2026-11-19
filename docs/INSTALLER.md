@@ -142,10 +142,10 @@ C:\Program Files\UpdateAgent\LabManager\
 
 ```powershell
 # 가장 단순한 무인 설치(설정은 나중에 configure-agent.ps1로 적용)
-.\UpdateAgent.Agent-Setup-0.1.5-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+.\UpdateAgent.Agent-Setup-0.1.6-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # 설치와 동시에 LabManager URL/토큰 적용(토큰은 파일로 전달)
-.\UpdateAgent.Agent-Setup-0.1.5-x64.exe `
+.\UpdateAgent.Agent-Setup-0.1.6-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LabManagerUrl=http://192.168.0.10:5080 `
   /AgentTokenFile=C:\pilot-agent-token.txt
@@ -159,7 +159,7 @@ C:\Program Files\UpdateAgent\LabManager\
 ### 교사 PC
 
 ```powershell
-.\UpdateAgent.LabManager-Setup-0.1.5-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+.\UpdateAgent.LabManager-Setup-0.1.6-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 설치 후 `C:\Program Files\UpdateAgent\LabManager\appsettings.json`의

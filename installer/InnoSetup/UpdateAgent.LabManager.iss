@@ -17,7 +17,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.5"
+  #define AppVersion "0.1.6"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -120,28 +120,26 @@ begin
   Result := Code;
 end;
 
-procedure KillProcess(const ImageName: String);
-begin
-  RunHidden(ExpandConstant('{sys}\taskkill.exe'), '/F /IM "' + ImageName + '" /T');
-end;
-
 { [Code] cannot capture stdout, so tasklist output is redirected to a temp file. }
 function IsProcessRunning(const ImageName: String): Boolean;
 var
-  Cmd, OutFile: String;
+  Cmd, OutFile, Needle: String;
   Lines: TArrayOfString;
   I: Integer;
 begin
   Result := False;
-  OutFile := AddBackslash(GetTempDir) + 'UpdateAgent.process.check.txt';
+  OutFile := AddBackslash(GetTempDir) + 'UpdateAgent.LabManager.process.check.txt';
   DeleteFile(OutFile);
+  { CSV keeps the full image name; the default table view truncates it to
+    25 characters, which hides UpdateAgent.LabManager.Desktop.exe and others. }
   Cmd := '/c ""' + ExpandConstant('{sys}\tasklist.exe') + '" /FI "IMAGENAME eq ' +
-    ImageName + '" /NH > "' + OutFile + '" 2>&1"';
+    ImageName + '" /NH /FO CSV > "' + OutFile + '" 2>&1"';
   RunHidden(ExpandConstant('{sys}\cmd.exe'), Cmd);
   if not LoadStringsFromFile(OutFile, Lines) then Exit;
+  Needle := '"' + Uppercase(ImageName) + '"';
   for I := 0 to GetArrayLength(Lines) - 1 do
   begin
-    if Pos(Uppercase(ImageName), Uppercase(Lines[I])) > 0 then
+    if Pos(Needle, Uppercase(Lines[I])) > 0 then
     begin
       Result := True;
       Exit;

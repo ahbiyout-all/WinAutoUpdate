@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-11-19 — 프로세스 종료 감지 결함 수정 (v0.1.6)
+
+### 자아성찰 — 발견한 오류
+
+- v0.1.4/v0.1.5의 `IsProcessRunning`은 `tasklist /NH` 기본 표 출력에서 이미지명을 찾았다.
+- 실제 Windows `tasklist`는 이미지명을 25자로 잘라 표시한다. 예: `UpdateAgent.Agent.Desktop.exe` → `UpdateAgent.Agent.Desktop`, `UpdateAgent.LabManager.exe` → `UpdateAgent.LabManager`.
+- 따라서 **학생 GUI, 세션 도우미, 교사 런처/서버가 실행 중이어도 감지하지 못해 종료하지 않는다.** `종료 → 언인스톨 → 설치` 순서를 보장한다고 주장했지만 실제로는 보장되지 않았다.
+- 원인은 컴파일 성공과 단위 테스트만으로 설치 시나리오를 검증하지 않고, 프로세스 감지 로직을 실제 실행 중인 프로세스로 확인하지 않은 데 있다.
+
+### 수정
+
+| 항목 | 내용 |
+|---|---|
+| 감지 방식 | `tasklist ... /NH /FO CSV`로 전체 이미지명을 얻고 `"IMAGENAME"` 문자열로 비교 |
+| 임시 파일 | 제품별 파일명(`UpdateAgent.Agent.process.check.txt`, `UpdateAgent.LabManager.process.check.txt`)으로 분리 |
+| 정리 | 리팩터링 후 사용되지 않는 `KillProcess` 함수 제거 |
+| 검증 | 학생 GUI를 실제 실행한 상태에서 감지 `True`, 강제 종료 후 감지 `False` 확인 |
+
+### 영향
+
+- `v0.1.4`, `v0.1.5` 설치 프로그램으로 덮어쓰기 설치 시 위 프로세스가 남아 있으면 파일 잠금으로 실패할 수 있다. `v0.1.6` 사용을 권장한다.
+
+### 검증
+
+- `dotnet build -c Release`: 경고 0/오류 0, 테스트 89개 통과.
+- PowerShell/YAML 파싱, PII 스캔, 버전 동기화 검사 통과.
+- Inno Setup 6.7.1 컴파일 성공, UTF-8 BOM 유지.
+- 로컬 빌드 SHA-256(CI 재빌드 시 달라질 수 있음):
+  - `UpdateAgent.Agent-Setup-0.1.6-x64.exe` `df3e1b5667d1c3ee5ec0eaa03ac1086a5a3378927f875e691c2e8f3a45034a76`
+  - `UpdateAgent.LabManager-Setup-0.1.6-x64.exe` `89dc454dfbced1583c5f1e8df74ec5dccd4deadaf549c25ef35b4c096d61a64e`
+  - `UpdateAgent.Agent-0.1.6-x64.msi` `8479da3cc7a0c49d065a4293086bc5dab96350f55c180206245d5ae066849b60`
+
+---
+
 ## 2026-11-19 — 앱별 아이콘 추가 (v0.1.5)
 
 ### 내용
