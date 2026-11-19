@@ -51,7 +51,8 @@ artifacts\inno\
 C:\Program Files\UpdateAgent\
   Service\            UpdateAgent.Service.exe + 런타임 DLL
   SessionHelper\      UpdateAgent.SessionHelper.exe + 런타임 DLL
-  Cli\                UpdateAgent.Cli.exe + 런타임 DLL
+  Desktop\            UpdateAgent.Agent.Desktop.exe + 런타임 DLL (상태 확인 창)
+  Cli\                UpdateAgent.Cli.exe + 런타임 DLL (고급 점검용)
   unins000.exe        제거 프로그램
 
 C:\ProgramData\UpdateAgent\
@@ -105,8 +106,10 @@ C:\Program Files\UpdateAgent\LabManager\
 6. **서비스·방화벽·설정 적용** (Agent)
    - 서비스 등록/갱신, 방화벽 규칙 등록, 선택적 `agent.json` 작성.
 7. **앱 실행**
-   - Agent: 서비스를 시작하고 마지막 화면에서 `UpdateAgent 상태 확인`을 실행할 수 있습니다.
-   - LabManager: 설치 완료 후 **런처**(`UpdateAgent.LabManager.Desktop.exe`)를 실행합니다.
+   - Agent: 서비스를 시작하고 마지막 화면에서 `UpdateAgent 상태 확인` 데스크톱 앱을 실행할 수 있습니다.
+     시작 메뉴/바탕화면 바로가기도 같은 앱(`{app}\Desktop\UpdateAgent.Agent.Desktop.exe`)을 엽니다.
+   - LabManager: 기본 토큰(`change-me-*`)이 남아 있으면 대시보드를 자동 실행하지 않고 토큰 변경 안내를 표시합니다.
+     토큰을 변경한 뒤 **런처**(`UpdateAgent.LabManager.Desktop.exe`)를 실행합니다.
      바로가기도 런처를 가리키며, 런처가 Edge/Chrome 앱 모드 창으로 대시보드를 엽니다.
 
 ## 5. 기존 설치 처리
@@ -121,6 +124,7 @@ C:\Program Files\UpdateAgent\LabManager\
 - 제거 직전 `appsettings.json`을 `%TEMP%`에 백업하고, 제거가 끝나면 복원합니다.
   - Agent: `C:\Program Files\UpdateAgent\Service\appsettings.json`
   - LabManager: `C:\Program Files\UpdateAgent\LabManager\appsettings.json`
+  - 설치 과정에서 생성된 기본 `appsettings.json`은 백업본으로 덮어씁니다.
 - `C:\ProgramData\UpdateAgent\agent.json`은 제거 대상이 아니므로 그대로 유지됩니다.
 - 이전 버전 제거가 실패하면 오류를 표시하고 **새 설치를 중단합니다.** 덮어쓰기로 이어가지 않습니다.
 
@@ -130,10 +134,10 @@ C:\Program Files\UpdateAgent\LabManager\
 
 ```powershell
 # 가장 단순한 무인 설치(설정은 나중에 configure-agent.ps1로 적용)
-.\UpdateAgent.Agent-Setup-0.1.2-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+.\UpdateAgent.Agent-Setup-0.1.3-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # 설치와 동시에 LabManager URL/토큰 적용(토큰은 파일로 전달)
-.\UpdateAgent.Agent-Setup-0.1.2-x64.exe `
+.\UpdateAgent.Agent-Setup-0.1.3-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LabManagerUrl=http://192.168.0.10:5080 `
   /AgentTokenFile=C:\pilot-agent-token.txt
@@ -147,7 +151,7 @@ C:\Program Files\UpdateAgent\LabManager\
 ### 교사 PC
 
 ```powershell
-.\UpdateAgent.LabManager-Setup-0.1.2-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+.\UpdateAgent.LabManager-Setup-0.1.3-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 설치 후 `C:\Program Files\UpdateAgent\LabManager\appsettings.json`의
@@ -199,7 +203,8 @@ C:\Program Files\UpdateAgent\LabManager\
 
 - 위 패턴이 하나라도 남아 있으면 오류.
 - Agent 필수 파일: `Service\UpdateAgent.Service.exe`, `Service\appsettings.json`,
-  `SessionHelper\UpdateAgent.SessionHelper.exe`, `Cli\UpdateAgent.Cli.exe`
+  `SessionHelper\UpdateAgent.SessionHelper.exe`, `Desktop\UpdateAgent.Agent.Desktop.exe`,
+  `Cli\UpdateAgent.Cli.exe`
 - LabManager 필수 파일: `UpdateAgent.LabManager.exe`, `UpdateAgent.LabManager.Desktop.exe`,
   `wwwroot\index.html`, `appsettings.json`
 

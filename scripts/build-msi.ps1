@@ -16,7 +16,7 @@ Run from a normal PowerShell prompt. WiX 5.0.2 is restored from NuGet.
 .\scripts\build-msi.ps1
 
 .EXAMPLE
-.\scripts\build-msi.ps1 -ProductVersion 0.1.2 -SkipValidate
+.\scripts\build-msi.ps1 -ProductVersion 0.1.3 -SkipValidate
 
 .EXAMPLE
 .\scripts\build-msi.ps1 -Sign -CertificateThumbprint "ABC123..." -TimestampUrl "http://timestamp.digicert.com"
@@ -160,10 +160,12 @@ $ProductVersion = ConvertTo-MsiProductVersion $ProductVersion
 
 $serviceSource       = Join-Path $PublishRoot "agent\service"
 $sessionHelperSource = Join-Path $PublishRoot "agent\sessionhelper"
+$agentDesktopSource  = Join-Path $PublishRoot "agent\desktop"
 $cliSource           = Join-Path $PublishRoot "cli"
 
 Assert-PublishFolder $serviceSource "UpdateAgent.Service.exe"
 Assert-PublishFolder $sessionHelperSource "UpdateAgent.SessionHelper.exe"
+Assert-PublishFolder $agentDesktopSource "UpdateAgent.Agent.Desktop.exe"
 Assert-PublishFolder $cliSource "UpdateAgent.Cli.exe"
 
 if (-not (Test-Path -LiteralPath $payloadAppSettings)) {
@@ -188,6 +190,7 @@ New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
 $folders = @(
     [pscustomobject]@{ Source = $serviceSource;       Destination = (Join-Path $StagingRoot "agent\service") }
     [pscustomobject]@{ Source = $sessionHelperSource; Destination = (Join-Path $StagingRoot "agent\sessionhelper") }
+    [pscustomobject]@{ Source = $agentDesktopSource;  Destination = (Join-Path $StagingRoot "agent\desktop") }
     [pscustomobject]@{ Source = $cliSource;           Destination = (Join-Path $StagingRoot "cli") }
 )
 

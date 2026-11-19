@@ -65,6 +65,7 @@ dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj
 publish\labmanager
 publish\agent\service
 publish\agent\sessionhelper
+publish\agent\desktop
 publish\cli
 ```
 
@@ -111,7 +112,8 @@ Get-NetIPAddress -AddressFamily IPv4 |
 ### 3-4. 실행 (브라우저 앱 모드)
 
 3-1에서 설정한 토큰이 `publish\labmanager\appsettings.json`에 있는지 확인합니다.
-기본 토큰(`change-me-*`)이면 서버가 시작되지 않습니다.
+기본 토큰(`change-me-*`)이면 서버가 시작되지 않습니다. 설치 마지막 단계의 런처 자동 실행도
+기본 토큰이 남아 있으면 건너뛰고 토큰 변경 안내를 표시합니다.
 
 `appsettings.json`을 읽도록 **게시 폴더에서** 런처를 실행합니다.
 
@@ -160,7 +162,7 @@ Phase 0 파일럿에서는 Inno Setup을 먼저 검증하고, 문제가 있으�
 ```powershell
 Set-Location "<복사한 폴더>"
 
-.\UpdateAgent.Agent-Setup-0.1.2-x64.exe `
+.\UpdateAgent.Agent-Setup-0.1.3-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LabManagerUrl=http://<교사-PC-IP>:5080 `
   /AgentTokenFile="<agent-token.txt 경로>"
@@ -190,7 +192,7 @@ Set-Location "<복사한 폴더>"
 
 $env:UPDATEAGENT_AGENT_TOKEN = Get-Content "<agent-token.txt 경로>" -Raw
 .\scripts\install-agent-msi.ps1 `
-  -MsiPath ".\UpdateAgent.Agent-0.1.2-x64.msi" `
+  -MsiPath ".\UpdateAgent.Agent-0.1.3-x64.msi" `
   -LabManagerUrl "http://<교사-PC-IP>:5080" `
   -ConfirmMaestro
 ```
@@ -216,7 +218,8 @@ $env:UPDATEAGENT_AGENT_TOKEN = Get-Content "<agent-token.txt 경로>" -Raw
   scripts\
   publish\agent\service
   publish\agent\sessionhelper
-  publish\cli                (선택: 사전 점검/상태 확인용)
+  publish\agent\desktop      (학생용 상태 확인 GUI)
+  publish\cli                (선택: 고급 사전 점검용)
 ```
 
 학생 PC에서 **관리자 PowerShell**을 열고:

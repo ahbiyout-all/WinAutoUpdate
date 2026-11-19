@@ -27,11 +27,16 @@ public sealed class LabManagerServer
     /// <summary>이 데스크톱 프로세스가 서버를 직접 시작했는지.</summary>
     public bool StartedByDesktop => _process is not null;
 
+    /// <summary>로컬 서버를 시작했지만 곧 종료되었는지(예: 기본 토큰 거부).</summary>
+    public bool LocalServerExited { get; private set; }
+
     /// <summary>
     /// 서버가 준비되었으면 true. 원격 주소인데 연결할 수 없거나 로컬 서버 시작에 실패하면 false.
     /// </summary>
     public async Task<bool> EnsureRunningAsync(CancellationToken cancellationToken = default)
     {
+        LocalServerExited = false;
+
         if (await IsHealthyAsync(cancellationToken).ConfigureAwait(false))
         {
             return true;
@@ -84,6 +89,7 @@ public sealed class LabManagerServer
 
             if (_process.HasExited)
             {
+                LocalServerExited = true;
                 return false;
             }
         }

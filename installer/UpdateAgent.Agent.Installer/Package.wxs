@@ -29,6 +29,7 @@
       <Directory Id="INSTALLFOLDER" Name="UpdateAgent">
         <Directory Id="ServiceDir" Name="Service" />
         <Directory Id="SessionHelperDir" Name="SessionHelper" />
+        <Directory Id="DesktopDir" Name="Desktop" />
         <Directory Id="CliDir" Name="Cli" />
       </Directory>
     </StandardDirectory>
@@ -36,6 +37,7 @@
     <Feature Id="AgentFeature" Title="UpdateAgent Agent" Level="1">
       <ComponentGroupRef Id="ServiceFiles" />
       <ComponentGroupRef Id="SessionHelperFiles" />
+      <ComponentGroupRef Id="DesktopFiles" />
     </Feature>
 
     <Feature Id="CliFeature" Title="Command-line tool" Level="2">
@@ -108,6 +110,16 @@
         <Exclude Files="$(var.PublishRoot)\agent\sessionhelper\**\*.md" />
         <Exclude Files="$(var.PublishRoot)\agent\sessionhelper\**\*.txt" />
         <Exclude Files="$(var.PublishRoot)\agent\sessionhelper\**\*.pdf" />
+      </Files>
+    </ComponentGroup>
+
+    <ComponentGroup Id="DesktopFiles" Directory="DesktopDir">
+      <Files Include="$(var.PublishRoot)\agent\desktop\**">
+        <Exclude Files="$(var.PublishRoot)\agent\desktop\**\*.pdb" />
+        <Exclude Files="$(var.PublishRoot)\agent\desktop\**\*.xml" />
+        <Exclude Files="$(var.PublishRoot)\agent\desktop\**\*.md" />
+        <Exclude Files="$(var.PublishRoot)\agent\desktop\**\*.txt" />
+        <Exclude Files="$(var.PublishRoot)\agent\desktop\**\*.pdf" />
       </Files>
     </ComponentGroup>
 

@@ -17,7 +17,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.2"
+  #define AppVersion "0.1.3"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -96,7 +96,7 @@ Name: "{group}\UpdateAgent LabManager 제거"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\UpdateAgent LabManager"; Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"; Description: "UpdateAgent LabManager 실행"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"; Description: "UpdateAgent LabManager 실행"; Flags: postinstall nowait skipifsilent; Check: ShouldLaunchDashboard
 
 [Code]
 var
@@ -105,6 +105,7 @@ var
   LabManagerConfigBackup: String;
   LabManagerConfigRestoreNeeded: Boolean;
   FirewallPort: String;
+  LaunchSkippedForDefaultTokens: Boolean;
 
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
@@ -200,9 +201,10 @@ begin
   DeleteFile(LabManagerConfigBackup);
   if FileExists(LabManagerConfigFile) then
   begin
+    Log('Backing up LabManager appsettings.json: ' + LabManagerConfigFile + ' -> ' + LabManagerConfigBackup);
     if not CopyFile(LabManagerConfigFile, LabManagerConfigBackup, False) then
     begin
-      Result := '기존 LabManager appsettings.json 백업에 실패해 설치를 중단합니다.';
+      Result := '기존 LabManager appsettings.json 백업에 실패해 설치를 중단합니다: ' + LabManagerConfigBackup;
       Exit;
     end;
     LabManagerConfigRestoreNeeded := True;
@@ -332,6 +334,40 @@ begin
   AddFirewallRule('UpdateAgent LabManager {#AppVersion}', 'UpdateAgent LabManager (versioned rule)');
 end;
 
+function HasDefaultLabManagerToken: Boolean;
+var
+  Lines: TStringList;
+  I: Integer;
+begin
+  Result := False;
+  if LabManagerConfigFile = '' then
+    LabManagerConfigFile := ExpandConstant('{app}\appsettings.json');
+  if not FileExists(LabManagerConfigFile) then Exit;
+
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(LabManagerConfigFile);
+    for I := 0 to Lines.Count - 1 do
+      if Pos('change-me-', Lowercase(Lines.Strings[I])) > 0 then
+      begin
+        Result := True;
+        Exit;
+      end;
+  finally
+    Lines.Free;
+  end;
+end;
+
+function ShouldLaunchDashboard: Boolean;
+begin
+  Result := not HasDefaultLabManagerToken;
+  if not Result then
+  begin
+    LaunchSkippedForDefaultTokens := True;
+    Log('Skipping dashboard launch: appsettings.json still contains a default token.');
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
@@ -339,14 +375,24 @@ begin
     { InstallDelete/[Files]가 끝난 뒤에 설정을 복원해야 덮어써지지 않는다. }
     if LabManagerConfigRestoreNeeded then
     begin
+      Log('Restoring LabManager appsettings.json: ' + LabManagerConfigBackup + ' -> ' + LabManagerConfigFile);
       ForceDirectories(ExtractFileDir(LabManagerConfigFile));
-      if not CopyFile(LabManagerConfigBackup, LabManagerConfigFile, True) then
-        RaiseException('기존 LabManager appsettings.json 복원에 실패해 설치를 중단합니다.');
+      { [Files] may have created appsettings.json with onlyifdoesntexist; overwrite with the backup. }
+      if not CopyFile(LabManagerConfigBackup, LabManagerConfigFile, False) then
+        RaiseException('기존 LabManager appsettings.json 복원에 실패해 설치를 중단합니다. 백업: ' + LabManagerConfigBackup);
       DeleteFile(LabManagerConfigBackup);
       LabManagerConfigRestoreNeeded := False;
     end;
 
     ApplyFirewallRules;
+  end
+  else if CurStep = ssDone then
+  begin
+    if LaunchSkippedForDefaultTokens and not WizardSilent then
+      MsgBox(
+        '기본 토큰(change-me-*)이 남아 있어 대시보드를 자동 실행하지 않았습니다.' + #13#10 +
+        '설치 폴더의 appsettings.json에서 AdminToken과 AgentToken을 변경한 뒤 런처를 실행하세요.',
+        mbInformation, MB_OK);
   end;
 end;
 

@@ -19,7 +19,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.2"
+  #define AppVersion "0.1.3"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -79,25 +79,27 @@ Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 Name: "desktopicon"; Description: "바탕화면에 UpdateAgent 상태 바로가기 만들기"; GroupDescription: "바로가기:"; Flags: checkedonce
 
 [Files]
-; 설치 폴더는 서비스/세션 도우미/CLI로 나뉜 개별 파일 구조다.
+; 설치 폴더는 서비스/세션 도우미/데스크톱 앱/CLI로 나뉜 개별 파일 구조다.
 ; 문서, 심볼, 압축/포터블 파일은 빌드 스크립트에서 스테이징 단계에 제거한다.
 Source: "{#StageRoot}\Service\*"; DestDir: "{app}\Service"; Excludes: "appsettings.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#StageRoot}\Service\appsettings.json"; DestDir: "{app}\Service"; Flags: onlyifdoesntexist
 Source: "{#StageRoot}\SessionHelper\*"; DestDir: "{app}\SessionHelper"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#StageRoot}\Desktop\*"; DestDir: "{app}\Desktop"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#StageRoot}\Cli\*"; DestDir: "{app}\Cli"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [InstallDelete]
 ; 덮어쓰기 설치에서 이전 버전의 잔여 파일을 남기지 않는다.
 Type: filesandordirs; Name: "{app}\Service"
 Type: filesandordirs; Name: "{app}\SessionHelper"
+Type: filesandordirs; Name: "{app}\Desktop"
 Type: filesandordirs; Name: "{app}\Cli"
 
 [Icons]
-Name: "{group}\UpdateAgent 상태 확인"; Filename: "{cmd}"; Parameters: "/k ""{app}\Cli\UpdateAgent.Cli.exe"" status"; WorkingDir: "{app}\Cli"; IconFilename: "{app}\Cli\UpdateAgent.Cli.exe"
-Name: "{autodesktop}\UpdateAgent 상태 확인"; Filename: "{cmd}"; Parameters: "/k ""{app}\Cli\UpdateAgent.Cli.exe"" status"; WorkingDir: "{app}\Cli"; IconFilename: "{app}\Cli\UpdateAgent.Cli.exe"; Tasks: desktopicon
+Name: "{group}\UpdateAgent 상태 확인"; Filename: "{app}\Desktop\UpdateAgent.Agent.Desktop.exe"; WorkingDir: "{app}\Desktop"; IconFilename: "{app}\Desktop\UpdateAgent.Agent.Desktop.exe"
+Name: "{autodesktop}\UpdateAgent 상태 확인"; Filename: "{app}\Desktop\UpdateAgent.Agent.Desktop.exe"; WorkingDir: "{app}\Desktop"; IconFilename: "{app}\Desktop\UpdateAgent.Agent.Desktop.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{cmd}"; Parameters: "/k ""{app}\Cli\UpdateAgent.Cli.exe"" status"; WorkingDir: "{app}\Cli"; Description: "UpdateAgent 상태 확인"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\Desktop\UpdateAgent.Agent.Desktop.exe"; WorkingDir: "{app}\Desktop"; Description: "UpdateAgent 상태 확인"; Flags: postinstall nowait skipifsilent
 
 [Code]
 var
@@ -381,9 +383,10 @@ begin
   DeleteFile(AgentConfigBackup);
   if FileExists(AgentConfigFile) then
   begin
+    Log('Backing up Agent appsettings.json: ' + AgentConfigFile + ' -> ' + AgentConfigBackup);
     if not CopyFile(AgentConfigFile, AgentConfigBackup, False) then
     begin
-      Result := '기존 Agent appsettings.json 백업에 실패해 설치를 중단합니다.';
+      Result := '기존 Agent appsettings.json 백업에 실패해 설치를 중단합니다: ' + AgentConfigBackup;
       Exit;
     end;
     AgentConfigRestoreNeeded := True;
@@ -581,9 +584,11 @@ begin
     { InstallDelete와 [Files]가 모두 끝난 뒤에 설정을 복원해야 덮어써지지 않는다. }
     if AgentConfigRestoreNeeded then
     begin
+      Log('Restoring Agent appsettings.json: ' + AgentConfigBackup + ' -> ' + AgentConfigFile);
       ForceDirectories(ExtractFileDir(AgentConfigFile));
-      if not CopyFile(AgentConfigBackup, AgentConfigFile, True) then
-        RaiseException('기존 Agent appsettings.json 복원에 실패해 설치를 중단합니다.');
+      { [Files] may have created appsettings.json with onlyifdoesntexist; overwrite with the backup. }
+      if not CopyFile(AgentConfigBackup, AgentConfigFile, False) then
+        RaiseException('기존 Agent appsettings.json 복원에 실패해 설치를 중단합니다. 백업: ' + AgentConfigBackup);
       DeleteFile(AgentConfigBackup);
       AgentConfigRestoreNeeded := False;
     end;

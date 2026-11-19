@@ -226,10 +226,11 @@ if (-not (Test-Path -LiteralPath $noticeRtf)) { throw "License notice not found:
 
 $serviceSource       = Join-Path $PublishRoot "agent\service"
 $sessionHelperSource = Join-Path $PublishRoot "agent\sessionhelper"
+$agentDesktopSource  = Join-Path $PublishRoot "agent\desktop"
 $cliSource           = Join-Path $PublishRoot "cli"
 $labManagerSource    = Join-Path $PublishRoot "labmanager"
 
-$requiredSources = @($serviceSource, $sessionHelperSource, $cliSource)
+$requiredSources = @($serviceSource, $sessionHelperSource, $agentDesktopSource, $cliSource)
 if (-not $AgentOnly) {
     $requiredSources += $labManagerSource
 }
@@ -253,6 +254,7 @@ if (-not $NoPublish) {
 
 Assert-PublishFolder $serviceSource "UpdateAgent.Service.exe"
 Assert-PublishFolder $sessionHelperSource "UpdateAgent.SessionHelper.exe"
+Assert-PublishFolder $agentDesktopSource "UpdateAgent.Agent.Desktop.exe"
 Assert-PublishFolder $cliSource "UpdateAgent.Cli.exe"
 if (-not $AgentOnly) {
     Assert-PublishFolder $labManagerSource "UpdateAgent.LabManager.exe"
@@ -280,6 +282,7 @@ $labManagerStage = Join-Path $StagingRoot "labmanager"
 $stageFolders = @(
     [pscustomobject]@{ Source = $serviceSource;       Destination = (Join-Path $agentStage "Service") }
     [pscustomobject]@{ Source = $sessionHelperSource; Destination = (Join-Path $agentStage "SessionHelper") }
+    [pscustomobject]@{ Source = $agentDesktopSource;  Destination = (Join-Path $agentStage "Desktop") }
     [pscustomobject]@{ Source = $cliSource;           Destination = (Join-Path $agentStage "Cli") }
 )
 if (-not $AgentOnly) {
@@ -316,6 +319,7 @@ if (-not $SkipValidation) {
         "Service\UpdateAgent.Service.exe",
         "Service\appsettings.json",
         "SessionHelper\UpdateAgent.SessionHelper.exe",
+        "Desktop\UpdateAgent.Agent.Desktop.exe",
         "Cli\UpdateAgent.Cli.exe"
     )
     if (-not $AgentOnly) {

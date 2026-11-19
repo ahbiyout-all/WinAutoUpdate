@@ -94,6 +94,9 @@ C:\Program Files\UpdateAgent\
   SessionHelper\
     UpdateAgent.SessionHelper.exe
     ... (self-contained 런타임, deps)
+  Desktop\
+    UpdateAgent.Agent.Desktop.exe
+    ... (self-contained 런타임, deps)
   Cli\                        ← 선택 기능
     UpdateAgent.Cli.exe
     ...
@@ -140,7 +143,7 @@ C:\ProgramData\UpdateAgent\    ← MSI가 소유하지 않음 (제거해도 보�
 
 | Feature | Level | 내용 |
 |---|---|---|
-| `AgentFeature` | 1 | 서비스 + SessionHelper (기본 설치) |
+| `AgentFeature` | 1 | 서비스 + SessionHelper + 상태 확인 데스크톱 앱 (기본 설치) |
 | `CliFeature` | 2 | CLI 도구 (선택) |
 
 - 기본: `AgentFeature`만 설치.
@@ -173,7 +176,7 @@ WiX v5+ 내장 `<Files>`로 게시 폴더를 그대로 하베스팅합니다. He
 - `UpdateAgent.Service.exe`는 `ServiceInstall` 때문에 하베스팅에서 제외하고 수동 컴포넌트로 넣습니다.
 - `appsettings.json`은 빌드 시 **정제된 템플릿**으로 교체한 뒤 패키징합니다 (6-5).
 - `.pdb`, `appsettings.Development.json`은 배포하지 않습니다.
-- SessionHelper와 CLI는 각각 `SessionHelperDir`, `CliDir` 루트로 하베스팅합니다.
+- SessionHelper, 상태 확인 데스크톱 앱, CLI는 각각 `SessionHelperDir`, `DesktopDir`, `CliDir` 루트로 하베스팅합니다.
 
 ### 5-4. 서비스 등록
 
@@ -446,8 +449,8 @@ installer\
 artifacts\
   staging\                    ← build-msi.ps1이 만드는 임시 게시물
   msi\
-    UpdateAgent.Agent-0.1.2-x64.msi
-    UpdateAgent.Agent-0.1.2-x64.msi.sha256
+    UpdateAgent.Agent-0.1.3-x64.msi
+    UpdateAgent.Agent-0.1.3-x64.msi.sha256
     build-info.json
 ```
 
@@ -458,7 +461,7 @@ artifacts\
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
-    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.2</ProductVersion>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.3</ProductVersion>
     <PublishRoot Condition="'$(PublishRoot)' == ''">$(MSBuildThisFileDirectory)..\..\publish</PublishRoot>
     <DefineConstants>ProductVersion=$(ProductVersion);PublishRoot=$(PublishRoot)</DefineConstants>
   </PropertyGroup>
@@ -487,7 +490,7 @@ artifacts\
 
 ```powershell
 .\scripts\publish.ps1
-.\scripts\build-msi.ps1 -ProductVersion 0.1.2
+.\scripts\build-msi.ps1 -ProductVersion 0.1.3
 ```
 
 ```powershell
@@ -496,12 +499,12 @@ dotnet build .\installer\UpdateAgent.Agent.Installer\UpdateAgent.Agent.Installer
   -c Release `
   -t:Rebuild `
   -p:Platform=x64 `
-  -p:ProductVersion=0.1.2 `
+  -p:ProductVersion=0.1.3 `
   -p:PublishRoot="$PWD\artifacts\staging"
 
 # 검증 (저장소 루트에서)
 dotnet tool restore
-dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.2-x64.msi
+dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.3-x64.msi
 ```
 
 ### 8-4. 버전 규칙
@@ -583,13 +586,13 @@ $env:UPDATEAGENT_AGENT_TOKEN = Get-Content ".\pilot-agent-token.txt" -Raw
 
 ```powershell
 # 최소 UI (수동 설치)
-msiexec /i ".\UpdateAgent.Agent-0.1.2-x64.msi" /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.3-x64.msi" /norestart /l*v ".\install.log"
 
 # 무인 설치
-msiexec /i ".\UpdateAgent.Agent-0.1.2-x64.msi" /qn /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.3-x64.msi" /qn /norestart /l*v ".\install.log"
 
 # 무인 + CLI
-msiexec /i ".\UpdateAgent.Agent-0.1.2-x64.msi" /qn /norestart ADDLOCAL=CliFeature
+msiexec /i ".\UpdateAgent.Agent-0.1.3-x64.msi" /qn /norestart ADDLOCAL=CliFeature
 ```
 
 - 토큰/URL은 이 명령으로 설정되지 않습니다. 설치 후 래퍼 또는 `configure-agent.ps1`을 실행해야 원격 관리가 활성화됩니다.
@@ -608,7 +611,7 @@ msiexec /i ".\UpdateAgent.Agent-0.1.2-x64.msi" /qn /norestart ADDLOCAL=CliFeatur
 ### 10-4. 제거
 
 ```powershell
-msiexec /x ".\UpdateAgent.Agent-0.1.2-x64.msi" /qn /norestart /l*v ".\uninstall.log"
+msiexec /x ".\UpdateAgent.Agent-0.1.3-x64.msi" /qn /norestart /l*v ".\uninstall.log"
 ```
 
 또는:

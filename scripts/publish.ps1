@@ -3,11 +3,12 @@
 Publishes the UpdateAgent LabManager, Service, SessionHelper and CLI for a pilot deployment.
 
 .DESCRIPTION
-Produces four self-contained (or framework-dependent) folders from five projects:
+Produces five self-contained (or framework-dependent) folders from six projects:
 
   publish\labmanager          Teacher PC headless API + native WPF desktop client
   publish\agent\service       Student PC Windows service
   publish\agent\sessionhelper Student PC overlay helper (WPF)
+  publish\agent\desktop       Student PC status desktop app (WPF)
   publish\cli                 Optional local CLI for scan/preflight/status/maestro
 
 With -AgentOnly only the three student-PC folders are produced
@@ -66,6 +67,12 @@ $projects = @(
         Name    = "SessionHelper"
         Project = Join-Path $repoRoot "src\UpdateAgent.SessionHelper\UpdateAgent.SessionHelper.csproj"
         Output  = Join-Path $OutputRoot "agent\sessionhelper"
+        Clean   = $true
+    },
+    [pscustomobject]@{
+        Name    = "AgentDesktop"
+        Project = Join-Path $repoRoot "src\UpdateAgent.Agent.Desktop\UpdateAgent.Agent.Desktop.csproj"
+        Output  = Join-Path $OutputRoot "agent\desktop"
         Clean   = $true
     },
     [pscustomobject]@{

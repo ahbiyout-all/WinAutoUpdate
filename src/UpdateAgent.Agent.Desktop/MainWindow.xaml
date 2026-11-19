@@ -1,0 +1,97 @@
+<Window x:Class="UpdateAgent.Agent.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="UpdateAgent 상태"
+        Height="560" Width="760"
+        MinHeight="420" MinWidth="640"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,16">
+            <TextBlock Text="UpdateAgent 상태" FontSize="24" FontWeight="SemiBold" />
+            <TextBlock Text="학생 PC의 서비스와 Windows Update 작업 상태를 확인합니다."
+                       Foreground="#666666" Margin="0,4,0,0" />
+        </StackPanel>
+
+        <GroupBox Grid.Row="1" Header="에이전트 정보" Padding="12" Margin="0,0,0,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="서비스:" FontWeight="SemiBold" Margin="0,0,12,6" />
+                <TextBlock x:Name="ServiceText" Grid.Row="0" Grid.Column="1" Text="확인 중..." Margin="0,0,16,6" />
+                <TextBlock Grid.Row="0" Grid.Column="2" Text="컴퓨터:" FontWeight="SemiBold" Margin="0,0,12,6" />
+                <TextBlock x:Name="MachineText" Grid.Row="0" Grid.Column="3" Text="-" Margin="0,0,0,6" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="에이전트 ID:" FontWeight="SemiBold" Margin="0,0,12,0" />
+                <TextBlock x:Name="AgentIdText" Grid.Row="1" Grid.Column="1" Text="-" Margin="0,0,16,0" />
+                <TextBlock Grid.Row="1" Grid.Column="2" Text="LabManager:" FontWeight="SemiBold" Margin="0,0,12,0" />
+                <TextBlock x:Name="UrlText" Grid.Row="1" Grid.Column="3" Text="-" TextTrimming="CharacterEllipsis" />
+            </Grid>
+        </GroupBox>
+
+        <GroupBox x:Name="ActiveCard" Grid.Row="2" Header="진행 중인 작업" Padding="12" Margin="0,0,0,12"
+                  Visibility="Collapsed">
+            <StackPanel>
+                <TextBlock x:Name="ActiveStateText" Text="-" FontWeight="SemiBold" />
+                <TextBlock x:Name="ActiveMessageText" Text="" Margin="0,4,0,8" TextWrapping="Wrap" />
+                <ProgressBar x:Name="ActiveProgress" Height="18" Minimum="0" Maximum="100" />
+                <TextBlock x:Name="ActiveProgressText" Text="0%" Margin="0,4,0,0" Foreground="#666666" />
+            </StackPanel>
+        </GroupBox>
+
+        <GroupBox Grid.Row="3" Header="최근 작업" Padding="12">
+            <Grid>
+                <TextBlock x:Name="EmptyText" Text="기록된 작업이 없습니다." Foreground="#666666"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                <ListBox x:Name="RecentList" BorderThickness="0" Background="Transparent">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="90" />
+                                    <ColumnDefinition Width="70" />
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding StateLabel}" FontWeight="SemiBold" />
+                                <TextBlock Grid.Column="1" Text="{Binding ProgressPercent, StringFormat={}{0}%}" />
+                                <TextBlock Grid.Column="2" Text="{Binding UpdatedAt, StringFormat={}{0:MM-dd HH:mm}}"
+                                           Foreground="#666666" />
+                                <TextBlock Grid.Column="3" Text="{Binding Message}" TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </GroupBox>
+
+        <TextBlock x:Name="ErrorText" Grid.Row="4" Margin="0,8,0,0" Foreground="#C00000"
+                   TextWrapping="Wrap" Visibility="Collapsed" />
+
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <TextBlock x:Name="UpdatedText" Text="마지막 새로고침: -" VerticalAlignment="Center"
+                       Foreground="#666666" Margin="0,0,16,0" />
+            <Button x:Name="RefreshButton" Content="새로고침" Width="90" Height="32" Margin="0,0,8,0"
+                    Click="RefreshButton_Click" />
+            <Button Content="닫기" Width="90" Height="32" IsCancel="True" Click="CloseButton_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

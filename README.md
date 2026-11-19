@@ -167,10 +167,14 @@ $env:UPDATEAGENT_AGENT_TOKEN = Get-Content <에이전트-토큰-파일> -Raw
 publish\labmanager
 publish\agent\service
 publish\agent\sessionhelper
+publish\agent\desktop
 publish\cli
 ```
 
-학생 PC에서는 `publish\cli\UpdateAgent.Cli.exe`로 사전 점검과 상태 확인을 할 수 있습니다.
+학생 PC에서는 `publish\agent\desktop\UpdateAgent.Agent.Desktop.exe`로 서비스 상태와 작업 진행 상황을
+창으로 확인할 수 있습니다. 설치 시 시작 메뉴/바탕화면의 **`UpdateAgent 상태 확인`** 바로가기도 이 앱을 실행합니다.
+상태 앱은 읽기 전용이며 토큰을 저장하거나 작업을 제어하지 않습니다.
+고급 사전 점검은 `publish\cli\UpdateAgent.Cli.exe`를 사용합니다.
 서비스가 실행 중일 때는 `scan`, `preflight`, `status`, `maestro`만 사용하고,
 작업 제어(`run`/`resume`/`pause`/`cancel`)는 LabManager 대시보드를 사용하세요.
 

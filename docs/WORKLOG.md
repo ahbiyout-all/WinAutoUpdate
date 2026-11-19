@@ -5,6 +5,38 @@
 
 ---
 
+## 2026-11-18 — 학생/교사 설치 오류 수정 및 학생용 데스크톱 앱 추가 (v0.1.3)
+
+### 원인
+
+- 학생 PC: 기존 설치를 덮어쓰면 `[InstallDelete]`가 설치 폴더 전체를 지우고 `[Files]`가 기본 `appsettings.json`을 다시 만든다. 복원 단계가 `CopyFile(..., True)`(`FailIfExists`)를 사용해 이미 생성된 기본 파일 위에 기존 설정을 덮어쓰지 못하고 설치를 중단했다. Agent와 LabManager 인스톨러에 동일한 결함이 있었다.
+- 교사 PC: 설치 마지막 단계에서 런처를 자동 실행하지만, `appsettings.json`에 기본 토큰(`change-me-*`)이 남아 있으면 헤드리스 서버가 보안상 즉시 종료된다. 런처는 원인과 무관하게 일반적인 `LabManager 서버에 연결할 수 없습니다` 메시지를 표시했다.
+
+### 수정
+
+| 영역 | 내용 |
+|---|---|
+| Agent 인스톨러 | 백업/복원 경로를 로그에 기록하고, 복원 시 기본 설정 파일을 덮어쓰도록 `FailIfExists`를 `False`로 변경 |
+| LabManager 인스톨러 | 동일한 복원 결함 수정 |
+| LabManager 자동 실행 | 기본 토큰이 남아 있으면 설치 후 런처 자동 실행을 건너뛰고 토큰 변경 안내 표시 |
+| LabManager 런처 | 로컬 서버가 시작 직후 종료된 경우 기본 토큰/로그 경로를 포함한 구체적인 안내 표시 |
+| 학생용 GUI | `UpdateAgent.Agent.Desktop`(WPF) 추가. 서비스 상태, 에이전트 ID, 컴퓨터명, LabManager URL, 진행 중/최근 작업을 읽기 전용으로 표시하고 새로고침 제공. 토큰은 읽지 않음 |
+| 학생 바로가기 | Agent 인스톨러의 시작 메뉴/바탕화면/설치 완료 실행을 `cmd /k Cli.exe status`에서 `{app}\Desktop\UpdateAgent.Agent.Desktop.exe`로 교체 |
+| 패키징 | `publish.ps1`, `build-inno.ps1`, `build-msi.ps1`, `Package.wxs`에 `agent\desktop` → `Desktop` 폴더 포함. MSI는 `DesktopFiles`를 `AgentFeature`(Level 1)에 포함 |
+| 버전·문서 | 단일 소스 버전을 `0.1.3`으로 올리고 현재 명령 예시 동기화 |
+
+### 검증
+
+- `dotnet build UpdateAgent.sln -c Release`: 경고 0, 오류 0.
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --no-build`: 89개 통과.
+- `scripts\*.ps1` 11개 구문 분석 통과, `.iss` 두 파일 UTF-8 BOM 유지, 워크플로 YAML 파싱 통과.
+- `scripts\publish.ps1` → `scripts\build-inno.ps1` → `scripts\build-msi.ps1`: Inno 2개와 MSI 1개가 `0.1.3`으로 빌드됨.
+- 로컬 빌드 해시: Agent Setup `01125de46f1fa6491fa138402a9c8dd6ee9eec15466fe0d01a7b888afc29bb4f`, LabManager Setup `a828aaab1c51f2d6ad94732e90c90d494ddb351cd550672d4681fb3850843834`, MSI `54f3324f420bcfc4bd32686a132c1b65ef7d8088a4d565ed002e20dbb5c9af81`.
+- Windows Installer COM으로 MSI에 `DesktopDir`과 `UpdateAgent.Agent.Desktop.exe`가 포함됐음을 확인.
+- 실제 관리자 권한 PC/VM에서 업그레이드 보존/자동 실행 분기 재현은 환경 제약으로 미실시.
+
+---
+
 ## 2026-11-18 — 2차 심층 자아성찰 감사 및 오류 수정 (v0.1.2)
 
 ### 목적

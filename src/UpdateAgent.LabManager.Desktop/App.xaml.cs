@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using UpdateAgent.LabManager.Desktop.Services;
 
@@ -29,9 +30,16 @@ public partial class App : Application
 
         if (!ready)
         {
+            var hint = server.LocalServerExited
+                ? "로컬 서버가 시작되지 않았습니다. change-me-* 기본 토큰을 변경했는지 확인하세요.\n" +
+                  "설정: " + Path.Combine(AppContext.BaseDirectory, "appsettings.json") + "\n" +
+                  "로그: " + Path.Combine(
+                      Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                      "UpdateAgent", "LabManager", "logs")
+                : "서버가 실행 중인지 확인한 뒤 다시 실행하세요.";
+
             ShowError(
-                $"LabManager 서버에 연결할 수 없습니다.\n\n주소: {settings.ServerUrl}\n\n" +
-                "서버가 실행 중인지 확인한 뒤 다시 실행하세요.");
+                $"LabManager 서버에 연결할 수 없습니다.\n\n주소: {settings.ServerUrl}\n\n{hint}");
             Shutdown();
             return;
         }
