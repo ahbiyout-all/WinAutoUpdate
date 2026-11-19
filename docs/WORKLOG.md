@@ -28,11 +28,15 @@
 - `dotnet build -c Release`: 경고 0/오류 0, 테스트 89개 통과.
 - PowerShell 10개 파일 파싱, YAML 파싱, PII/email 스캔, 버전 동기화 검사 통과.
 - Inno Setup 6.7.1로 두 설치 파일 모두 컴파일 성공, UTF-8 BOM 유지. MSI 빌드 및 COM 검증에서 `DesktopDir`와 `UpdateAgent.Agent.Desktop.exe` 포함 확인(파일 1264개).
-- `v0.1.4` 산출물 SHA-256:
+- 로컬 빌드 SHA-256(CI가 소스에서 다시 빌드하므로 공개 에셋과 다를 수 있음):
   - `UpdateAgent.Agent-Setup-0.1.4-x64.exe` `26a736cda9007fb204aafa1ef34e97ad9e4fa8a00cbf3e23b09984aff912d484`
   - `UpdateAgent.LabManager-Setup-0.1.4-x64.exe` `a7a94f2a78bc1be190ef998accd6c5d4c0e1e95fa8e61157c855fbb1bcd2615f`
   - `UpdateAgent.Agent-0.1.4-x64.msi` `b049ac9974186dc49552e97f31c3879d7433a030ba9ea10bfb97fb4675e620b1`
-- 이미 공개된 `v0.1.3` 릴리스는 변경하지 않음.
+- 공개된 `v0.1.4` 릴리스 에셋 3개의 다운로드 해시가 릴리스 노트와 일치함을 GitHub REST API로 확인:
+  - `UpdateAgent.Agent-Setup-0.1.4-x64.exe` `1de677d4952e84eb184722337f2f97757063b34f3cf216c392630114cf70b2ef`
+  - `UpdateAgent.LabManager-Setup-0.1.4-x64.exe` `098235330938183cbd490db66cb6ed6b975e6c110c489274a0cca4b5c085d052`
+  - `UpdateAgent.Agent-0.1.4-x64.msi` `eac6a19f7ed126fd253286a11fce08a3630a95acb3a9d64779f31e7a1268537e`
+- 이미 공개된 `v0.1.3` 릴리스(에셋 3개, 해시 동일)는 변경하지 않음.
 
 ---
 
