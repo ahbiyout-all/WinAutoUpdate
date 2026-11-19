@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-11-19 — 앱별 아이콘 추가 (v0.1.5)
+
+### 내용
+
+| 대상 | 아이콘 | 적용 위치 |
+|---|---|---|
+| 학생용(`UpdateAgent.Agent.Desktop`) | 모니터 + 초록색 상태 체크(파랑~청록 배경) | WPF `ApplicationIcon`, 바로가기, Agent 인스톨러, MSI `ARPPRODUCTICON` |
+| 교사용(`UpdateAgent.LabManager.Desktop`) | 중앙 대시보드 + 관리 대상 PC 연결(남보라~보라 배경) | WPF `ApplicationIcon`, 바로가기, LabManager 인스톨러 |
+
+- 이미지 생성 서비스 인증 오류로 로컬(Pillow)에서 벡터 스타일로 직접 생성했다.
+- `assets/icons/`에 16~256px 다중 해상도 ICO로 저장했고, 16px에서도 실루엣이 유지됨을 확인했다.
+- Agent 인스톨러의 `UninstallDisplayIcon`도 학생용 GUI exe로 바꿔 추가/제거 항목 아이콘을 통일했다.
+
+### 검증
+
+- `dotnet build -c Release`: 경고 0/오류 0, 테스트 89개 통과.
+- PowerShell/YAML 파싱, PII 스캔, 버전 동기화 검사 통과.
+- exe 및 설치 프로그램에서 추출한 아이콘이 원본 ICO와 일치(렌더링 차이만 존재).
+- Inno Setup 6.7.1 컴파일 성공, MSI `Icon` 테이블과 `ARPPRODUCTICON=AgentIcon` 확인.
+- 로컬 빌드 SHA-256(CI 재빌드 시 달라질 수 있음):
+  - `UpdateAgent.Agent-Setup-0.1.5-x64.exe` `d6e7e343c01afb74911e673687933fa88ea1a99a0bcf34d64c9682a81ac40302`
+  - `UpdateAgent.LabManager-Setup-0.1.5-x64.exe` `d1145a87dc8d8ec89bcb55f5a13dbae9f3fab95848a54adc1912da02d82bfd4e`
+  - `UpdateAgent.Agent-0.1.5-x64.msi` `6772c6e7be0bc3fff635eda82ec156644810b527b984755cb5644c76838b2af7`
+
+---
+
 ## 2026-11-19 — Inno Setup 덮어쓰기 설치 시 앱 종료 순서 보장 (v0.1.4)
 
 ### 문제

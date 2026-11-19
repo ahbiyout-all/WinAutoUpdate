@@ -10,6 +10,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <ApplicationIcon>..\..\assets\icons\UpdateAgent.LabManager.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

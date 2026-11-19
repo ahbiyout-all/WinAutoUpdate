@@ -79,6 +79,11 @@ scripts/github-push.bat
 !src/**/*.png
 !src/**/*.svg
 
+# 7b) Shared application icons.
+!assets/
+!assets/icons/
+!assets/icons/*.ico
+
 # 8) Tests.
 !tests/
 !tests/**/*.cs

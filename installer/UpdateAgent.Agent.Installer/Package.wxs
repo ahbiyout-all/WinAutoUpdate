@@ -18,6 +18,9 @@
 
     <MediaTemplate EmbedCab="yes" />
 
+    <Icon Id="AgentIcon" SourceFile="..\..\assets\icons\UpdateAgent.Agent.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AgentIcon" />
+
     <Launch Condition="VersionNT64" Message="UpdateAgent requires 64-bit Windows." />
     <Launch Condition="VersionNT &gt;= 1000" Message="UpdateAgent requires Windows 10 or later." />
 

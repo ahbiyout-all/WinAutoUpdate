@@ -3,7 +3,7 @@
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
-    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.4</ProductVersion>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.5</ProductVersion>
     <PublishRoot Condition="'$(PublishRoot)' == ''">$(MSBuildThisFileDirectory)..\..\publish</PublishRoot>
     <NoticeRtf>$(MSBuildThisFileDirectory)payload\notice.ko.rtf</NoticeRtf>
     <OutputName>UpdateAgent.Agent-$(ProductVersion)-x64</OutputName>

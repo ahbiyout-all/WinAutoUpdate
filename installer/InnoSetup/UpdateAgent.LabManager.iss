@@ -17,7 +17,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.4"
+  #define AppVersion "0.1.5"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -67,6 +67,7 @@ RestartIfNeededByRun=no
 DirExistsWarning=no
 UsePreviousAppDir=yes
 SetupLogging=yes
+SetupIconFile=..\..\assets\icons\UpdateAgent.LabManager.ico
 ShowLanguageDialog=no
 LanguageDetectionMethod=none
 
@@ -91,9 +92,9 @@ Type: filesandordirs; Name: "{app}\wwwroot"
 Type: filesandordirs; Name: "{app}\*"
 
 [Icons]
-Name: "{group}\UpdateAgent LabManager"; Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"
+Name: "{group}\UpdateAgent LabManager"; Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\UpdateAgent.LabManager.Desktop.exe"
 Name: "{group}\UpdateAgent LabManager 제거"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\UpdateAgent LabManager"; Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\UpdateAgent LabManager"; Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\UpdateAgent.LabManager.Desktop.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"; Description: "UpdateAgent LabManager 실행"; Flags: postinstall nowait skipifsilent; Check: ShouldLaunchDashboard

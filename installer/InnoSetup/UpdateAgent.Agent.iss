@@ -19,7 +19,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.4"
+  #define AppVersion "0.1.5"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -62,13 +62,14 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.14393
 Uninstallable=yes
 UninstallDisplayName=UpdateAgent Agent {#AppVersion}
-UninstallDisplayIcon={app}\Service\UpdateAgent.Service.exe
+UninstallDisplayIcon={app}\Desktop\UpdateAgent.Agent.Desktop.exe
 CloseApplications=no
 RestartApplications=no
 RestartIfNeededByRun=no
 DirExistsWarning=no
 UsePreviousAppDir=yes
 SetupLogging=yes
+SetupIconFile=..\..\assets\icons\UpdateAgent.Agent.ico
 ShowLanguageDialog=no
 LanguageDetectionMethod=none
 
