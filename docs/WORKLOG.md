@@ -28,6 +28,11 @@
   - `UpdateAgent.Agent-Setup-0.1.5-x64.exe` `d6e7e343c01afb74911e673687933fa88ea1a99a0bcf34d64c9682a81ac40302`
   - `UpdateAgent.LabManager-Setup-0.1.5-x64.exe` `d1145a87dc8d8ec89bcb55f5a13dbae9f3fab95848a54adc1912da02d82bfd4e`
   - `UpdateAgent.Agent-0.1.5-x64.msi` `6772c6e7be0bc3fff635eda82ec156644810b527b984755cb5644c76838b2af7`
+- 공개된 `v0.1.5` 릴리스 에셋 3개의 다운로드 해시가 릴리스 노트와 일치함을 GitHub REST API로 확인:
+  - `UpdateAgent.Agent-Setup-0.1.5-x64.exe` `4af569f5d84a4370c6dfcc7c3d26e8280eac53091a0ec2cb97460a34d6e583a6`
+  - `UpdateAgent.LabManager-Setup-0.1.5-x64.exe` `7c2e5a0058a3571c72236f54ea63e96921596b15153f02d7ae6765a51ee79ec3`
+  - `UpdateAgent.Agent-0.1.5-x64.msi` `1edcc290c4bbc33f5bc8b4c64666f39c3977c9f437064169c9d6ae2d28d3ef3d`
+- 기존 `v0.1.4`, `v0.1.3` 릴리스는 변경하지 않음.
 
 ---
 
