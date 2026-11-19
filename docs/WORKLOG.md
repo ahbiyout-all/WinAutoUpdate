@@ -5,6 +5,37 @@
 
 ---
 
+## 2026-11-19 — Inno Setup 덮어쓰기 설치 시 앱 종료 순서 보장 (v0.1.4)
+
+### 문제
+
+- Agent 인스톨러는 세션 도우미/CLI/서비스만 종료하고 새 학생용 GUI(`UpdateAgent.Agent.Desktop.exe`)는 종료하지 않았다. 창이 열린 상태에서 덮어쓰기 설치하면 파일이 잠겨 언인스톨/설치가 실패할 수 있었다.
+- `taskkill`이 반환되는 것만 기다리고 프로세스가 실제로 사라졌는지는 확인하지 않아, 종료 전에 언인스톨이 시작될 수 있었다.
+
+### 수정
+
+| 영역 | 내용 |
+|---|---|
+| 종료 대상 | Agent: `UpdateAgent.SessionHelper.exe`, `UpdateAgent.Agent.Desktop.exe`, `UpdateAgent.Cli.exe`, `UpdateAgent.Service.exe` / LabManager: `UpdateAgent.LabManager.Desktop.exe`, `UpdateAgent.LabManager.exe` |
+| 종료 확인 | `tasklist /FI "IMAGENAME eq ..." /NH` 결과를 임시 파일로 읽어 프로세스가 사라질 때까지 최대 5초 폴링 |
+| 순서 강제 | `InitializeSetup`(사전 정리) → `PrepareToInstall`(언인스톨 전 종료, 실패 시 중단) → `ssInstall`(파일 교체 전 재확인, 실패 시 중단) → 실제 설치 |
+| 서비스 | `sc stop` 후 강제 종료, SCM 자동 재시작은 설치 중 비활성화하고 `EnsureService`에서 복원 |
+| 독립 제거 | `CurUninstallStepChanged(usUninstall)`에서도 동일한 종료 절차 사용 |
+| 문서 | `docs/INSTALLER.md`에 종료 → 언인스톨 → 설치 순서와 종료 대상 기록 |
+
+### 검증
+
+- `dotnet build -c Release`: 경고 0/오류 0, 테스트 89개 통과.
+- PowerShell 10개 파일 파싱, YAML 파싱, PII/email 스캔, 버전 동기화 검사 통과.
+- Inno Setup 6.7.1로 두 설치 파일 모두 컴파일 성공, UTF-8 BOM 유지. MSI 빌드 및 COM 검증에서 `DesktopDir`와 `UpdateAgent.Agent.Desktop.exe` 포함 확인(파일 1264개).
+- `v0.1.4` 산출물 SHA-256:
+  - `UpdateAgent.Agent-Setup-0.1.4-x64.exe` `26a736cda9007fb204aafa1ef34e97ad9e4fa8a00cbf3e23b09984aff912d484`
+  - `UpdateAgent.LabManager-Setup-0.1.4-x64.exe` `a7a94f2a78bc1be190ef998accd6c5d4c0e1e95fa8e61157c855fbb1bcd2615f`
+  - `UpdateAgent.Agent-0.1.4-x64.msi` `b049ac9974186dc49552e97f31c3879d7433a030ba9ea10bfb97fb4675e620b1`
+- 이미 공개된 `v0.1.3` 릴리스는 변경하지 않음.
+
+---
+
 ## 2026-11-18 — 학생/교사 설치 오류 수정 및 학생용 데스크톱 앱 추가 (v0.1.3)
 
 ### 원인

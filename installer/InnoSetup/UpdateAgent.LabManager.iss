@@ -17,7 +17,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.3"
+  #define AppVersion "0.1.4"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -124,6 +124,56 @@ begin
   RunHidden(ExpandConstant('{sys}\taskkill.exe'), '/F /IM "' + ImageName + '" /T');
 end;
 
+{ [Code] cannot capture stdout, so tasklist output is redirected to a temp file. }
+function IsProcessRunning(const ImageName: String): Boolean;
+var
+  Cmd, OutFile: String;
+  Lines: TArrayOfString;
+  I: Integer;
+begin
+  Result := False;
+  OutFile := AddBackslash(GetTempDir) + 'UpdateAgent.process.check.txt';
+  DeleteFile(OutFile);
+  Cmd := '/c ""' + ExpandConstant('{sys}\tasklist.exe') + '" /FI "IMAGENAME eq ' +
+    ImageName + '" /NH > "' + OutFile + '" 2>&1"';
+  RunHidden(ExpandConstant('{sys}\cmd.exe'), Cmd);
+  if not LoadStringsFromFile(OutFile, Lines) then Exit;
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    if Pos(Uppercase(ImageName), Uppercase(Lines[I])) > 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+{ taskkill returns before the target is guaranteed to have exited; poll until gone. }
+function KillAndWait(const ImageName: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := True;
+  if not IsProcessRunning(ImageName) then Exit;
+  Log('Terminating running app: ' + ImageName);
+  RunHidden(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM "' + ImageName + '"');
+  for I := 0 to 19 do
+  begin
+    if not IsProcessRunning(ImageName) then Exit;
+    Sleep(250);
+  end;
+  Result := not IsProcessRunning(ImageName);
+  if not Result then
+    Log('Failed to terminate running app: ' + ImageName);
+end;
+
+function TerminateLabManagerApps: Boolean;
+begin
+  Result := True;
+  if not KillAndWait('UpdateAgent.LabManager.Desktop.exe') then Result := False;
+  if not KillAndWait('UpdateAgent.LabManager.exe') then Result := False;
+end;
+
 function ExtractExePath(const Command: String): String;
 var
   P: Integer;
@@ -176,9 +226,8 @@ end;
 
 function InitializeSetup: Boolean;
 begin
-  { 1) 실행 중인 기존 앱을 먼저 강제 종료한다. }
-  KillProcess('UpdateAgent.LabManager.Desktop.exe');
-  KillProcess('UpdateAgent.LabManager.exe');
+  { 1) 종료 → 언인스톨 → 설치 순서를 위해 실행 중인 앱을 먼저 정리한다. }
+  TerminateLabManagerApps;
 
   { 2) 기존 설치는 선택 없이 PrepareToInstall에서 항상 제거한다. }
   OldInnoUninstall := FindInnoUninstallString;
@@ -191,8 +240,14 @@ var
   UninstallExe: String;
 begin
   Result := '';
-  KillProcess('UpdateAgent.LabManager.Desktop.exe');
-  KillProcess('UpdateAgent.LabManager.exe');
+
+  { 언인스톨보다 먼저 모든 실행 중인 앱을 종료한다. 종료 실패 시 설치를 중단한다. }
+  if not TerminateLabManagerApps then
+  begin
+    Result := '기존 UpdateAgent LabManager 앱을 종료하지 못해 설치를 중단합니다. ' +
+      '대시보드 창과 LabManager 서버를 닫은 뒤 다시 실행해 주세요.';
+    Exit;
+  end;
 
   { 이전 제거 프로그램/InstallDelete가 appsettings.json을 지우므로 먼저 백업한다. }
   LabManagerConfigFile := ExpandConstant('{app}\appsettings.json');
@@ -370,7 +425,13 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssPostInstall then
+  if CurStep = ssInstall then
+  begin
+    { 언인스톨이 끝난 뒤 파일 교체 직전에도 남은 프로세스가 없음을 보장한다. }
+    if not TerminateLabManagerApps then
+      RaiseException('기존 UpdateAgent LabManager 앱을 종료하지 못해 설치를 중단합니다.');
+  end
+  else if CurStep = ssPostInstall then
   begin
     { InstallDelete/[Files]가 끝난 뒤에 설정을 복원해야 덮어써지지 않는다. }
     if LabManagerConfigRestoreNeeded then
@@ -400,8 +461,7 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
   begin
-    KillProcess('UpdateAgent.LabManager.Desktop.exe');
-    KillProcess('UpdateAgent.LabManager.exe');
+    TerminateLabManagerApps;
     RunHidden(ExpandConstant('{sys}\netsh.exe'),
       'advfirewall firewall delete rule name=all group="' + FirewallGroup + '"');
   end;

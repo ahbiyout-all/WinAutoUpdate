@@ -121,6 +121,14 @@ C:\Program Files\UpdateAgent\LabManager\
 | 레거시 스크립트 설치(`C:\ProgramData\UpdateAgent\app`) | 감지 후 안내만 표시, 필요 시 수동 제거 |
 | 모든 경우(대화형/무인) | 묻지 않고 항상 제거 후 설치(설정 데이터는 보존) |
 
+- 설치 순서는 **실행 중인 앱 종료 → 이전 버전 언인스톨 → 새 파일 설치**입니다.
+  - 종료 대상: Agent `UpdateAgent.SessionHelper.exe`, `UpdateAgent.Agent.Desktop.exe`,
+    `UpdateAgent.Cli.exe`, `UpdateAgent.Service.exe` / LabManager
+    `UpdateAgent.LabManager.Desktop.exe`, `UpdateAgent.LabManager.exe`.
+  - `sc stop`으로 서비스를 먼저 내린 뒤 남은 프로세스를 강제 종료하고,
+    `tasklist`로 실제 종료를 확인할 때까지 기다립니다.
+  - 언인스톨 직전과 파일 교체 직전에 한 번씩 다시 확인하며, 종료 실패 시 설치를 중단합니다.
+  - 서비스 자동 재시작은 설치 중 비활성화하고 등록 단계에서 복원합니다.
 - 제거 직전 `appsettings.json`을 `%TEMP%`에 백업하고, 제거가 끝나면 복원합니다.
   - Agent: `C:\Program Files\UpdateAgent\Service\appsettings.json`
   - LabManager: `C:\Program Files\UpdateAgent\LabManager\appsettings.json`
@@ -134,10 +142,10 @@ C:\Program Files\UpdateAgent\LabManager\
 
 ```powershell
 # 가장 단순한 무인 설치(설정은 나중에 configure-agent.ps1로 적용)
-.\UpdateAgent.Agent-Setup-0.1.3-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+.\UpdateAgent.Agent-Setup-0.1.4-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # 설치와 동시에 LabManager URL/토큰 적용(토큰은 파일로 전달)
-.\UpdateAgent.Agent-Setup-0.1.3-x64.exe `
+.\UpdateAgent.Agent-Setup-0.1.4-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LabManagerUrl=http://192.168.0.10:5080 `
   /AgentTokenFile=C:\pilot-agent-token.txt
@@ -151,7 +159,7 @@ C:\Program Files\UpdateAgent\LabManager\
 ### 교사 PC
 
 ```powershell
-.\UpdateAgent.LabManager-Setup-0.1.3-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+.\UpdateAgent.LabManager-Setup-0.1.4-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 설치 후 `C:\Program Files\UpdateAgent\LabManager\appsettings.json`의
