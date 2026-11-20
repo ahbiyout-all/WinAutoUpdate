@@ -33,6 +33,12 @@
   - `UpdateAgent.Agent-Setup-0.1.7-x64.exe` `756543b52f556c8b29df0a0fb416f9ff182800ecd2949ff1bae924da0c987cdb`
   - `UpdateAgent.LabManager-Setup-0.1.7-x64.exe` `e95901327a40b6dbc39a719db5ebc117de2daed94bfa7eb342d96d32e5988a35`
   - `UpdateAgent.Agent-0.1.7-x64.msi` `65dfee01b2b9cdbebabc6bb6fef6fd18d4ab5c0bdce655b7041ea0882e7b4a77`
+- 공개된 `v0.1.7` 릴리스의 설치 파일 3개 해시가 릴리스 노트와 일치함을 확인:
+  - `UpdateAgent.Agent-Setup-0.1.7-x64.exe` `5880448dc1f2e81035a7e4628ffcf6f163c4ea0f2a0f047a4023ae700007863f`
+  - `UpdateAgent.LabManager-Setup-0.1.7-x64.exe` `2c4ad498c612b94be6a5628a76ea2f950a3bfb6c7e264431350a481e0265d2ff`
+  - `UpdateAgent.Agent-0.1.7-x64.msi` `d4177455d5ec64ec19026d73269b8c558afea91e363a1aab1a01032d626af0e5`
+- 릴리스 워크플로 실행 #8 성공. GitHub 자동 생성 소스 코드 2개를 제외한 업로드 자산은 설치 파일 3개뿐이며 기존 릴리스와 동일한 형태다.
+- 기존 `v0.1.6` 이하 릴리스는 변경하지 않음.
 
 ---
 
