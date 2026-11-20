@@ -20,7 +20,8 @@ DRY RUN으로 확인할 수 없는 **실제 설치, 재부팅/재개, 오버레�
 
 ## 0. 토큰 준비
 
-관리자 토큰과 에이전트 토큰을 생성합니다. **기본값(`change-me-*`)은 파일럿에서도 사용하지 마세요.**
+관리자 토큰과 에이전트 토큰을 생성합니다. **기본값(`change-me-*`)과 설치 파일에 들어 있는 샘플 값(`sample-*-token-replace-before-pilot`)은 파일럿에서도 그대로 사용하지 마세요.**
+샘플 값은 서버가 바로 시작되도록 넣어 둔 예시일 뿐이며, 값 자체에 표시된 대로 배포 전 반드시 교체해야 합니다.
 아래 예시는 임시 폴더에 저장합니다. 파일럿 후 삭제하고, 실제 랩에서는 암호 관리 도구를 사용하세요.
 
 ```powershell
@@ -114,6 +115,8 @@ Get-NetIPAddress -AddressFamily IPv4 |
 3-1에서 설정한 토큰이 `publish\labmanager\appsettings.json`에 있는지 확인합니다.
 기본 토큰(`change-me-*`)이면 서버가 시작되지 않습니다. 설치 마지막 단계의 런처 자동 실행도
 기본 토큰이 남아 있으면 건너뛰고 토큰 변경 안내를 표시합니다.
+설치 파일 기본값인 샘플 토큰(`sample-*-token-replace-before-pilot`)으로는 서버가 시작되지만,
+이 값도 배포 전에 반드시 실제 토큰으로 교체해야 합니다.
 
 `appsettings.json`을 읽도록 **게시 폴더에서** 런처를 실행합니다.
 
@@ -162,7 +165,7 @@ Phase 0 파일럿에서는 Inno Setup을 먼저 검증하고, 문제가 있으�
 ```powershell
 Set-Location "<복사한 폴더>"
 
-.\UpdateAgent.Agent-Setup-0.1.7-x64.exe `
+.\UpdateAgent.Agent-Setup-0.1.8-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LabManagerUrl=http://<교사-PC-IP>:5080 `
   /AgentTokenFile="<agent-token.txt 경로>"
@@ -192,7 +195,7 @@ Set-Location "<복사한 폴더>"
 
 $env:UPDATEAGENT_AGENT_TOKEN = Get-Content "<agent-token.txt 경로>" -Raw
 .\scripts\install-agent-msi.ps1 `
-  -MsiPath ".\UpdateAgent.Agent-0.1.7-x64.msi" `
+  -MsiPath ".\UpdateAgent.Agent-0.1.8-x64.msi" `
   -LabManagerUrl "http://<교사-PC-IP>:5080" `
   -ConfirmMaestro
 ```

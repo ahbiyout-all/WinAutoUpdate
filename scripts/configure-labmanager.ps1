@@ -83,9 +83,13 @@ $AgentToken = Resolve-Secret `
 
 if ([string]::IsNullOrWhiteSpace($AdminToken)) { throw "Admin token is required." }
 if ([string]::IsNullOrWhiteSpace($AgentToken)) { throw "Agent token is required." }
+$placeholderTokens = @(
+    "change-me-admin-token", "change-me-agent-token",
+    "sample-admin-token-replace-before-pilot", "sample-agent-token-replace-before-pilot"
+)
 if (-not $AllowDefaultTokens -and
-    ($AdminToken -eq "change-me-admin-token" -or $AgentToken -eq "change-me-agent-token")) {
-    throw "A default token is still in use. Generate new tokens for the pilot, or pass -AllowDefaultTokens for local development only."
+    ($placeholderTokens -contains $AdminToken -or $placeholderTokens -contains $AgentToken)) {
+    throw "A default or sample token is still in use. Generate new tokens for the pilot, or pass -AllowDefaultTokens for local development only."
 }
 
 $uri = $null

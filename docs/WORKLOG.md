@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-11-20 — LabManager 샘플 토큰 기본값 제공 (v0.1.8)
+
+### 배경
+
+- 교사용 LabManager 설치 후 `appsettings.json`에 `change-me-*`가 남아 있으면 서버가 즉시 종료되어 대시보드 런처가 오류를 표시했다.
+- 사용자가 설치 직후 바로 실행할 수 있도록 기본값에 샘플 토큰을 넣어 달라고 요청했다.
+
+### 변경
+
+| 항목 | 내용 |
+|---|---|
+| `src\UpdateAgent.LabManager\appsettings.json` | `AdminToken`/`AgentToken`을 `sample-*-token-replace-before-pilot`으로 변경 |
+| `configure-labmanager.ps1` | 실제 토큰으로 교체할 때 샘플 값도 거부하도록 검사 확장 |
+| `Program.cs` | 기존대로 `change-me-*`만 거부 → 샘플 값으로 서버가 정상 시작 |
+| `docs\PILOT.md` | 샘플 값도 파일럿에서 그대로 쓰지 말고 반드시 교체한다는 경고 추가 |
+
+- 값 자체에 `replace-before-pilot`이 들어 있어 설정 파일을 열면 교체 필요성을 알 수 있다.
+
+### 검증
+
+- 샘플 토큰으로 `--headless` 서버 기동 후 `/api/health`가 `200` 반환 확인.
+- 빌드 경고 0/오류 0, 테스트 89개 통과.
+- 로컬 빌드 SHA-256(CI 재빌드 시 달라질 수 있음):
+  - `UpdateAgent.Agent-Setup-0.1.8-x64.exe` `1dde1047334eb6d9b3e25d83b205fcc2b896441f711f29b08ce3fb6802d52009`
+  - `UpdateAgent.LabManager-Setup-0.1.8-x64.exe` `db96f87cb75d75bd3d5c630c827ae043b87d4b0a0079353a7ec5c7860abc3f45`
+  - `UpdateAgent.Agent-0.1.8-x64.msi` `3a7fba24e25cfc02379ad6bff98bed97a50fa9f1fe188d17000add12b17a647b`
+
+### 보안 주의
+
+- 샘플 토큰은 공개된 값이므로 실제 배포/파일럿 전 반드시 `configure-labmanager.ps1`로 교체해야 한다.
+
+---
+
 ## 2026-11-20 — 학생 데스크톱 앱 창이 표시되지 않는 결함 수정 (v0.1.7)
 
 ### 발견한 오류
