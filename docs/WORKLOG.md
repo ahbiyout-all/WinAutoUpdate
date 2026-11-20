@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-11-20 — 업그레이드 시 기본 토큰 자동 교체 (v0.1.9)
+
+### 발견한 오류
+
+- v0.1.8은 설치 파일에 샘플 토큰을 넣었지만, **기존 설치를 덮어쓰는 업그레이드 경로**에서는 `appsettings.json`을 백업→복원하므로 예전의 `change-me-*` 값이 그대로 돌아왔다.
+- 결과적으로 v0.1.8로 업그레이드해도 서버가 시작되지 않고 대시보드 실행이 건너뛰어졌다.
+
+### 수정
+
+| 항목 | 내용 |
+|---|---|
+| `installer\InnoSetup\UpdateAgent.LabManager.iss` | 복원된 `appsettings.json`에 `change-me-*`가 남아 있으면 샘플 토큰(`sample-*-token-replace-before-pilot`)으로 자동 교체 |
+| 교체 범위 | `change-me-admin-token`, `change-me-agent-token`만 치환 → 사용자가 이미 설정한 토큰은 유지 |
+| 실패 처리 | 교체 실패 시 설치 중단(기존 백업/복원 실패 처리와 동일) |
+
+- 신규 설치는 기존과 같이 페이로드의 샘플 토큰을 그대로 사용한다.
+- `HasDefaultLabManagerToken`이 복원 후 파일을 검사하므로 대시보드 자동 실행도 정상 동작한다.
+
+### 검증
+
+- Inno Setup 컴파일 성공, 빌드 경고 0/오류 0, 테스트 89개 통과, 정적 검사 통과.
+- `change-me-*` 설정을 샘플 토큰으로 치환하는 로직을 시뮬레이션해 유효한 JSON과 잔여 `change-me-` 0개를 확인.
+- 로컬 빌드 SHA-256(CI 재빌드 시 달라질 수 있음):
+  - `UpdateAgent.Agent-Setup-0.1.9-x64.exe` `3cff19be4a8a3ed5717c6b3e508b3d225f1a6d6e6362276c7c0a3fb1aedf80a4`
+  - `UpdateAgent.LabManager-Setup-0.1.9-x64.exe` `83e7e96c6433bc998774c4c8d216664ebabc35179949a7aa703ea43854b48c18`
+  - `UpdateAgent.Agent-0.1.9-x64.msi` `d7e1d59d492ede6a281f8bf8225ab08a8680e7888d9ba42b079f3f0e973c5f21`
+
+### 보안 주의
+
+- 샘플 토큰은 공개된 값이므로 실제 배포/파일럿 전 반드시 `configure-labmanager.ps1`로 교체해야 한다.
+
+---
+
 ## 2026-11-20 — LabManager 샘플 토큰 기본값 제공 (v0.1.8)
 
 ### 배경

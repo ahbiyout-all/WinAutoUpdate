@@ -14,7 +14,7 @@ Run on the teacher PC as administrator.
 .\scripts\allow-labmanager.ps1
 
 .EXAMPLE
-.\scripts\allow-labmanager.ps1 -Port 5080 -ProductVersion 0.1.8
+.\scripts\allow-labmanager.ps1 -Port 5080 -ProductVersion 0.1.9
 
 .EXAMPLE
 .\scripts\allow-labmanager.ps1 -Remove

@@ -165,7 +165,7 @@ Phase 0 파일럿에서는 Inno Setup을 먼저 검증하고, 문제가 있으�
 ```powershell
 Set-Location "<복사한 폴더>"
 
-.\UpdateAgent.Agent-Setup-0.1.8-x64.exe `
+.\UpdateAgent.Agent-Setup-0.1.9-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LabManagerUrl=http://<교사-PC-IP>:5080 `
   /AgentTokenFile="<agent-token.txt 경로>"
@@ -195,7 +195,7 @@ Set-Location "<복사한 폴더>"
 
 $env:UPDATEAGENT_AGENT_TOKEN = Get-Content "<agent-token.txt 경로>" -Raw
 .\scripts\install-agent-msi.ps1 `
-  -MsiPath ".\UpdateAgent.Agent-0.1.8-x64.msi" `
+  -MsiPath ".\UpdateAgent.Agent-0.1.9-x64.msi" `
   -LabManagerUrl "http://<교사-PC-IP>:5080" `
   -ConfirmMaestro
 ```

@@ -17,7 +17,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.8"
+  #define AppVersion "0.1.9"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -111,6 +111,8 @@ var
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
   FirewallGroup = 'UpdateAgent LabManager';
+  SampleAdminToken = 'sample-admin-token-replace-before-pilot';
+  SampleAgentToken = 'sample-agent-token-replace-before-pilot';
 
 function RunHidden(const FileName, Params: String): Integer;
 var
@@ -388,6 +390,65 @@ begin
   AddFirewallRule('UpdateAgent LabManager {#AppVersion}', 'UpdateAgent LabManager (versioned rule)');
 end;
 
+{ Replace all occurrences of OldPat with NewPat without relying on StringReplace. }
+function ReplaceAllText(const S, OldPat, NewPat: String): String;
+var
+  P, StartPos: Integer;
+begin
+  Result := S;
+  StartPos := 1;
+  while StartPos <= Length(Result) do
+  begin
+    P := Pos(OldPat, Copy(Result, StartPos, Length(Result) - StartPos + 1));
+    if P = 0 then Break;
+    P := P + StartPos - 1;
+    Result := Copy(Result, 1, P - 1) + NewPat +
+      Copy(Result, P + Length(OldPat), Length(Result) - P - Length(OldPat) + 1);
+    StartPos := P + Length(NewPat);
+  end;
+end;
+
+{ Upgrade path: the restored config may still contain change-me-* placeholders.
+  Replace only those placeholders with the shipped sample tokens so the server
+  starts immediately. Tokens the user already configured are left untouched. }
+function ReplaceDefaultLabManagerTokens(const FileName: String): Boolean;
+var
+  Lines: TStringList;
+  I: Integer;
+  Changed: Boolean;
+begin
+  Result := False;
+  Lines := TStringList.Create;
+  try
+    try
+      Lines.LoadFromFile(FileName);
+      Changed := False;
+      for I := 0 to Lines.Count - 1 do
+      begin
+        if Pos('change-me-admin-token', Lines.Strings[I]) > 0 then
+        begin
+          Lines.Strings[I] := ReplaceAllText(Lines.Strings[I],
+            'change-me-admin-token', SampleAdminToken);
+          Changed := True;
+        end;
+        if Pos('change-me-agent-token', Lines.Strings[I]) > 0 then
+        begin
+          Lines.Strings[I] := ReplaceAllText(Lines.Strings[I],
+            'change-me-agent-token', SampleAgentToken);
+          Changed := True;
+        end;
+      end;
+      if Changed then
+        Lines.SaveToFile(FileName);
+      Result := True;
+    except
+      Result := False;
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
 function HasDefaultLabManagerToken: Boolean;
 var
   Lines: TStringList;
@@ -440,6 +501,9 @@ begin
       { [Files] may have created appsettings.json with onlyifdoesntexist; overwrite with the backup. }
       if not CopyFile(LabManagerConfigBackup, LabManagerConfigFile, False) then
         RaiseException('기존 LabManager appsettings.json 복원에 실패해 설치를 중단합니다. 백업: ' + LabManagerConfigBackup);
+      { 이전 버전에서 남은 기본 토큰은 새 샘플 토큰으로 교체해 서버가 바로 시작되도록 한다. }
+      if not ReplaceDefaultLabManagerTokens(LabManagerConfigFile) then
+        RaiseException('기존 appsettings.json의 기본 토큰을 샘플 토큰으로 교체하지 못해 설치를 중단합니다.');
       DeleteFile(LabManagerConfigBackup);
       LabManagerConfigRestoreNeeded := False;
     end;
