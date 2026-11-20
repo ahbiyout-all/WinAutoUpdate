@@ -24,7 +24,7 @@ $env:UPDATEAGENT_AGENT_TOKEN = Read-Host -AsSecureString
 
 .EXAMPLE
 .\scripts\install-agent-msi.ps1 `
-  -MsiPath ".\artifacts\msi\UpdateAgent.Agent-0.1.6-x64.msi" `
+  -MsiPath ".\artifacts\msi\UpdateAgent.Agent-0.1.7-x64.msi" `
   -LabManagerUrl "http://192.168.0.10:5080" `
   -AgentTokenFile ".\pilot-agent-token.txt" `
   -ConfirmMaestro -Quiet

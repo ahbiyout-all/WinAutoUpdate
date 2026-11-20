@@ -5,6 +5,37 @@
 
 ---
 
+## 2026-11-20 — 학생 데스크톱 앱 창이 표시되지 않는 결함 수정 (v0.1.7)
+
+### 발견한 오류
+
+- 학생용 `UpdateAgent.Agent.Desktop.exe`가 실행되면 프로세스는 살아 있지만 창이 전혀 나타나지 않았다.
+- `src\UpdateAgent.Agent.Desktop\App.xaml`에 `StartupUri="MainWindow.xaml"`이 누락되어 WPF가 `MainWindow`를 생성하지 않았다.
+- `App.xaml.cs`가 비어 있어 대체 시작 코드도 없었다. (SessionHelper는 코드에서 창을 만들고, LabManager Desktop은 의도적으로 창이 없다.)
+- 이전 검증은 `tasklist`로 프로세스 존재만 확인하고 `MainWindowHandle`을 확인하지 않아 놓쳤다.
+
+### 수정
+
+| 항목 | 내용 |
+|---|---|
+| 변경 | `App.xaml`에 `StartupUri="MainWindow.xaml"` 추가 |
+| 검증 | 재빌드 후 프로세스 실행 시 `MainWindowHandle` ≠ 0, 창 제목 `UpdateAgent 상태` 확인 |
+
+### 영향
+
+- `v0.1.6` 이하에서 학생용 상태 앱을 실행해도 창이 보이지 않는다. `v0.1.7` 사용을 권장한다.
+
+### 검증
+
+- `dotnet build -c Release`: 경고 0/오류 0, 테스트 89개 통과, 정적 검사 통과.
+- Inno Setup 6.7.1 재컴파일 성공, MSI 재빌드 성공, UTF-8 BOM 유지.
+- 로컬 빌드 SHA-256(CI 재빌드 시 달라질 수 있음):
+  - `UpdateAgent.Agent-Setup-0.1.7-x64.exe` `756543b52f556c8b29df0a0fb416f9ff182800ecd2949ff1bae924da0c987cdb`
+  - `UpdateAgent.LabManager-Setup-0.1.7-x64.exe` `e95901327a40b6dbc39a719db5ebc117de2daed94bfa7eb342d96d32e5988a35`
+  - `UpdateAgent.Agent-0.1.7-x64.msi` `65dfee01b2b9cdbebabc6bb6fef6fd18d4ab5c0bdce655b7041ea0882e7b4a77`
+
+---
+
 ## 2026-11-19 — 프로세스 종료 감지 결함 수정 (v0.1.6)
 
 ### 자아성찰 — 발견한 오류
