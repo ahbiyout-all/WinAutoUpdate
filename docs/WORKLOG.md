@@ -31,6 +31,12 @@
   - `UpdateAgent.Agent-Setup-0.1.8-x64.exe` `1dde1047334eb6d9b3e25d83b205fcc2b896441f711f29b08ce3fb6802d52009`
   - `UpdateAgent.LabManager-Setup-0.1.8-x64.exe` `db96f87cb75d75bd3d5c630c827ae043b87d4b0a0079353a7ec5c7860abc3f45`
   - `UpdateAgent.Agent-0.1.8-x64.msi` `3a7fba24e25cfc02379ad6bff98bed97a50fa9f1fe188d17000add12b17a647b`
+- 공개된 `v0.1.8` 릴리스의 설치 파일 3개 해시가 릴리스 노트와 일치함을 확인:
+  - `UpdateAgent.Agent-Setup-0.1.8-x64.exe` `fce2ff097c4e644cc8924d0dcb1c8e994f71313f79cc25da41342b77cf336b9e`
+  - `UpdateAgent.LabManager-Setup-0.1.8-x64.exe` `09fe89e8fbe27e3098ddac89d8289201d9394f1c0498567651ee75832c79323b`
+  - `UpdateAgent.Agent-0.1.8-x64.msi` `faba1673c3fdd738ee6ceadae77669e23c1f13d20865c8c322305cf8cbb8adc4`
+- 릴리스 워크플로 실행 #9 성공. GitHub 자동 생성 소스 코드 2개를 제외한 업로드 자산은 설치 파일 3개뿐이며 기존 릴리스와 동일한 형태다.
+- 기존 `v0.1.7` 이하 릴리스는 변경하지 않음.
 
 ### 보안 주의
 
