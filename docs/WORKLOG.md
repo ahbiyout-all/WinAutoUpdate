@@ -38,6 +38,16 @@
 
 - `node --check` 통과, Release 빌드 경고 0/오류 0, 테스트 **146개 통과**.
 
+### 릴리스 검증
+
+- 워크플로: https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/44900295626 (성공)
+- 릴리스: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.17
+- 자산 3개 확인, 릴리스 노트 해시와 API `digest` 일치:
+  - `UpdateAgent.Agent-Setup-0.1.17-x64.exe`: `414f02fa8365530c0a323e040cf71be6caac80693bf7fa08b397308abd7bffa5`
+  - `UpdateAgent.LabManager-Setup-0.1.17-x64.exe`: `2cfd9d4999c325e564efdced024419e7d8f76746e2aea109b64897661430fdf0`
+  - `UpdateAgent.Agent-0.1.17-x64.msi`: `1048d92b3b965f635b714fcb3aa65a557b127a5960742b29989b13680dd9392d`
+- 문서 정합성 후속 수정: `PILOT.md`의 "일시중지 기본 체크" 설명을 새 기본값(해제)에 맞게 정정.
+
 ---
 
 ## 2026-11-21 — 혼합 OS 선택 시 오버레이 옵션 유지 (v0.1.16)
