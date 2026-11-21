@@ -29,6 +29,11 @@
 - Inno Setup 6 `ISCC.exe`로 Agent/LabManager 인스톨러 모두 컴파일 성공(경고/오류 없음).
 - 두 `.iss` 파일의 UTF-8 BOM(`EF-BB-BF`) 유지 확인.
 - 실제 권한 상승 덮어쓰기 설치에서의 안내 화면 표시/자동 전환은 로컬 환경에서 검증하지 못했다.
+- 릴리스 워크플로 실행 #44886868753 성공. 업로드 자산은 설치 파일 3개뿐이다.
+- 공개된 `v0.1.13` 릴리스의 설치 파일 3개 해시가 릴리스 노트와 일치함을 확인:
+  - `UpdateAgent.Agent-Setup-0.1.13-x64.exe` `8a8ac1be39061aa193fcc849633d6a1348dc92db0e9fe2844f3cf9dbf73244c4`
+  - `UpdateAgent.LabManager-Setup-0.1.13-x64.exe` `b2ba60e9aa56c0bc55ca6d189faaf1b60f1a0219c8f80c52234f9b8121aaff17`
+  - `UpdateAgent.Agent-0.1.13-x64.msi` `1ff6512ff31ae7448a3b5301d622540d8d7050f8594eb084b239d27d73c9df8a`
 
 ---
 
