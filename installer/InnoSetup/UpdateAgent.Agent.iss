@@ -2,6 +2,7 @@
 ;  UpdateAgent Agent - Inno Setup 6 installer
 ;
 ;  설치 흐름
+;    0) 일반 설치: 각 단계 시작 전 안내 화면을 표시하고 몇 초 후 자동 진행
 ;    1) 실행 중인 기존 앱 강제 종료(서비스 중지 포함)
 ;    2) 라이선스 고지
 ;    3) 설치 직전 기존 설치 자동 감지 후 무인 제거(Inno/MSI, 설정 파일은 백업/복원)
@@ -9,6 +10,8 @@
 ;    5) 바탕화면 바로가기 선택
 ;    6) 서비스 등록 + 방화벽 규칙(기본 이름/버전 이름) 등록
 ;    7) 서비스 시작 및 상태 확인 실행
+;
+;  무인 설치(/VERYSILENT)에서는 안내 화면과 대기 시간을 생략한다.
 ;
 ;  무인 설치
 ;    UpdateAgent.Agent-Setup-<version>-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
@@ -29,6 +32,9 @@
 #endif
 #ifndef NoticeRtf
   #define NoticeRtf "..\UpdateAgent.Agent.Installer\payload\notice.ko.rtf"
+#endif
+#ifndef NoticeDelaySeconds
+  #define NoticeDelaySeconds 5
 #endif
 
 [Setup]
@@ -111,11 +117,18 @@ var
   AgentConfigRestoreNeeded: Boolean;
   AgentConfigWriteFailed: Boolean;
   ServiceRecoveryDisabled: Boolean;
+  StepNoticePage: TOutputProgressWizardPage;
 
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
   ServiceName = 'UpdateAgentService';
   FirewallGroup = 'UpdateAgent';
+  NoticeSeconds = {#NoticeDelaySeconds};
+
+procedure InitializeWizard;
+begin
+  StepNoticePage := CreateOutputProgressPage('UpdateAgent 설치', '단계 안내');
+end;
 
 function RunHidden(const FileName, Params: String): Integer;
 var
@@ -123,6 +136,39 @@ var
 begin
   Exec(FileName, Params, '', SW_HIDE, ewWaitUntilTerminated, Code);
   Result := Code;
+end;
+
+{ Non-modal notice with a countdown. The caller's next statement is the step
+  that the notice describes, so the wizard advances automatically when the
+  countdown ends. WizardSilent keeps unattended installs delay-free. }
+procedure ShowStepNotice(const ACaption, AMessage, ASubMessage: String);
+var
+  I, Remaining: Integer;
+begin
+  if WizardSilent then Exit;
+  if StepNoticePage = nil then Exit;
+
+  StepNoticePage.Caption := ACaption;
+  StepNoticePage.Description := '잠시 후 다음 단계로 자동 진행합니다.';
+  StepNoticePage.SetText(AMessage, ASubMessage + ' (' + IntToStr(NoticeSeconds) + '초 후 자동 진행)');
+  StepNoticePage.SetProgress(0, NoticeSeconds);
+  StepNoticePage.Show;
+  try
+    for I := 1 to NoticeSeconds do
+    begin
+      Sleep(1000);
+      Remaining := NoticeSeconds - I;
+      StepNoticePage.SetProgress(I, NoticeSeconds);
+      if Remaining > 0 then
+        StepNoticePage.SetText(AMessage, ASubMessage + ' (' + IntToStr(Remaining) + '초 후 자동 진행)')
+      else
+        StepNoticePage.SetText(AMessage, '이제 진행합니다...');
+      StepNoticePage.Msg1Label.Refresh;
+      StepNoticePage.Msg2Label.Refresh;
+    end;
+  finally
+    StepNoticePage.Hide;
+  end;
 end;
 
 { [Code] cannot capture stdout, so tasklist output is redirected to a temp file. }
@@ -408,10 +454,7 @@ end;
 
 function InitializeSetup: Boolean;
 begin
-  { 1) 종료 → 언인스톨 → 설치 순서를 위해 실행 중인 앱을 먼저 정리한다. }
-  TerminateAgentApps;
-
-  { 2) 기존 설치는 선택 없이 PrepareToInstall에서 항상 제거한다. }
+  { 종료 → 언인스톨 → 설치 순서는 PrepareToInstall에서 안내와 함께 수행한다. }
   OldInnoUninstall := FindInnoUninstallString;
   OldMsiProduct := FindMsiProductCode;
   Result := True;
@@ -425,12 +468,19 @@ begin
   Result := '';
 
   { 언인스톨보다 먼저 모든 실행 중인 앱을 종료한다. 종료 실패 시 설치를 중단한다. }
+  ShowStepNotice('기존 앱 종료',
+    '실행 중인 UpdateAgent 앱을 종료합니다.',
+    '창과 서비스를 정리한 뒤 언인스톨을 준비합니다.');
   if not TerminateAgentApps then
   begin
     Result := '기존 UpdateAgent 앱을 종료하지 못해 설치를 중단합니다. ' +
       '실행 중인 UpdateAgent 창/서비스를 닫은 뒤 다시 실행해 주세요.';
     Exit;
   end;
+
+  ShowStepNotice('기존 설치 제거',
+    '기존 UpdateAgent 설치를 제거합니다.',
+    'appsettings.json은 백업된 뒤 새 설치에 복원됩니다.');
 
   { 이전 제거 프로그램/InstallDelete가 appsettings.json을 지우므로 먼저 백업한다. }
   AgentConfigFile := ExpandConstant('{app}\Service\appsettings.json');
@@ -637,6 +687,9 @@ var
 begin
   if CurStep = ssInstall then
   begin
+    ShowStepNotice('새 버전 설치',
+      'UpdateAgent 새 버전 설치를 시작합니다.',
+      '파일 교체·서비스 등록·방화벽 설정까지 자동으로 진행합니다.');
     { 언인스톨이 끝난 뒤 파일 교체 직전에도 남은 프로세스가 없음을 보장한다. }
     if not TerminateAgentApps then
       RaiseException('기존 UpdateAgent 앱을 종료하지 못해 설치를 중단합니다.');

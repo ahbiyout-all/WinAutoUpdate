@@ -128,6 +128,10 @@ C:\Program Files\UpdateAgent\LabManager\
 | 모든 경우(대화형/무인) | 묻지 않고 항상 제거 후 설치(설정 데이터는 보존) |
 
 - 설치 순서는 **실행 중인 앱 종료 → 이전 버전 언인스톨 → 새 파일 설치**입니다.
+  - 일반(대화형) 설치에서는 각 단계 직전에 안내 화면을 표시하고 **5초 후 자동으로 다음 단계로 진행**합니다.
+    안내 단계는 `기존 앱 종료 → 기존 설치 제거 → 새 버전 설치`이며, 사용자가 버튼을 누를 필요가 없습니다.
+    대기 시간은 `.iss` 상단의 `NoticeDelaySeconds` 값으로 조정할 수 있습니다.
+  - `/VERYSILENT /SUPPRESSMSGBOXES` 무인 설치에서는 안내 화면과 대기 시간을 완전히 생략합니다.
   - 종료 대상: Agent `UpdateAgent.SessionHelper.exe`, `UpdateAgent.Agent.Desktop.exe`,
     `UpdateAgent.Cli.exe`, `UpdateAgent.Service.exe` / LabManager
     `UpdateAgent.LabManager.Desktop.exe`, `UpdateAgent.LabManager.exe`.
