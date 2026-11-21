@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-11-21 — 학생용 앱에서 수동 업데이트 시작 (v0.1.11)
+
+### 배경
+
+- 학생용 상태 앱(`UpdateAgent.Agent.Desktop`)은 상태 조회만 가능한 읽기 전용 앱이었다.
+- 실제 작업은 관리자 PowerShell에서 `UpdateAgent.Cli run --confirm-maestro`로 시작할 수 있었지만,
+  이 작업은 로컬 저장소에만 기록되어 교사 대시보드에 나타나지 않았다.
+- 학생이 상태 앱에서 직접 작업을 시작하면서도 실행 중인 서비스를 통해 대시보드에 보고되도록 할 필요가 있었다.
+
+### 변경
+
+| 항목 | 내용 |
+|---|---|
+| `Shared/UpdateAgentConstants.cs` | 로컬 제어 파이프 이름 `UpdateAgent.LocalControl.v1` 추가 |
+| `Shared/Models/LocalControlModels.cs` (신규) | `start-update` 요청/응답 DTO. 요청은 작업 종류와 Maestro 확인 여부만 포함 |
+| `Core/Comms/LocalControlPipe.cs` (신규) | 요청 1줄/응답 1줄 파이프 서버·클라이언트. 최대 요청 크기 제한, 응답 시간 제한, 오버레이와 동일한 ACL(인증 사용자 읽기-쓰기) |
+| `Service/Configuration/ServerPolicyProvider.cs` (신규) | 캐시된 서버 정책 로더. `CommandExecutor`도 함께 사용하도록 정리 |
+| `Service/Comms/LocalUpdateTrigger.cs` (신규) | 알 수 없는 작업 거부, Maestro 미확인 차단, 확인 주체를 서버에서 `student`로 고정 |
+| `Service/Worker.cs`, `Program.cs` | 파이프 서버 시작/종료, 성공 요청 시 즉시 체크인으로 대시보드 반영 |
+| `LabManager/Program.cs` | 체크인으로 처음 발견된 Maestro 필요 작업에 대해 학생 확인 체크리스트를 자동 생성 |
+| `Agent.Desktop/MainWindow.xaml(.cs)`, `Services/LocalUpdateClient.cs` | **업데이트 시작** 버튼, Maestro/재부팅 확인 창, 결과 표시 및 상태 새로고침 |
+| 테스트 | 직렬화·정책 로더·트리거 검증·파이프 왕복 등 9개 추가(전체 107개 통과) |
+
+- 토큰은 여전히 학생 앱에 저장하지 않는다.
+- 진행 중인 작업이 있으면 시작 버튼을 비활성화하고, 재개/일시중지/취소는 대시보드에서 처리한다.
+- CLI `run`은 로컬 전용 경로로 남으며, 대시보드 보고가 필요한 경우 학생 앱이나 대시보드를 사용한다.
+
+### 검증
+
+- 빌드 경고 0/오류 0, 테스트 107개 통과.
+- 파이프 서버/클라이언트 왕복, Maestro 미확인 차단, 확인자 고정(`student`), 정책 로딩 테스트 통과.
+- 실제 권한 상승 설치/오버레이/재부팅 시나리오는 로컬 환경에서 검증하지 못했다.
+
+---
+
 ## 2026-11-21 — 대시보드에서 관리자 기본 토큰 표시 및 서버 토큰 변경 (v0.1.10)
 
 ### 배경

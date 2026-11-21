@@ -96,10 +96,20 @@ try
             DryRun = sp.GetRequiredService<IOptions<AgentOptions>>().Value.DryRun,
         }));
 
-    // 원격 관리
+    // 원격 관리 + 학생용 앱 로컬 제어
+    builder.Services.AddSingleton<ServerPolicyProvider>();
     builder.Services.AddSingleton<LabManagerClient>();
     builder.Services.AddSingleton<CommandExecutor>();
     builder.Services.AddSingleton<SessionWatcherService>();
+    builder.Services.AddSingleton(sp =>
+    {
+        var runner = sp.GetRequiredService<UpdateJobRunner>();
+        var trigger = new LocalUpdateTrigger(
+            (policy, confirmed, by, ct) => runner.StartAsync(policy, confirmed, by, null, ct),
+            sp.GetRequiredService<ServerPolicyProvider>(),
+            sp.GetRequiredService<ILogger<LocalUpdateTrigger>>());
+        return new LocalControlPipeServer(trigger.HandleAsync);
+    });
 
     builder.Services.AddHostedService<Worker>();
 

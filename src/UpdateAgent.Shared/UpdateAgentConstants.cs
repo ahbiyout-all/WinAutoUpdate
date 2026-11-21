@@ -18,6 +18,9 @@ public static class UpdateAgentConstants
     /// <summary>서비스 ↔ SessionHelper 명명된 파이프.</summary>
     public const string OverlayPipeName = "UpdateAgent.Overlay.v1";
 
+    /// <summary>학생용 상태 앱 ↔ 서비스 로컬 제어 명명된 파이프.</summary>
+    public const string LocalControlPipeName = "UpdateAgent.LocalControl.v1";
+
     /// <summary>교사 PC LabManager 기본 주소.</summary>
     public const string DefaultLabManagerUrl = "http://localhost:5080";
 

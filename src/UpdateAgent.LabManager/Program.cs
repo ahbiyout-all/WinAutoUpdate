@@ -190,6 +190,22 @@ app.MapPost("/api/agents/checkin", async (
                 await labStore.SaveJobSummaryAsync(validated, request.Agent.MachineName, cancellationToken);
             }
 
+            if (validated.RequiresMaestroAttention &&
+                await labStore.GetChecklistAsync(summary.JobId, cancellationToken) is null)
+            {
+                // 학생용 앱에서 시작한 작업은 체크인으로 처음 발견된다.
+                // 서비스가 학생 확인을 받아 시작한 작업이므로 보호 해제 확인을 기록해
+                // 대시보드에서 재부팅 후 Maestro 단계를 계속 관리할 수 있게 한다.
+                await labStore.SaveChecklistAsync(new MaestroChecklist
+                {
+                    JobId = summary.JobId,
+                    ProtectionSuspendedConfirmed = true,
+                    ProtectionSuspendedConfirmedAt = DateTimeOffset.Now,
+                    ConfirmedBy = "student",
+                    RequiresManualConfirmation = true,
+                }, cancellationToken);
+            }
+
             if (previous is null || previous.Summary.State != validated.State)
             {
                 await labStore.AddAuditAsync(

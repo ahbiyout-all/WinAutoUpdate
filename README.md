@@ -173,10 +173,13 @@ publish\cli
 
 학생 PC에서는 `publish\agent\desktop\UpdateAgent.Agent.Desktop.exe`로 서비스 상태와 작업 진행 상황을
 창으로 확인할 수 있습니다. 설치 시 시작 메뉴/바탕화면의 **`UpdateAgent 상태 확인`** 바로가기도 이 앱을 실행합니다.
-상태 앱은 읽기 전용이며 토큰을 저장하거나 작업을 제어하지 않습니다.
+상태 앱은 토큰을 저장하지 않으며, **업데이트 시작** 버튼으로 실행 중인 서비스에 작업 시작을 요청할 수 있습니다.
+버튼을 누르면 Maestro 수동 복구 모드 확인과 재부팅 경고가 표시되고, 확인한 뒤에만 작업이 시작됩니다.
+작업은 서비스에서 실행되므로 교사 대시보드의 체크인 상태에도 표시됩니다.
 고급 사전 점검은 `publish\cli\UpdateAgent.Cli.exe`를 사용합니다.
 서비스가 실행 중일 때는 `scan`, `preflight`, `status`, `maestro`만 사용하고,
-작업 제어(`run`/`resume`/`pause`/`cancel`)는 LabManager 대시보드를 사용하세요.
+일시중지/재개/취소 등 작업 제어는 LabManager 대시보드를 사용하세요.
+로컬 CLI `run`은 대시보드에 보고되지 않으므로 학생용 앱이나 대시보드를 이용하세요.
 
 ## 실행
 

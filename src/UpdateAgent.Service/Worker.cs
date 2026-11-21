@@ -30,6 +30,7 @@ public sealed class Worker : BackgroundService
     private readonly IUserSessionProbe _sessions;
     private readonly IRebootManager _reboot;
     private readonly OverlayPipeServer _overlayPipe;
+    private readonly LocalControlPipeServer _localControlPipe;
     private readonly OverlayJobProgressSink _overlaySink;
     private readonly SessionWatcherService _sessionWatcher;
     private readonly LabManagerClient _labManager;
@@ -38,6 +39,8 @@ public sealed class Worker : BackgroundService
     private readonly ILogger<Worker> _logger;
 
     private DateTimeOffset? _firstSeen;
+    private volatile bool _checkInRequested;
+    private CancellationTokenSource? _pollDelayCts;
 
     public Worker(
         UpdateJobRunner runner,
@@ -47,6 +50,7 @@ public sealed class Worker : BackgroundService
         IUserSessionProbe sessions,
         IRebootManager reboot,
         OverlayPipeServer overlayPipe,
+        LocalControlPipeServer localControlPipe,
         OverlayJobProgressSink overlaySink,
         SessionWatcherService sessionWatcher,
         LabManagerClient labManager,
@@ -61,6 +65,7 @@ public sealed class Worker : BackgroundService
         _sessions = sessions;
         _reboot = reboot;
         _overlayPipe = overlayPipe;
+        _localControlPipe = localControlPipe;
         _overlaySink = overlaySink;
         _sessionWatcher = sessionWatcher;
         _labManager = labManager;
@@ -99,8 +104,17 @@ public sealed class Worker : BackgroundService
             }, CancellationToken.None);
         }
 
+        void OnLocalControlRequestSucceeded()
+        {
+            // 학생용 앱이 작업을 시작하면 대시보드 반영을 위해 체크인을 앞당긴다.
+            _checkInRequested = true;
+            _pollDelayCts?.Cancel();
+        }
+
         _overlayPipe.ClientConnected += OnOverlayClientConnected;
         _overlayPipe.Start();
+        _localControlPipe.RequestSucceeded += OnLocalControlRequestSucceeded;
+        _localControlPipe.Start();
 
         try
         {
@@ -133,23 +147,39 @@ public sealed class Worker : BackgroundService
         {
             while (!stoppingToken.IsCancellationRequested)
             {
+                _checkInRequested = false;
                 await CheckInAsync(stoppingToken);
+
+                if (_checkInRequested) continue;
+
+                using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                _pollDelayCts = delayCts;
+                if (_checkInRequested) delayCts.Cancel();
 
                 try
                 {
                     await Task.Delay(
                         TimeSpan.FromSeconds(_options.CurrentValue.EffectivePollSeconds),
-                        stoppingToken);
+                        delayCts.Token);
+                }
+                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+                {
+                    // 학생용 앱의 로컬 작업 시작 → 즉시 체크인
                 }
                 catch (OperationCanceledException)
                 {
                     break;
+                }
+                finally
+                {
+                    if (ReferenceEquals(_pollDelayCts, delayCts)) _pollDelayCts = null;
                 }
             }
         }
         finally
         {
             _overlayPipe.ClientConnected -= OnOverlayClientConnected;
+            _localControlPipe.RequestSucceeded -= OnLocalControlRequestSucceeded;
 
             try
             {

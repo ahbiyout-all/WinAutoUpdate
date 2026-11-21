@@ -20,6 +20,8 @@
             <TextBlock Text="UpdateAgent 상태" FontSize="24" FontWeight="SemiBold" />
             <TextBlock Text="학생 PC의 서비스와 Windows Update 작업 상태를 확인합니다."
                        Foreground="#666666" Margin="0,4,0,0" />
+            <TextBlock Text="수동 업데이트는 화면 잠금과 재부팅이 발생할 수 있습니다."
+                       Foreground="#9A6700" Margin="0,4,0,0" />
         </StackPanel>
 
         <GroupBox Grid.Row="1" Header="에이전트 정보" Padding="12" Margin="0,0,0,12">
@@ -89,6 +91,8 @@
         <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <TextBlock x:Name="UpdatedText" Text="마지막 새로고침: -" VerticalAlignment="Center"
                        Foreground="#666666" Margin="0,0,16,0" />
+            <Button x:Name="StartButton" Content="업데이트 시작" Width="110" Height="32" Margin="0,0,8,0"
+                    Click="StartButton_Click" />
             <Button x:Name="RefreshButton" Content="새로고침" Width="90" Height="32" Margin="0,0,8,0"
                     Click="RefreshButton_Click" />
             <Button Content="닫기" Width="90" Height="32" IsCancel="True" Click="CloseButton_Click" />

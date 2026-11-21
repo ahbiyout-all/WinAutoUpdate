@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using UpdateAgent.Core.Orchestration;
 using UpdateAgent.Core.Reboot;
 using UpdateAgent.Core.Storage;
+using UpdateAgent.Service.Configuration;
 using UpdateAgent.Service.Overlay;
 using UpdateAgent.Shared.Models;
 using UpdateAgent.Shared.Serialization;
@@ -18,6 +19,7 @@ public sealed class CommandExecutor
     private readonly IRebootManager _reboot;
     private readonly OverlayJobProgressSink _overlay;
     private readonly IJobStore _store;
+    private readonly ServerPolicyProvider _policies;
     private readonly ILogger<CommandExecutor> _logger;
     private readonly List<CommandResult> _pendingResults = new();
     private readonly LinkedList<string> _processed = new();
@@ -29,12 +31,14 @@ public sealed class CommandExecutor
         IRebootManager reboot,
         OverlayJobProgressSink overlay,
         IJobStore store,
+        ServerPolicyProvider policies,
         ILogger<CommandExecutor> logger)
     {
         _runner = runner;
         _reboot = reboot;
         _overlay = overlay;
         _store = store;
+        _policies = policies;
         _logger = logger;
     }
 
@@ -180,7 +184,7 @@ public sealed class CommandExecutor
 
             case CommandType.ScanNow:
             {
-                var policy = await GetServerPolicyAsync(cancellationToken);
+                var policy = await _policies.GetAsync(cancellationToken);
                 var report = await _runner.ScanAsync(policy, cancellationToken);
                 return Ok(command,
                     $"검색 완료: 대상 {report.Selected.Count}건, 제외 {report.Excluded.Count}건");
@@ -210,7 +214,7 @@ public sealed class CommandExecutor
 
             case CommandType.ApplyPolicy:
             {
-                await _store.SetSettingAsync("server-policy", command.PayloadJson, cancellationToken);
+                await _store.SetSettingAsync(ServerPolicyProvider.SettingKey, command.PayloadJson, cancellationToken);
                 return Ok(command, "정책을 적용했습니다.");
             }
 
@@ -228,21 +232,6 @@ public sealed class CommandExecutor
 
             default:
                 return Fail(command, $"지원하지 않는 명령입니다: {command.Type}");
-        }
-    }
-
-    private async Task<UpdatePolicy> GetServerPolicyAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var json = await _store.GetSettingAsync("server-policy", cancellationToken);
-            return string.IsNullOrWhiteSpace(json)
-                ? UpdatePolicy.Default
-                : UpdateAgentJson.Deserialize<UpdatePolicy>(json) ?? UpdatePolicy.Default;
-        }
-        catch
-        {
-            return UpdatePolicy.Default;
         }
     }
 
