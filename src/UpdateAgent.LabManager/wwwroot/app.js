@@ -15,6 +15,7 @@ let agentPolicies = {};
 let startCapability = null;
 let agentPolicyCapability = null;
 let agentPolicyTargetId = null;
+let savedPolicySelection = { withOverride: 0, total: 0 };
 
 const OS_GROUPS = [
   { id: 'windows-11', label: 'Windows 11', tone: 'blue' },
@@ -33,38 +34,38 @@ const POLICY_PRESETS = {
   },
   standard: {
     label: '표준',
-    hint: '보안 · 중요 · 권장 업데이트를 설치합니다. 드라이버는 제외됩니다.',
+    hint: '보안 · 중요 · 권장 업데이트를 설치합니다. 드라이버는 제외되고 로그온으로 일시중지하지 않습니다.',
     values: {
       security: true, critical: true, important: true, optional: false,
       drivers: false, definitions: false, feature: false, overlay: true,
-      pauseUser: true, rebootNever: false, maxReboots: 5,
+      pauseUser: false, rebootNever: false, maxReboots: 5,
     },
   },
   'security-only': {
     label: '보안 중심',
-    hint: '보안 · 중요 업데이트만 설치하고 재부팅 횟수를 줄입니다.',
+    hint: '보안 · 중요 업데이트만 설치하고 재부팅 횟수를 줄입니다. 로그온으로 일시중지하지 않습니다.',
     values: {
       security: true, critical: true, important: false, optional: false,
       drivers: false, definitions: false, feature: false, overlay: true,
-      pauseUser: true, rebootNever: false, maxReboots: 3,
+      pauseUser: false, rebootNever: false, maxReboots: 3,
     },
   },
   'server-safe': {
     label: '서버 안전',
-    hint: '정의 업데이트를 포함하고 자동 재부팅과 오버레이를 끕니다.',
+    hint: '정의 업데이트를 포함하고 자동 재부팅과 오버레이를 끕니다. 로그온으로 일시중지하지 않습니다.',
     values: {
       security: true, critical: true, important: true, optional: false,
       drivers: false, definitions: true, feature: false, overlay: false,
-      pauseUser: true, rebootNever: true, maxReboots: 5,
+      pauseUser: false, rebootNever: true, maxReboots: 5,
     },
   },
   full: {
     label: '전체',
-    hint: '선택 · 드라이버 · 정의 업데이트까지 모두 포함합니다.',
+    hint: '선택 · 드라이버 · 정의 업데이트까지 모두 포함합니다. 로그온으로 일시중지하지 않습니다.',
     values: {
       security: true, critical: true, important: true, optional: true,
       drivers: true, definitions: true, feature: false, overlay: true,
-      pauseUser: true, rebootNever: false, maxReboots: 5,
+      pauseUser: false, rebootNever: false, maxReboots: 5,
     },
   },
 };
@@ -229,7 +230,8 @@ function capabilitiesFor(records) {
   const groups = new Map();
   let supportsOverlayAny = false;
   let supportsOverlayAll = true;
-  let supportsFeature = true;
+  let supportsFeatureAny = false;
+  let supportsFeatureAll = true;
   for (const record of records) {
     const os = record.agent.os || {};
     const group = osGroup(os);
@@ -237,14 +239,21 @@ function capabilitiesFor(records) {
     const overlay = os.supportsOverlay ?? !os.isServerCore;
     if (overlay) supportsOverlayAny = true;
     else supportsOverlayAll = false;
-    if (!(os.supportsFeatureUpdates ?? (!os.isServer && !os.isLtsc && !os.isWindows10))) supportsFeature = false;
+    const feature = os.supportsFeatureUpdates ?? (!os.isServer && !os.isLtsc && !os.isWindows10);
+    if (feature) supportsFeatureAny = true;
+    else supportsFeatureAll = false;
   }
   if (records.length === 0) {
     supportsOverlayAny = false;
-    supportsFeature = false;
+    supportsFeatureAny = false;
+    supportsFeatureAll = false;
   }
   // supportsOverlay: 적어도 한 대라면 UI에서 선택 가능(서버가 OS별로 자동 조정).
-  return { count: records.length, groups, supportsOverlay: supportsOverlayAny, supportsOverlayAll, supportsFeature };
+  return {
+    count: records.length, groups,
+    supportsOverlay: supportsOverlayAny, supportsOverlayAll,
+    supportsFeature: supportsFeatureAll, supportsFeatureAny,
+  };
 }
 
 function renderOsMix(selector, capability) {
@@ -258,7 +267,10 @@ function renderOsMix(selector, capability) {
     parts.push('<div class="muted small">Server Core: 전체화면 오버레이가 OS별로 자동 비활성화됩니다.</div>');
   }
   if (!capability.supportsFeature) {
-    parts.push('<div class="muted small">선택된 OS는 기능 업데이트를 지원하지 않습니다.</div>');
+    const text = capability.supportsFeatureAny
+      ? '선택된 OS 중 일부는 기능 업데이트를 지원하지 않습니다.'
+      : '선택된 OS는 기능 업데이트를 지원하지 않습니다.';
+    parts.push(`<div class="muted small">${text}</div>`);
   }
   host.innerHTML = parts.join(' ');
 }
@@ -309,7 +321,10 @@ function writePolicyForm(prefix, policy) {
 }
 
 function applyPolicyCapabilities(prefix, capability) {
-  capability = capability || { supportsOverlay: true, supportsOverlayAll: true, supportsFeature: true };
+  capability = capability || {
+    supportsOverlay: true, supportsOverlayAll: true,
+    supportsFeature: true, supportsFeatureAny: true,
+  };
   const overlay = $(fieldSel(prefix, 'overlay'));
   if (overlay) {
     overlay.disabled = !capability.supportsOverlay;
@@ -321,7 +336,9 @@ function applyPolicyCapabilities(prefix, capability) {
     feature.checked = false;
     feature.parentElement.title = capability.supportsFeature
       ? '기능 업데이트는 2차 승인 워크플로에서만 사용합니다.'
-      : '선택된 OS는 기능 업데이트를 지원하지 않습니다.';
+      : (capability.supportsFeatureAny
+        ? '선택된 OS 중 일부는 기능 업데이트를 지원하지 않습니다.'
+        : '선택된 OS는 기능 업데이트를 지원하지 않습니다.');
   }
 }
 
@@ -723,7 +740,9 @@ function jobActionLabel(action) {
 }
 
 async function submitStart() {
-  const policy = readPolicyForm('p-');
+  // 저장된 PC별 옵션을 쓰면 정책을 보내지 않는다(null). 서버가 개별 > 기본 순으로 해석한다.
+  const useSaved = !!$('#p-use-saved-policy')?.checked;
+  const policy = useSaved ? null : readPolicyForm('p-');
 
   const agentIds = [...selected];
   if (agentIds.length === 0) {
@@ -745,7 +764,7 @@ async function submitStart() {
       body: JSON.stringify({
         agentIds,
         policy,
-        saveAsAgentPolicy: $('#p-save-policy').checked,
+        saveAsAgentPolicy: !useSaved && $('#p-save-policy').checked,
         maestroConfirmed: true,
         confirmedBy: 'teacher',
         note,
@@ -771,6 +790,27 @@ async function submitStart() {
   }
 }
 
+function updateSavedPolicyUi() {
+  const useSaved = $('#p-use-saved-policy');
+  const save = $('#p-save-policy');
+  const hint = $('#p-saved-policy-hint');
+  if (save) save.disabled = !!useSaved?.checked;
+  if (!hint) return;
+
+  const { withOverride, total } = savedPolicySelection;
+  if (useSaved?.checked) {
+    hint.textContent = withOverride > 0
+      ? `저장된 옵션 사용: 선택한 ${total}대 중 ${withOverride}대에 저장된 값을 적용합니다.`
+      : `저장된 옵션 사용: 저장된 값이 없어 선택한 ${total}대에 서버 기본 정책을 적용합니다.`;
+  } else if (total > 0) {
+    hint.textContent = withOverride > 0
+      ? `선택한 ${total}대 중 ${withOverride}대에 저장된 옵션이 있습니다.`
+      : '선택한 PC에 저장된 개별 옵션이 없습니다.';
+  } else {
+    hint.textContent = '';
+  }
+}
+
 function openStartDialog(agentIds) {
   if (agentIds && agentIds.length > 0) {
     for (const id of agentIds) selected.add(id);
@@ -793,7 +833,13 @@ function openStartDialog(agentIds) {
   const allServer = records.length > 0 && [...startCapability.groups.keys()]
     .every((id) => id === 'server' || id === 'server-core');
   setPolicyPreset('p-', allServer ? 'server-safe' : 'standard', startCapability);
+  savedPolicySelection = {
+    withOverride: records.filter((r) => !!agentPolicies[r.agent.agentId]?.hasOverride).length,
+    total: records.length,
+  };
+  $('#p-use-saved-policy').checked = false;
   $('#p-save-policy').checked = false;
+  updateSavedPolicyUi();
 
   $('#start-target-count').textContent = `${selected.size}대`;
   $('#start-modal').classList.remove('hidden');
@@ -807,8 +853,9 @@ async function openAgentPolicyDialog(agent) {
     $('#ap-source').textContent = data.source || '기본 정책';
     agentPolicyCapability = capabilitiesFor([agent]);
     renderOsMix('#ap-os-mix', agentPolicyCapability);
-    applyPolicyCapabilities('ap-', agentPolicyCapability);
+    // 먼저 정책 값을 쓰고, 그 다음 OS 제한으로 비활성화·해제한다(역순이면 꺼진 옵션이 다시 켜질 수 있음).
     writePolicyForm('ap-', data.policy || {});
+    applyPolicyCapabilities('ap-', agentPolicyCapability);
     $('#ap-preset').value = 'custom';
     updatePresetHint('ap-', 'custom', agentPolicyCapability);
     $('#agent-policy-modal').classList.remove('hidden');
@@ -1206,6 +1253,7 @@ function wireEvents() {
   $('#start-close').addEventListener('click', () => $('#start-modal').classList.add('hidden'));
   $('#start-cancel').addEventListener('click', () => $('#start-modal').classList.add('hidden'));
   $('#start-submit').addEventListener('click', submitStart);
+  $('#p-use-saved-policy')?.addEventListener('change', updateSavedPolicyUi);
   $('#ap-close').addEventListener('click', () => $('#agent-policy-modal').classList.add('hidden'));
   $('#ap-cancel').addEventListener('click', () => $('#agent-policy-modal').classList.add('hidden'));
   $('#ap-save').addEventListener('click', saveAgentPolicy);

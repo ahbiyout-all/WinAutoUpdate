@@ -140,6 +140,49 @@ public sealed class AgentPolicyServiceTests
         });
     }
 
+    [Fact]
+    public async Task GetEffectiveAsync_TreatsCorruptOverrideAsDefault()
+    {
+        var windows11 = WindowsOsInfoProvider.Create("Windows 11 Pro", "Professional", "25H2", 26200);
+
+        await WithStore(async (store, service) =>
+        {
+            await store.SetSettingAsync(
+                AgentPolicyService.DefaultSettingKey,
+                UpdateAgentJson.Serialize(UpdatePolicy.Default with { IncludeOptional = true }));
+            await store.SetSettingAsync("agent-policy:pc-1", "{not-valid-json");
+
+            var effective = await service.GetEffectiveAsync("pc-1", windows11);
+
+            Assert.False(effective.HasOverride);
+            Assert.Equal("기본 정책", effective.Source);
+            Assert.True(effective.Policy.IncludeOptional);
+        });
+    }
+
+    [Fact]
+    public async Task GetSummaries_DoesNotMarkCorruptOverrideAsIndividualOption()
+    {
+        var windows11 = WindowsOsInfoProvider.Create("Windows 11 Pro", "Professional", "25H2", 26200);
+
+        await WithStore(async (store, service) =>
+        {
+            foreach (var id in new[] { "pc-1", "pc-2" })
+            {
+                await store.UpsertAgentAsync(
+                    new AgentInfo { AgentId = id, MachineName = id },
+                    new AgentTelemetry { AgentId = id });
+            }
+
+            await store.SetSettingAsync("agent-policy:pc-1", "{not-valid-json");
+            await service.SaveAsync("pc-2", UpdatePolicy.Default, windows11);
+            var summaries = await service.GetSummariesAsync();
+
+            Assert.False(summaries.Single(s => s.AgentId == "pc-1").HasOverride);
+            Assert.True(summaries.Single(s => s.AgentId == "pc-2").HasOverride);
+        });
+    }
+
     private static async Task WithStore(Func<LabStore, AgentPolicyService, Task> action)
     {
         var root = Path.Combine(Path.GetTempPath(), "UpdateAgentTests", Guid.NewGuid().ToString("N"));

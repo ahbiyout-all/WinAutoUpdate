@@ -20,21 +20,23 @@ public sealed class AgentPolicyService
     public AgentPolicyService(LabStore store) => _store = store;
 
     public async Task<UpdatePolicy> GetDefaultAsync(CancellationToken cancellationToken = default) =>
-        Parse(await _store.GetSettingAsync(DefaultSettingKey, cancellationToken));
+        TryParse(await _store.GetSettingAsync(DefaultSettingKey, cancellationToken)) ?? UpdatePolicy.Default;
 
     public async Task<EffectivePolicy> GetEffectiveAsync(
         string agentId,
         OsInfo? os = null,
         CancellationToken cancellationToken = default)
     {
-        var json = await _store.GetSettingAsync(Key(agentId), cancellationToken);
-        if (json is not null)
+        // 손상된 JSON은 "저장된 설정"으로 세지 않고 기본 정책으로 되돌린다.
+        var overridePolicy = TryParse(await _store.GetSettingAsync(Key(agentId), cancellationToken));
+        if (overridePolicy is not null)
         {
-            return new EffectivePolicy(Parse(json).SanitizeFor(os), true, "PC별 설정");
+            return new EffectivePolicy(overridePolicy.SanitizeFor(os), true, "PC별 설정");
         }
 
-        var defaultJson = await _store.GetSettingAsync(DefaultSettingKey, cancellationToken);
-        return new EffectivePolicy(Parse(defaultJson).SanitizeFor(os), false, "기본 정책");
+        var defaultPolicy = TryParse(await _store.GetSettingAsync(DefaultSettingKey, cancellationToken))
+            ?? UpdatePolicy.Default;
+        return new EffectivePolicy(defaultPolicy.SanitizeFor(os), false, "기본 정책");
     }
 
     public async Task<EffectivePolicy> SaveAsync(
@@ -86,7 +88,9 @@ public sealed class AgentPolicyService
         var agents = await _store.GetAgentsAsync(cancellationToken);
         return agents.Select(agent =>
         {
-            var hasOverride = overrides.ContainsKey(Key(agent.Agent.AgentId));
+            // GetEffectiveAsync와 동일하게 파싱 가능한 값만 유효한 개별 정책으로 표시한다.
+            var hasOverride = overrides.TryGetValue(Key(agent.Agent.AgentId), out var json)
+                && TryParse(json) is not null;
             return new AgentPolicySummary
             {
                 AgentId = agent.Agent.AgentId,
@@ -98,16 +102,17 @@ public sealed class AgentPolicyService
 
     private static string Key(string agentId) => AgentKeyPrefix + agentId;
 
-    private static UpdatePolicy Parse(string? json)
+    /// <summary>파싱할 수 없으면 null을 돌려 기본 정책 폴백과 구분한다.</summary>
+    private static UpdatePolicy? TryParse(string? json)
     {
-        if (string.IsNullOrWhiteSpace(json)) return UpdatePolicy.Default;
+        if (string.IsNullOrWhiteSpace(json)) return null;
         try
         {
-            return UpdateAgentJson.Deserialize<UpdatePolicy>(json) ?? UpdatePolicy.Default;
+            return UpdateAgentJson.Deserialize<UpdatePolicy>(json);
         }
         catch
         {
-            return UpdatePolicy.Default;
+            return null;
         }
     }
 }

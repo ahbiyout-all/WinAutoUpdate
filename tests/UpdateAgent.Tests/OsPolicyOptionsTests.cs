@@ -112,6 +112,21 @@ public sealed class OsPolicyOptionsTests
     }
 
     [Fact]
+    public void Presets_MatchDashboardOptionDefaults()
+    {
+        var standard = UpdatePolicyPresets.Get(UpdatePolicyPresets.Standard);
+        var securityOnly = UpdatePolicyPresets.Get(UpdatePolicyPresets.SecurityOnly);
+        var serverSafe = UpdatePolicyPresets.Get(UpdatePolicyPresets.ServerSafe);
+        var full = UpdatePolicyPresets.Get(UpdatePolicyPresets.Full);
+
+        // 50대 랩에서는 로그온 시 일시중지가 켜지면 교사가 50대를 모두 재개해야 한다.
+        Assert.All([standard!, securityOnly!, serverSafe!, full!],
+            p => Assert.False(p.PauseOnUserLogon));
+        Assert.Equal(5, standard!.MaxRebootCount);
+        Assert.Equal(3, securityOnly!.MaxRebootCount);
+    }
+
+    [Fact]
     public void Presets_AreSanitizedForSelectedOs()
     {
         var core = WindowsOsInfoProvider.Create(

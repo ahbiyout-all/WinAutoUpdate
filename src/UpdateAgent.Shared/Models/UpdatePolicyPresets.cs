@@ -30,6 +30,7 @@ public static class UpdatePolicyPresets
                 IncludeSecurity = true,
                 IncludeCritical = true,
                 IncludeImportant = false,
+                MaxRebootCount = 3,
             },
             ServerSafe => new UpdatePolicy
             {

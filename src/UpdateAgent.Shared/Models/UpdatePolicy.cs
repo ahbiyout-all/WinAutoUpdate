@@ -31,8 +31,11 @@ public sealed record UpdatePolicy
     /// <summary>작업 전체 제한 시간(시간). 0이면 제한 없음.</summary>
     public int MaxRuntimeHours { get; init; } = 12;
 
-    /// <summary>사용자가 로그온하면 일시중지할지 여부.</summary>
-    public bool PauseOnUserLogon { get; init; } = true;
+    /// <summary>
+    /// 사용자가 로그온하면 일시중지할지 여부. 50대 랩에서는 교사가 일일이 재개하지 않도록
+    /// 프리셋/기본값 모두 false로 두고, 필요한 경우에만 교사가 명시적으로 켠다.
+    /// </summary>
+    public bool PauseOnUserLogon { get; init; } = false;
 
     /// <summary>일시중지가 유지되는 최대 시간(시간). 초과 시 재개.</summary>
     public int MaxPauseHours { get; init; } = 12;

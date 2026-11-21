@@ -162,7 +162,7 @@
         <div class="section-label">동작</div>
         <div class="grid-2">
           <label class="check-line"><input type="checkbox" id="p-overlay" checked /><span>전체화면 진행 오버레이</span></label>
-          <label class="check-line"><input type="checkbox" id="p-pause-user" checked /><span>사용자 로그온 시 일시중지</span></label>
+          <label class="check-line"><input type="checkbox" id="p-pause-user" /><span>사용자 로그온 시 일시중지</span></label>
           <label class="check-line"><input type="checkbox" id="p-reboot-never" /><span>자동 재부팅 안 함 (수동)</span></label>
           <label class="field">
             <span>최대 재부팅 횟수</span>
@@ -174,8 +174,14 @@
         <input type="text" id="p-note" class="text-input" placeholder="예: 2026-11 월간 보안 업데이트" />
 
         <label class="check-line save-policy-line">
+          <input type="checkbox" id="p-use-saved-policy" />
+          <span>선택한 PC에 저장된 개별 옵션 사용 (위 옵션 대신 저장된 값 적용)</span>
+        </label>
+        <div id="p-saved-policy-hint" class="muted small"></div>
+
+        <label class="check-line save-policy-line">
           <input type="checkbox" id="p-save-policy" />
-          <span>선택한 PC에 이 옵션을 기본값으로 저장 (이후 작업에서 재사용)</span>
+          <span>선택한 PC에 이 옵션을 기본값으로 저장 (저장된 옵션 사용으로 재사용)</span>
         </label>
 
         <div class="modal-foot">
