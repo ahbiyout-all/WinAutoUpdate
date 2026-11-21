@@ -25,6 +25,15 @@
 
 - `node --check` 통과, Release 빌드 경고 0/오류 0, 테스트 **143개 통과**, 비밀정보 스캔 162개 파일 정상.
 
+### 릴리스 검증
+
+- 워크플로: https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/44898936852 (성공)
+- 릴리스: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.16
+- 자산 3개 확인, 릴리스 노트 해시와 API `digest` 일치:
+  - `UpdateAgent.Agent-Setup-0.1.16-x64.exe`: `b4b3b3fdf21e396e3dd8222835489716fa96aab0f4d12cf77d097b3ba53031bf`
+  - `UpdateAgent.LabManager-Setup-0.1.16-x64.exe`: `4cb6b4fcf5f8bbd9a623a3fc738e10f7f441c8715b2603c4c7bc0c3cd864adb3`
+  - `UpdateAgent.Agent-0.1.16-x64.msi`: `1fce3d26ca6cb14ae83a09b19805e758022bf186318e9fd1f672dae23ea6faeb`
+
 ---
 
 ## 2026-11-21 — Windows 종류 구분과 업데이트 옵션 선택 (v0.1.15)
@@ -42,7 +51,7 @@
 |---|---|
 | 공통 모델 | `OsInfo.GroupId/GroupLabel/ReleaseLabel` 추가(서버는 빌드 기준 릴리스 표시), `UpdatePolicy.SanitizeFor/SanitizationNotes`, `UpdatePolicyPresets` 추가 |
 | LabManager 저장 | `settings` 키 `agent-policy:{agentId}`에 PC별 정책 저장. `LabStore.DeleteSettingAsync/GetSettingsByPrefixAsync` 추가 |
-| LabManager 서비스 | `AgentPolicyService`가 기본 정책 > PC별 정책을 해석하고 OS 안전 규칙을 적용. 체크인 응답도 해당 PC의 유효 정책 반환 |
+| LabManager 서비스 | `AgentPolicyService`가 PC별 정책 > 기본 정책 순서로 해석하고 OS 안전 규칙을 적용. 체크인 응답도 해당 PC의 유효 정책 반환 |
 | LabManager API | `GET /api/admin/agents/policies`, `GET/PUT/DELETE /api/admin/agents/{id}/policy` 추가. 작업 시작 시 PC별 정책 해석, OS 조정 사유를 `warnings`로 반환, `saveAsAgentPolicy` 지원 |
 | 대시보드 | OS 필터 칩/개수, OS 그룹 칩, **개별 옵션** 표기, PC별 옵션 모달, 작업 시작 창의 OS별 프리셋·호환성 안내 추가 |
 | 에이전트 | 작업 시작/검색/ApplyPolicy 직전에도 `SanitizeFor`를 호출해 서버 전달 값과 관계없이 OS 안전 규칙 강제 |

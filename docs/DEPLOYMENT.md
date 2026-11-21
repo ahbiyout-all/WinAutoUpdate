@@ -381,3 +381,4 @@ Invoke-WebRequest "http://127.0.0.1:5080/api/admin/audit" -Headers @{ "X-Admin-T
 - 2026-11-21: 교사 PC 구성/검증(`setup-labmanager-lab.ps1`), 인벤토리 기반 패키지 생성
   (`deploy-agents.ps1`), 샘플 CSV, 이 런북 추가. 제품 코드 변경 없음(버전 유지 `0.1.13`).
 - 2026-11-21: Windows 종류 구분/필터, OS별 프리셋, PC별 옵션 저장, OS 안전 규칙 추가(`v0.1.15`).
+- 2026-11-21: 혼합 OS 선택 시 오버레이 옵션이 불필요하게 꺼지던 대시보드 문제 수정(`v0.1.16`).
