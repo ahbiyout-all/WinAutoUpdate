@@ -359,7 +359,7 @@ builder.Configuration
 icacls $configPath /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)"
 ```
 
-- 기본 토큰(`change-me-agent-token`)은 MSI에 포함하지 않습니다. 래퍼가 기본값을 감지하면 경고합니다.
+- 기본 토큰(`change-me-*`)은 MSI에 포함하지 않습니다(템플릿은 빈 값). 빌드 스크립트가 기본 토큰 잔존을 감지하면 중단하고, 설치 래퍼도 기본값을 감지하면 경고합니다.
 - 토큰 교체: 동일 래퍼를 `-AgentTokenFile`과 함께 다시 실행하거나, 새 `configure-agent.ps1`(6-6)을 사용합니다.
 
 ### 6-5. 설치 시 기본 설정

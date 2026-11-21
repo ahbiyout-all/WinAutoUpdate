@@ -311,8 +311,8 @@ LabManager 대시보드에 업데이트 팝업을 표시합니다. 설치 파일
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
-| `AdminToken` | `change-me-admin-token` | 관리자 API/대시보드 토큰 |
-| `AgentToken` | `change-me-agent-token` | 에이전트 체크인 토큰 |
+| `AdminToken` | `sample-admin-token-replace-before-pilot` | 관리자 API/대시보드 토큰. 설치 시 이 샘플 값이 들어가며, `change-me-*`는 시작이 거부되는 플레이스홀더 |
+| `AgentToken` | `sample-agent-token-replace-before-pilot` | 에이전트 체크인 토큰. `change-me-*`는 시작이 거부되는 플레이스홀더 |
 | `DatabasePath` | `%LOCALAPPDATA%\UpdateAgent\LabManager\labmanager.db` | SQLite 경로 |
 | `OnlineThresholdSeconds` | `90` | 온라인 판정 기준 |
 | `WakePorts` | `[9, 7]` | WoL 매직 패킷 포트 |
@@ -324,7 +324,7 @@ LabManager 대시보드에 업데이트 팝업을 표시합니다. 설치 파일
 | 키 | 기본값 | 설명 |
 |---|---|---|
 | `LabManagerUrl` | `http://localhost:5080` | 교사 PC 주소 |
-| `AgentToken` | `change-me-agent-token` | LabManager와 동일해야 함 |
+| `AgentToken` | `sample-agent-token-replace-before-pilot` | LabManager와 동일해야 함 (설치 시 샘플 값 기본 제공) |
 | `PollIntervalSeconds` | `30` | 체크인 주기 (최소 15초) |
 | `CheckInEnabled` | `true` | `false`면 로컬 전용 |
 | `OverlayEnabled` | `true` | 오버레이 사용 여부 |

@@ -108,9 +108,10 @@ C:\Program Files\UpdateAgent\LabManager\
 7. **앱 실행**
    - Agent: 서비스를 시작하고 마지막 화면에서 `UpdateAgent 상태 확인` 데스크톱 앱을 실행할 수 있습니다.
      시작 메뉴/바탕화면 바로가기도 같은 앱(`{app}\Desktop\UpdateAgent.Agent.Desktop.exe`)을 엽니다.
-   - LabManager: 기본 토큰(`change-me-*`)이 남아 있으면 대시보드를 자동 실행하지 않고 토큰 변경 안내를 표시합니다.
-     토큰을 변경한 뒤 **런처**(`UpdateAgent.LabManager.Desktop.exe`)를 실행합니다.
-     바로가기도 런처를 가리키며, 런처가 Edge/Chrome 앱 모드 창으로 대시보드를 엽니다.
+   - LabManager: 설치 파일에는 샘플 토큰(`sample-*-token-replace-before-pilot`)이 들어 있어 서버와 대시보드가 바로 시작됩니다.
+     다만 샘플 값은 공개된 예시이므로 **파일럿 전에 반드시 실제 토큰으로 교체**해야 합니다.
+     `change-me-*`가 남아 있으면 서버가 시작되지 않고 토큰 변경 안내가 표시됩니다.
+     바로가기는 **런처**(`UpdateAgent.LabManager.Desktop.exe`)를 가리키며, 런처가 Edge/Chrome 앱 모드 창으로 대시보드를 엽니다.
 
 ## 5. 기존 설치 처리
 
@@ -133,6 +134,7 @@ C:\Program Files\UpdateAgent\LabManager\
   - Agent: `C:\Program Files\UpdateAgent\Service\appsettings.json`
   - LabManager: `C:\Program Files\UpdateAgent\LabManager\appsettings.json`
   - 설치 과정에서 생성된 기본 `appsettings.json`은 백업본으로 덮어씁니다.
+  - LabManager(v0.1.9 이상): 복원된 설정에 `change-me-*`가 남아 있으면 샘플 토큰(`sample-*-token-replace-before-pilot`)으로 자동 교체합니다. 이미 설정한 토큰은 그대로 유지됩니다.
 - `C:\ProgramData\UpdateAgent\agent.json`은 제거 대상이 아니므로 그대로 유지됩니다.
 - 이전 버전 제거가 실패하면 오류를 표시하고 **새 설치를 중단합니다.** 덮어쓰기로 이어가지 않습니다.
 
@@ -162,8 +164,10 @@ C:\Program Files\UpdateAgent\LabManager\
 .\UpdateAgent.LabManager-Setup-0.1.9-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
-설치 후 `C:\Program Files\UpdateAgent\LabManager\appsettings.json`의
-`AdminToken`과 `AgentToken`을 모두 변경하세요. 그 전에는 서버가 시작되지 않습니다.
+설치 후에는 샘플 토큰(`sample-*-token-replace-before-pilot`)으로 서버가 바로 시작되지만,
+이 값은 공개된 예시이므로 **파일럿 전에 반드시 실제 토큰으로 교체**해야 합니다.
+`C:\Program Files\UpdateAgent\LabManager\appsettings.json`의 `AdminToken`과 `AgentToken`을 모두 변경하세요.
+`change-me-*`가 남아 있으면 서버가 시작되지 않습니다.
 `AgentToken`은 에이전트와 동일한 값으로 설정합니다. 관리자 토큰(`AdminToken`)은 서버 설정이면서
 대시보드 첫 실행 시 입력하는 값이기도 합니다. 대시보드의 **토큰** 버튼으로 변경할 수 있으며,
 입력한 값은 앱 모드 브라우저 프로필의 localStorage에 저장됩니다.
