@@ -40,6 +40,9 @@
   `IsCombo` 보조키 조합, 2회 입력 감지(창 내/창 초과/리셋).
 - `docs/DEPLOYMENT.md`에 **8-B. 개별 수동 업데이트 강제 중단** 추가, `docs/PILOT.md` 체크리스트·제한 사항 갱신.
 - 검증: 빌드 경고 0/오류 0, 테스트 **126개 통과**(기존 113개 + 신규 13개).
+- 릴리스 `v0.1.14` / workflow [#44895859811](https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/44895859811)
+  성공. 공개된 설치 파일 3개 해시가 릴리스 노트와 일치함을 GitHub REST API로 확인:
+  Agent Setup `43966c2b…`, LabManager Setup `74e289f2…`, MSI `2044eab1…`.
 
 ---
 
