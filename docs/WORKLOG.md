@@ -36,6 +36,14 @@
 - 로컬 헤드리스 서버에서 `/monitor.html`, `/monitor.js`, `/styles.css` 200 응답과
   `/api/admin/live`의 `text/event-stream` 스냅샷 프레임을 확인.
 - 체크인 직후 약 1ms 내 새 스냅샷이 재전송되고 신규 에이전트가 반영됨을 확인.
+- `.iss` 파일 2개의 UTF-8 BOM(`EF-BB-BF`)이 릴리스 전후 모두 유지됨을 확인.
+- `dotnet publish` 산출물의 `wwwroot`에 `monitor.html`/`monitor.js`가 포함됨을 확인.
+- 릴리스 워크플로 실행 #44882964603 성공. 업로드 자산은 설치 파일 3개뿐이다.
+- 공개된 `v0.1.12` 릴리스의 설치 파일 3개 해시가 릴리스 노트와 일치함을 확인:
+  - `UpdateAgent.Agent-Setup-0.1.12-x64.exe` `b6bcbb69dfc059e6b0d68afc00d3f470c2ad68132008148b303c46860cb37aed`
+  - `UpdateAgent.LabManager-Setup-0.1.12-x64.exe` `0e686499ba37ca711717939e9b60126195cafcdac63330fbda6c3f8e173f9195`
+  - `UpdateAgent.Agent-0.1.12-x64.msi` `01003c2ec39203cb5019b9ba29fbf765f80deb162306de973a5dfef37e0f60db`
+- 실제 권한 상승 설치, 2창 동시 모니터링, 오버레이/재부팅 시나리오는 로컬 환경에서 검증하지 못했다.
 
 ---
 
