@@ -70,7 +70,7 @@ C:\ProgramData\UpdateAgent\
 C:\Program Files\UpdateAgent\LabManager\
   UpdateAgent.LabManager.Desktop.exe  브라우저 앱 모드 런처 (바로가기 대상)
   UpdateAgent.LabManager.exe          HTTP API 서버 + 런타임 DLL
-  wwwroot\                            대시보드(index.html, app.js, styles.css)
+  wwwroot\                            대시보드/모니터(index.html, app.js, monitor.html, monitor.js, styles.css)
   appsettings.json                    관리자/에이전트 토큰, 수신 URL
   unins000.exe
 ```
@@ -80,6 +80,8 @@ C:\Program Files\UpdateAgent\LabManager\
   이미 실행 중인 서버는 재사용합니다. 앱 모드 창을 닫아도 서버는 계속 실행됩니다.
 - 관리자 토큰은 전용 브라우저 프로필(`%LOCALAPPDATA%\UpdateAgent\LabManager\browser-profile`)의
   localStorage에 저장됩니다. 런처 설정은 같은 폴더의 `desktop-settings.json`에 저장됩니다.
+- 대시보드의 **작업 현황 모니터** 버튼 또는 런처 `--monitor` 인자로 전용 모니터 창(`/monitor.html`)을 열 수 있습니다.
+  모니터는 `GET /api/admin/live` SSE 스트림으로 작업/에이전트 변경을 실시간 수신하며, 같은 브라우저 프로필의 토큰을 공유합니다.
 - `appsettings.json`은 신규 설치 시에만 생성되며, 업그레이드 시 기존 설정을 덮어쓰지 않습니다.
 - API/대시보드 기본 포트: **5080/TCP**
 
@@ -302,7 +304,7 @@ build\agent\<버전>\
 - LabManager의 `appsettings.json`은 업그레이드 시 백업/복원으로 유지됩니다.
 - 앱 모드 브라우저 프로필(`browser-profile`)과 `desktop-settings.json`은
   `%LOCALAPPDATA%`에 있어 설치/제거 영향을 받지 않습니다.
-- `wwwroot` 대시보드는 설치 시 항상 최신 파일로 덮어써집니다.
+- `wwwroot` 대시보드/모니터 파일(`index.html`, `app.js`, `monitor.html`, `monitor.js`, `styles.css`)은 설치 시 항상 최신 파일로 덮어써집니다.
 
 ## 11. MSI와의 관계
 
@@ -330,7 +332,8 @@ build\agent\<버전>\
 - [ ] 런처가 Edge/Chrome을 감지해 주소창/툴바 없는 `--app=` 창을 염
 - [ ] 대시보드 첫 실행 시 토큰 입력창이 표시되고 브라우저 프로필에 저장됨
 - [ ] 서버가 없을 때 런처가 헤드리스 서버를 자동 시작하고, 앱 창을 닫아도 서버가 유지됨
-- [ ] 설치 폴더에 `wwwroot\index.html`이 있음
+- [ ] 설치 폴더에 `wwwroot\index.html`, `wwwroot\monitor.html`, `wwwroot\monitor.js`가 있음
+- [ ] 대시보드의 **작업 현황 모니터** 버튼과 런처 `--monitor`로 별도 창이 열리고 실시간 연결되는지 확인
 
 ## 13. 알려진 제약
 

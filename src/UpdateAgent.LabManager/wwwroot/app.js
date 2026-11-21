@@ -9,6 +9,7 @@ let overview = {};
 let selected = new Set();
 let openJobId = null;
 let lastError = '';
+let pendingJobId = null;
 
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, text) => {
@@ -369,6 +370,14 @@ async function refreshJobDetail(jobId, silent = false) {
   } catch (error) {
     if (!silent) toast(error.message, 'error');
   }
+}
+
+// 모니터의 작업 상세 링크(/?job=<id>)로 열었을 때 해당 작업 상세를 띄운다.
+function consumeDeepLink() {
+  if (!pendingJobId || !adminToken) return;
+  const jobId = pendingJobId;
+  pendingJobId = null;
+  refreshJobDetail(jobId);
 }
 
 // ---------------- 동작 ----------------
@@ -775,6 +784,7 @@ function setupTokenDialog() {
     dialog.classList.add('hidden');
     setError('');
     refresh();
+    consumeDeepLink();
     maybeCheckForUpdates(true);
     loadStatus();
   };
@@ -845,6 +855,7 @@ function wireEvents() {
     renderAgents();
   });
   $('#start-button').addEventListener('click', () => openStartDialog([]));
+  $('#monitor-button').addEventListener('click', () => window.open('/monitor.html', '_blank'));
   $('#start-close').addEventListener('click', () => $('#start-modal').classList.add('hidden'));
   $('#start-cancel').addEventListener('click', () => $('#start-modal').classList.add('hidden'));
   $('#start-submit').addEventListener('click', submitStart);
@@ -863,5 +874,7 @@ function wireEvents() {
 setupTokenDialog();
 wireEvents();
 setupUpdateDialog();
+pendingJobId = new URLSearchParams(location.search).get('job');
 refresh();
+consumeDeepLink();
 setInterval(refresh, 5000);

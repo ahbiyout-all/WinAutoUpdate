@@ -7,6 +7,7 @@ namespace UpdateAgent.LabManager.Desktop;
 /// <summary>
 /// 교사용 런처. 창을 띄우지 않고 로컬 LabManager 서버를 준비한 뒤
 /// Edge/Chrome의 --app= 단독 창 모드로 대시보드를 연다.
+/// --monitor 인자를 주면 실시간 작업 현황 모니터만 연다(전용 바로가기용).
 /// 서버는 앱 모드 창을 닫아도 계속 실행되어 학생 PC 체크인을 유지한다.
 /// </summary>
 public partial class App : Application
@@ -14,6 +15,9 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        var monitorMode = e.Args.Any(arg =>
+            arg.Equals("--monitor", StringComparison.OrdinalIgnoreCase));
 
         var settings = new DesktopSettings();
         var server = new LabManagerServer(settings);
@@ -44,7 +48,11 @@ public partial class App : Application
             return;
         }
 
-        if (!BrowserLauncher.OpenDashboard(settings.DashboardUrl, settings.Window.Width, settings.Window.Height))
+        var opened = monitorMode
+            ? BrowserLauncher.OpenMonitor(settings.MonitorUrl, settings.Window.Width, settings.Window.Height)
+            : BrowserLauncher.OpenDashboard(settings.DashboardUrl, settings.Window.Width, settings.Window.Height);
+
+        if (!opened)
         {
             ShowError(
                 "Microsoft Edge 또는 Google Chrome을 찾을 수 없습니다.\n\n" +

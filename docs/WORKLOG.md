@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-11-21 — 별도 창에서 실시간 작업 현황 모니터링 (v0.1.12)
+
+### 배경
+
+- 기존 교사 대시보드는 단일 `--app=` 창에서 5초 폴링으로만 갱신되어, 작업 제어와 전체 현황 관찰을 동시에 하기 어려웠다.
+- 여러 PC의 작업 진행을 별도 탭/창에서 실시간으로 보고 싶은 요구가 있었다.
+- 실시간 전달은 새 인프라 없이 인메모리 이벤트 버스 + SSE로 구현하고, 기존 대시보드 폴링은 변경하지 않는다.
+
+### 변경
+
+| 항목 | 내용 |
+|---|---|
+| `LabManager/Live/LiveEventBus.cs` (신규) | 버전과 대기 작업을 공유하는 인메모리 신호 버스. 체크인/작업 변경 시 모든 구독자에 즉시 전달 |
+| `LabManager/Live/LiveSnapshot.cs` (신규) | 에이전트/작업 요약과 전체 카운트를 담는 스냅샷 모델 및 빌더 |
+| `LabManager/Program.cs` | `/api/admin/live` SSE 추가(초기+변경 시 즉시, 15초 하트비트). 체크인/작업 시작·제어/Maestro 확인에서 신호 발행 |
+| `LabManager/wwwroot/monitor.html`, `monitor.js` (신규) | 전용 모니터 페이지. 토큰 배너, 연결 상태, 통계, 진행 중 작업/에이전트 표, 검색 필터, 재연결 |
+| `LabManager/wwwroot/index.html`, `app.js`, `styles.css` | 대시보드에 **작업 현황 모니터** 버튼 추가, `/?job=<id>` 상세 딥링크 처리, 모니터 스타일 추가 |
+| `LabManager.Desktop/DesktopSettings.cs`, `BrowserLauncher.cs`, `App.xaml.cs` | `MonitorUrl`(`/monitor.html`), `OpenMonitor`, `--monitor` 인자 지원(전용 바로가기) |
+| 테스트 | 이벤트 버스·스냅샷 빌더·모니터 URL·앱 모드 인자 6개 추가(전체 113개 통과) |
+
+- SSE는 `EventSource`가 사용자 지정 헤더를 보내지 못하므로 `fetch` 스트림으로 `X-Admin-Token`을 전달한다.
+- `localhost`는 `127.0.0.1`로 정규화하고, SPA 폴백이 없으므로 모니터 경로는 `/monitor.html`을 사용한다.
+- 두 창은 같은 브라우저 프로필을 공유하므로 토큰을 다시 입력하지 않아도 된다.
+- 서버는 창을 닫아도 기존과 같이 백그라운드에 남는다.
+
+### 검증
+
+- 빌드 경고 0/오류 0, 테스트 113개 통과, 정적 검사 통과.
+- 로컬 헤드리스 서버에서 `/monitor.html`, `/monitor.js`, `/styles.css` 200 응답과
+  `/api/admin/live`의 `text/event-stream` 스냅샷 프레임을 확인.
+- 체크인 직후 약 1ms 내 새 스냅샷이 재전송되고 신규 에이전트가 반영됨을 확인.
+
+---
+
 ## 2026-11-21 — 학생용 앱에서 수동 업데이트 시작 (v0.1.11)
 
 ### 배경

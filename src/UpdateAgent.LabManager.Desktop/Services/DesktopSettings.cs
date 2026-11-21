@@ -28,20 +28,22 @@ public sealed class DesktopSettings
     public string ServerUrl { get; set; } = DefaultServerUrl;
 
     /// <summary>브라우저 앱 모드로 열 대시보드 주소. 로컬 주소는 루프백 IP로 정규화한다.</summary>
-    public string DashboardUrl
-    {
-        get
-        {
-            var address = ServerUrl.TrimEnd('/');
-            if (Uri.TryCreate(address, UriKind.Absolute, out var uri) &&
-                uri.Scheme == Uri.UriSchemeHttp &&
-                uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
-            {
-                return new UriBuilder(uri) { Host = "127.0.0.1" }.Uri.AbsoluteUri.TrimEnd('/') + "/";
-            }
+    public string DashboardUrl => BuildUrl("/");
 
-            return address + "/";
+    /// <summary>브라우저 앱 모드로 열 실시간 작업 현황 모니터 주소.</summary>
+    public string MonitorUrl => BuildUrl("/monitor.html");
+
+    private string BuildUrl(string path)
+    {
+        var address = ServerUrl.TrimEnd('/');
+        if (Uri.TryCreate(address, UriKind.Absolute, out var uri) &&
+            uri.Scheme == Uri.UriSchemeHttp &&
+            uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            address = new UriBuilder(uri) { Host = "127.0.0.1" }.Uri.AbsoluteUri.TrimEnd('/');
         }
+
+        return address + path;
     }
 
     /// <summary>앱 모드 창 크기.</summary>

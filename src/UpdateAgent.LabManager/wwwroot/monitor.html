@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UpdateAgent · 작업 현황 모니터</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">UA</div>
+      <div>
+        <div class="brand-title">작업 현황 모니터</div>
+        <div class="brand-sub">에이전트와 업데이트 작업을 실시간으로 확인합니다</div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <span id="live-state" class="live-state connecting">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span id="live-state-text">연결 중</span>
+      </span>
+      <span id="last-update" class="muted small">마지막 수신: -</span>
+      <button id="dashboard-button" class="btn btn-ghost">대시보드 열기</button>
+      <button id="reconnect-button" class="btn">재연결</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="token-banner" class="notice hidden">
+      <div class="row wrap gap">
+        <span>관리자 토큰을 입력하세요. 대시보드에서 저장한 토큰은 같은 브라우저 프로필에서 자동으로 사용됩니다.</span>
+        <input id="token-input" type="password" class="filter-input" placeholder="관리자 토큰"
+               autocomplete="off" aria-label="관리자 토큰" />
+        <button id="token-save" class="btn btn-primary">저장 후 연결</button>
+      </div>
+    </div>
+
+    <div id="error-box" class="alert hidden"></div>
+
+    <section id="stats" class="stats"></section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>진행 중인 작업</h2>
+        <input id="filter-input" class="filter-input" type="search"
+               placeholder="PC 이름 또는 작업 ID 검색" aria-label="작업 검색" />
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>PC / 작업</th><th>상태</th><th>진행</th><th>재부팅</th><th>갱신</th><th>관리</th>
+            </tr>
+          </thead>
+          <tbody id="active-jobs-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>에이전트</h2>
+        <span class="muted small">90초 이상 체크인이 없으면 오프라인으로 표시됩니다.</span>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>PC</th><th>상태</th><th>현재 작업</th><th>Maestro</th><th>마지막 신호</th>
+            </tr>
+          </thead>
+          <tbody id="agents-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast-host" class="toast-host"></div>
+  <script src="monitor.js"></script>
+</body>
+</html>

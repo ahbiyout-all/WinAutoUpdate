@@ -502,8 +502,54 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 .update-links a { color: #93c5fd; text-decoration: none; }
 .update-links a:hover { text-decoration: underline; }
 
+/* ---------- 실시간 모니터 ---------- */
+.live-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.live-state.connected { color: #86efac; border-color: rgba(34, 197, 94, 0.32); background: rgba(34, 197, 94, 0.12); }
+.live-state.connected .live-dot { animation: live-pulse 1.8s ease-in-out infinite; }
+.live-state.connecting { color: #fcd34d; border-color: rgba(245, 158, 11, 0.32); background: rgba(245, 158, 11, 0.12); }
+.live-state.connecting .live-dot { animation: live-pulse 1s ease-in-out infinite; }
+.live-state.disconnected { color: #fca5a5; border-color: rgba(239, 68, 68, 0.32); background: rgba(239, 68, 68, 0.12); }
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.filter-input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 7px 11px;
+  font-size: 12px;
+  font-family: inherit;
+  min-width: 240px;
+}
+.filter-input:focus { outline: none; border-color: var(--blue); }
+.filter-input::placeholder { color: var(--muted); }
+
 @media (max-width: 720px) {
   .topbar { flex-direction: column; align-items: stretch; }
   .topbar-actions { flex-wrap: wrap; }
   main { padding: 14px; }
+  .filter-input { min-width: 0; width: 100%; }
 }

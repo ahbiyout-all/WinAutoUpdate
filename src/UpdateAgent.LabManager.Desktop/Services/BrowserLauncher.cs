@@ -33,6 +33,10 @@ internal static class BrowserLauncher
         }
     }
 
+    /// <summary>실시간 작업 현황 모니터를 별도 앱 모드 창으로 연다. 프로필을 공유하므로 토큰을 다시 입력하지 않는다.</summary>
+    internal static bool OpenMonitor(string url, double width, double height) =>
+        OpenDashboard(url, width, height);
+
     internal static string GetProfilePath() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "UpdateAgent",

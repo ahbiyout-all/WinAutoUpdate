@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Serilog;
 using UpdateAgent.LabManager.Auth;
 using UpdateAgent.LabManager.Configuration;
+using UpdateAgent.LabManager.Live;
 using UpdateAgent.LabManager.Models;
 using UpdateAgent.LabManager.Services;
 using UpdateAgent.LabManager.Storage;
@@ -90,6 +91,7 @@ builder.Services.AddHttpClient("github", client =>
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 builder.Services.AddSingleton<UpdateCheckService>();
+builder.Services.AddSingleton<LiveEventBus>();
 
 // 대시보드에서 변경한 관리자 토큰은 %LOCALAPPDATA%의 override 파일에 저장되며,
 // 미들웨어가 요청마다 최신 값을 읽으므로 재시작 없이 즉시 적용된다.
@@ -134,6 +136,7 @@ app.MapGet("/api/admin/update", async (
 app.MapPost("/api/agents/checkin", async (
     AgentCheckInRequest request,
     LabStore labStore,
+    LiveEventBus liveEvents,
     CancellationToken cancellationToken) =>
 {
     if (!JobStateGuard.AgentIdsMatch(request.Agent.AgentId, request.Telemetry.AgentId))
@@ -245,6 +248,9 @@ app.MapPost("/api/agents/checkin", async (
 
     var policy = await GetDefaultPolicyAsync(labStore, cancellationToken);
 
+    // 체크인으로 에이전트/작업 상태가 바뀌었음을 모니터에 알린다.
+    liveEvents.Signal();
+
     return Results.Ok(new AgentCheckInResponse
     {
         ServerTime = DateTimeOffset.Now,
@@ -271,6 +277,52 @@ app.MapGet("/api/admin/overview", async (LabStore labStore, CancellationToken ca
         CompletedJobs = jobs.Count(j => j.Summary.State == UpdateJobState.Completed),
         FailedJobs = jobs.Count(j => j.Summary.State == UpdateJobState.Failed),
     });
+});
+
+// ---------------- 실시간 작업 현황 (SSE) ----------------
+
+// EventSource는 사용자 지정 헤더를 보낼 수 없으므로 모니터 페이지에서는
+// fetch 스트림으로 X-Admin-Token을 전달한다. 기존 관리자 인증 경로를 그대로 사용한다.
+app.MapGet("/api/admin/live", async (
+    HttpContext context,
+    LabStore labStore,
+    LiveEventBus liveEvents,
+    CancellationToken cancellationToken) =>
+{
+    context.Response.ContentType = "text/event-stream";
+    context.Response.Headers.CacheControl = "no-cache";
+    context.Response.Headers.Connection = "keep-alive";
+    context.Response.Headers["X-Accel-Buffering"] = "no";
+
+    await context.Response.WriteAsync(": connected\n\n", cancellationToken);
+    await context.Response.Body.FlushAsync(cancellationToken);
+
+    while (!cancellationToken.IsCancellationRequested)
+    {
+        // 신호를 먼저 캡처해야 스냅샷을 만드는 동안 온 변경을 놓치지 않는다.
+        var version = liveEvents.Version;
+        var snapshot = await LiveSnapshotBuilder.BuildAsync(labStore, cancellationToken);
+        await context.Response.WriteAsync(
+            $"event: snapshot\ndata: {UpdateAgentJson.Serialize(snapshot)}\n\n",
+            cancellationToken);
+        await context.Response.Body.FlushAsync(cancellationToken);
+
+        // 변경 시 즉시, 없으면 15초마다 한 번 다시 보낸다(오프라인 전환 반영).
+        // 대기 작업 하나를 취소해서 재사용하므로 하트비트마다 대기가 쌓이지 않는다.
+        using var waitTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        waitTimeout.CancelAfter(TimeSpan.FromSeconds(15));
+        try
+        {
+            await liveEvents.WaitAsync(version, waitTimeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+            // 타임아웃 = 하트비트. 아래에서 최신 스냅샷을 다시 보낸다.
+        }
+    }
+
+    return Results.Empty;
 });
 
 app.MapGet("/api/admin/agents", async (LabStore labStore, CancellationToken cancellationToken) =>
@@ -444,6 +496,7 @@ app.MapGet("/api/admin/jobs/{jobId}", async (
 app.MapPost("/api/admin/jobs/start", async (
     StartJobsRequest request,
     LabStore labStore,
+    LiveEventBus liveEvents,
     CancellationToken cancellationToken) =>
 {
     if (request.AgentIds.Count == 0)
@@ -519,20 +572,21 @@ app.MapPost("/api/admin/jobs/start", async (
         jobIds.Add(jobId);
     }
 
+    liveEvents.Signal();
     return Results.Ok(new StartJobsResponse { JobIds = jobIds, Errors = errors });
 });
 
 app.MapPost("/api/admin/jobs/{jobId}/pause", async (
-    string jobId, LabStore labStore, CancellationToken cancellationToken) =>
-    await SendJobCommandAsync(jobId, CommandType.PauseJob, "{}", "pause", labStore, cancellationToken));
+    string jobId, LabStore labStore, LiveEventBus liveEvents, CancellationToken cancellationToken) =>
+    await SendJobCommandAsync(jobId, CommandType.PauseJob, "{}", "pause", labStore, liveEvents, cancellationToken));
 
 app.MapPost("/api/admin/jobs/{jobId}/resume", async (
-    string jobId, LabStore labStore, CancellationToken cancellationToken) =>
-    await SendJobCommandAsync(jobId, CommandType.ResumeJob, "{}", "resume", labStore, cancellationToken));
+    string jobId, LabStore labStore, LiveEventBus liveEvents, CancellationToken cancellationToken) =>
+    await SendJobCommandAsync(jobId, CommandType.ResumeJob, "{}", "resume", labStore, liveEvents, cancellationToken));
 
 app.MapPost("/api/admin/jobs/{jobId}/cancel", async (
-    string jobId, LabStore labStore, CancellationToken cancellationToken) =>
-    await SendJobCommandAsync(jobId, CommandType.CancelJob, "{}", "cancel", labStore, cancellationToken));
+    string jobId, LabStore labStore, LiveEventBus liveEvents, CancellationToken cancellationToken) =>
+    await SendJobCommandAsync(jobId, CommandType.CancelJob, "{}", "cancel", labStore, liveEvents, cancellationToken));
 
 // ---------------- Maestro 수동 확인 ----------------
 
@@ -548,6 +602,7 @@ app.MapGet("/api/admin/jobs/{jobId}/maestro", async (
 app.MapPost("/api/admin/jobs/{jobId}/maestro/protection-suspended", async (
     string jobId,
     LabStore labStore,
+    LiveEventBus liveEvents,
     CancellationToken cancellationToken) =>
 {
     var checklist = await labStore.GetChecklistAsync(jobId, cancellationToken);
@@ -564,6 +619,7 @@ app.MapPost("/api/admin/jobs/{jobId}/maestro/protection-suspended", async (
         "teacher", "maestro-protection-off", jobId,
         "Maestro 복원 보호 해제 확인", cancellationToken);
 
+    liveEvents.Signal();
     return Results.Ok(updated);
 });
 
@@ -571,6 +627,7 @@ app.MapPost("/api/admin/jobs/{jobId}/maestro/restored", async (
     string jobId,
     MaestroRestoreRequest request,
     LabStore labStore,
+    LiveEventBus liveEvents,
     CancellationToken cancellationToken) =>
 {
     var checklist = await labStore.GetChecklistAsync(jobId, cancellationToken);
@@ -588,6 +645,7 @@ app.MapPost("/api/admin/jobs/{jobId}/maestro/restored", async (
         $"현재 상태 저장={request.StateSaved}, 보호 재활성화={request.ProtectionRestored}",
         cancellationToken);
 
+    liveEvents.Signal();
     return Results.Ok(updated);
 });
 
@@ -721,6 +779,7 @@ static async Task<IResult> SendJobCommandAsync(
     string payloadJson,
     string action,
     LabStore store,
+    LiveEventBus liveEvents,
     CancellationToken cancellationToken)
 {
     var job = await store.GetJobAsync(jobId, cancellationToken);
@@ -738,5 +797,6 @@ static async Task<IResult> SendJobCommandAsync(
     await store.AddAuditAsync(
         "teacher", action, $"{job.MachineName}/{jobId}", $"{type} 명령 발급", cancellationToken);
 
+    liveEvents.Signal();
     return Results.Ok(new { queued = true, commandType = type.ToString() });
 }
