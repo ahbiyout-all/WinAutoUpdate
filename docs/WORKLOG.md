@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-11-21 — Windows 종류 구분과 업데이트 옵션 선택 (v0.1.15)
+
+### 배경
+
+- 50대 랩에 Windows 11, Windows 10 22H2 ESU, Windows Server 2016~2025(Server Core 포함)가 섞여 있어
+  교사가 OS 종류를 한눈에 구분하고, OS에 맞는 업데이트 옵션을 선택해야 하는 요청.
+- 기존에는 `OsInfo`에 구분 정보가 있었지만 대시보드에서는 이름/빌드만 표시했고,
+  작업 시작 옵션은 모든 PC에 동일한 값만 전달했다.
+
+### 구현
+
+| 영역 | 변경 |
+|---|---|
+| 공통 모델 | `OsInfo.GroupId/GroupLabel/ReleaseLabel` 추가(서버는 빌드 기준 릴리스 표시), `UpdatePolicy.SanitizeFor/SanitizationNotes`, `UpdatePolicyPresets` 추가 |
+| LabManager 저장 | `settings` 키 `agent-policy:{agentId}`에 PC별 정책 저장. `LabStore.DeleteSettingAsync/GetSettingsByPrefixAsync` 추가 |
+| LabManager 서비스 | `AgentPolicyService`가 기본 정책 > PC별 정책을 해석하고 OS 안전 규칙을 적용. 체크인 응답도 해당 PC의 유효 정책 반환 |
+| LabManager API | `GET /api/admin/agents/policies`, `GET/PUT/DELETE /api/admin/agents/{id}/policy` 추가. 작업 시작 시 PC별 정책 해석, OS 조정 사유를 `warnings`로 반환, `saveAsAgentPolicy` 지원 |
+| 대시보드 | OS 필터 칩/개수, OS 그룹 칩, **개별 옵션** 표기, PC별 옵션 모달, 작업 시작 창의 OS별 프리셋·호환성 안내 추가 |
+| 에이전트 | 작업 시작/검색/ApplyPolicy 직전에도 `SanitizeFor`를 호출해 서버 전달 값과 관계없이 OS 안전 규칙 강제 |
+
+### OS 안전 규칙
+
+- 기능 업데이트: Windows 10 / LTSC / Server에서는 옵션과 승인 릴리스를 자동 제거.
+- 오버레이: Server Core에서는 자동 비활성화.
+- 기능 업데이트는 2차 승인 워크플로 전용이라 모든 프리셋에서 기본 비활성화 유지.
+- PC별 정책이 있어도 조회·작성·실행 시마다 OS로 재검증하므로 지원되지 않는 옵션이 남지 않습니다.
+
+### 검증
+
+- 빌드 경고 0/오류 0, 테스트 **143개 통과**(기존 126개 + 신규 17개).
+- 신규 테스트: OS 그룹 분류/릴리스 표기, 정책 정리, 프리셋, PC별 정책 저장·삭제·요약.
+- `docs/DEPLOYMENT.md`에 **8-C. Windows 종류 구분과 업데이트 옵션 선택** 추가.
+
+---
+
 ## 2026-11-21 — 개별 수동 업데이트 강제 중단 (대시보드 + 오버레이 단축키)
 
 ### 배경

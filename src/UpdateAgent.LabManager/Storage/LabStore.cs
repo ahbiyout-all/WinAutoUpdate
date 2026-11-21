@@ -614,6 +614,33 @@ public sealed class LabStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task DeleteSettingAsync(string key, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM settings WHERE key = $key;";
+        command.Parameters.AddWithValue("$key", key);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>PC별 정책처럼 접두어로 묶인 설정을 한 번에 읽는다.</summary>
+    public async Task<IReadOnlyDictionary<string, string>> GetSettingsByPrefixAsync(
+        string prefix,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT key, value FROM settings WHERE key LIKE $pattern;";
+        command.Parameters.AddWithValue("$pattern", $"{prefix}%");
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result[reader.GetString(0)] = reader.GetString(1);
+        }
+        return result;
+    }
+
     private async Task<SqliteConnection> OpenAsync(CancellationToken cancellationToken)
     {
         var connection = new SqliteConnection(_connectionString);

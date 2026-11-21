@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using UpdateAgent.Core.Orchestration;
 using UpdateAgent.Core.Reboot;
 using UpdateAgent.Core.Storage;
+using UpdateAgent.Core.Windows;
 using UpdateAgent.Service.Configuration;
 using UpdateAgent.Service.Overlay;
 using UpdateAgent.Shared.Models;
@@ -222,7 +223,10 @@ public sealed class CommandExecutor
 
             case CommandType.ApplyPolicy:
             {
-                await _store.SetSettingAsync(ServerPolicyProvider.SettingKey, command.PayloadJson, cancellationToken);
+                var policy = Deserialize<UpdatePolicy>(command.PayloadJson) ?? UpdatePolicy.Default;
+                var sanitized = policy.SanitizeFor(WindowsOsInfoProvider.GetCurrent());
+                await _store.SetSettingAsync(
+                    ServerPolicyProvider.SettingKey, UpdateAgentJson.Serialize(sanitized), cancellationToken);
                 return Ok(command, "정책을 적용했습니다.");
             }
 

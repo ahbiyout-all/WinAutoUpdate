@@ -66,5 +66,49 @@ public sealed record UpdatePolicy
     /// <summary>동일 KB가 이 횟수만큼 실패하면 격리한다.</summary>
     public int MaxItemFailureCount { get; init; } = 2;
 
+    /// <summary>OS가 지원하지 않는 옵션을 자동으로 끈 정책을 반환한다.</summary>
+    public UpdatePolicy SanitizeFor(OsInfo? os)
+    {
+        if (os is null) return this;
+
+        var sanitized = this;
+        if (!os.SupportsFeatureUpdates &&
+            (IncludeFeatureUpdates || !string.IsNullOrWhiteSpace(ApprovedFeatureRelease)))
+        {
+            sanitized = sanitized with
+            {
+                IncludeFeatureUpdates = false,
+                ApprovedFeatureRelease = null,
+            };
+        }
+
+        if (!os.SupportsOverlay && OverlayEnabled)
+        {
+            sanitized = sanitized with { OverlayEnabled = false };
+        }
+
+        return sanitized;
+    }
+
+    /// <summary>SanitizeFor가 변경한 내용을 교사에게 보여줄 설명.</summary>
+    public IReadOnlyList<string> SanitizationNotes(OsInfo? os)
+    {
+        if (os is null) return [];
+
+        var notes = new List<string>();
+        if (!os.SupportsFeatureUpdates &&
+            (IncludeFeatureUpdates || !string.IsNullOrWhiteSpace(ApprovedFeatureRelease)))
+        {
+            notes.Add($"{os.SupportSummary}: 기능 업데이트를 지원하지 않아 해당 옵션을 제외했습니다.");
+        }
+
+        if (!os.SupportsOverlay && OverlayEnabled)
+        {
+            notes.Add($"{os.SupportSummary}: GUI가 없어 전체화면 오버레이를 비활성화했습니다.");
+        }
+
+        return notes;
+    }
+
     public static UpdatePolicy Default { get; } = new();
 }

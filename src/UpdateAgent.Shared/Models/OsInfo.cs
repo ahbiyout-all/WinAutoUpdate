@@ -19,9 +19,41 @@ public sealed record OsInfo
 
     public string VersionString => $"{DisplayVersion} (build {Build}.{Revision})";
 
+    /// <summary>대시보드 필터와 프리셋이 공유하는 OS 그룹 ID.</summary>
+    public string GroupId =>
+        IsServerCore ? "server-core"
+        : IsServer ? "server"
+        : IsLtsc ? "ltsc"
+        : IsWindows10 ? "windows-10"
+        : Build >= 22000 || ProductName.Contains("Windows 11", StringComparison.OrdinalIgnoreCase)
+            ? "windows-11"
+            : "unknown";
+
+    public string GroupLabel => GroupId switch
+    {
+        "server-core" => "Server Core",
+        "server" => "Windows Server",
+        "ltsc" => "LTSC / IoT LTSC",
+        "windows-10" => "Windows 10 (ESU)",
+        "windows-11" => "Windows 11",
+        _ => "미확인 OS",
+    };
+
+    /// <summary>서버는 빌드 번호로 릴리스를 표시한다(DisplayVersion이 21H2처럼 남는 경우가 많음).</summary>
+    public string ReleaseLabel => !IsServer
+        ? DisplayVersion
+        : Build switch
+        {
+            >= 26000 => "2025",
+            >= 20300 => "2022",
+            >= 17700 => "2019",
+            >= 14300 => "2016",
+            _ => DisplayVersion,
+        };
+
     public string ShortName =>
         IsServer
-            ? $"Windows Server {DisplayVersion}"
+            ? $"Windows Server {ReleaseLabel}"
             : $"{ProductName} {DisplayVersion}";
 
     /// <summary>기능 업데이트(OS 업그레이드)를 이 앱에서 다룰 수 있는지.</summary>

@@ -92,6 +92,7 @@ builder.Services.AddHttpClient("github", client =>
 });
 builder.Services.AddSingleton<UpdateCheckService>();
 builder.Services.AddSingleton<LiveEventBus>();
+builder.Services.AddSingleton<AgentPolicyService>();
 
 // 대시보드에서 변경한 관리자 토큰은 %LOCALAPPDATA%의 override 파일에 저장되며,
 // 미들웨어가 요청마다 최신 값을 읽으므로 재시작 없이 즉시 적용된다.
@@ -136,6 +137,7 @@ app.MapGet("/api/admin/update", async (
 app.MapPost("/api/agents/checkin", async (
     AgentCheckInRequest request,
     LabStore labStore,
+    AgentPolicyService agentPolicies,
     LiveEventBus liveEvents,
     CancellationToken cancellationToken) =>
 {
@@ -246,7 +248,11 @@ app.MapPost("/api/agents/checkin", async (
         20,
         cancellationToken);
 
-    var policy = await GetDefaultPolicyAsync(labStore, cancellationToken);
+    // PC별 저장 정책이 있으면 그것을, 없으면 서버 기본 정책을 사용한다.
+    // 에이전트가 보고한 OS로 지원되지 않는 옵션을 여기서도 제거한다.
+    var effective = await agentPolicies.GetEffectiveAsync(
+        request.Agent.AgentId, request.Agent.Os, cancellationToken);
+    var policy = effective.Policy;
 
     // 체크인으로 에이전트/작업 상태가 바뀌었음을 모니터에 알린다.
     liveEvents.Signal();
@@ -327,6 +333,72 @@ app.MapGet("/api/admin/live", async (
 
 app.MapGet("/api/admin/agents", async (LabStore labStore, CancellationToken cancellationToken) =>
     Results.Ok(await labStore.GetAgentsAsync(cancellationToken)));
+
+// 리터럴 경로는 {agentId} 라우트보다 먼저 등록해야 한다.
+app.MapGet("/api/admin/agents/policies", async (
+    AgentPolicyService agentPolicies,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await agentPolicies.GetSummariesAsync(cancellationToken)));
+
+app.MapGet("/api/admin/agents/{agentId}/policy", async (
+    string agentId,
+    LabStore labStore,
+    AgentPolicyService agentPolicies,
+    CancellationToken cancellationToken) =>
+{
+    var agent = await labStore.GetAgentAsync(agentId, cancellationToken);
+    if (agent is null) return Results.NotFound(new { error = "등록되지 않은 PC입니다." });
+
+    var effective = await agentPolicies.GetEffectiveAsync(agentId, agent.Agent.Os, cancellationToken);
+    return Results.Ok(new AgentPolicyResponse
+    {
+        AgentId = agentId,
+        Policy = effective.Policy,
+        HasOverride = effective.HasOverride,
+        Source = effective.Source,
+        Os = agent.Agent.Os,
+    });
+});
+
+app.MapPut("/api/admin/agents/{agentId}/policy", async (
+    string agentId,
+    UpdateAgentPolicyRequest request,
+    LabStore labStore,
+    AgentPolicyService agentPolicies,
+    CancellationToken cancellationToken) =>
+{
+    var agent = await labStore.GetAgentAsync(agentId, cancellationToken);
+    if (agent is null) return Results.NotFound(new { error = "등록되지 않은 PC입니다." });
+
+    var effective = await agentPolicies.SaveAsync(agentId, request.Policy, agent.Agent.Os, cancellationToken);
+    await labStore.AddAuditAsync(
+        "teacher", "agent-policy", $"{agent.Agent.MachineName}/{agentId}",
+        "PC별 업데이트 옵션 저장", cancellationToken);
+    return Results.Ok(new AgentPolicyResponse
+    {
+        AgentId = agentId,
+        Policy = effective.Policy,
+        HasOverride = true,
+        Source = effective.Source,
+        Os = agent.Agent.Os,
+    });
+});
+
+app.MapDelete("/api/admin/agents/{agentId}/policy", async (
+    string agentId,
+    LabStore labStore,
+    AgentPolicyService agentPolicies,
+    CancellationToken cancellationToken) =>
+{
+    var agent = await labStore.GetAgentAsync(agentId, cancellationToken);
+    if (agent is null) return Results.NotFound(new { error = "등록되지 않은 PC입니다." });
+
+    await agentPolicies.DeleteAsync(agentId, cancellationToken);
+    await labStore.AddAuditAsync(
+        "teacher", "agent-policy-reset", $"{agent.Agent.MachineName}/{agentId}",
+        "PC별 업데이트 옵션을 기본값으로 재설정", cancellationToken);
+    return Results.NoContent();
+});
 
 app.MapGet("/api/admin/agents/{agentId}", async (
     string agentId,
@@ -496,6 +568,7 @@ app.MapGet("/api/admin/jobs/{jobId}", async (
 app.MapPost("/api/admin/jobs/start", async (
     StartJobsRequest request,
     LabStore labStore,
+    AgentPolicyService agentPolicies,
     LiveEventBus liveEvents,
     CancellationToken cancellationToken) =>
 {
@@ -504,9 +577,9 @@ app.MapPost("/api/admin/jobs/start", async (
         return Results.BadRequest(new { error = "대상 PC를 선택하세요." });
     }
 
-    var policy = request.Policy ?? await GetDefaultPolicyAsync(labStore, cancellationToken);
     var jobIds = new List<string>();
     var errors = new List<string>();
+    var warnings = new List<string>();
     var now = DateTimeOffset.Now;
 
     foreach (var agentId in request.AgentIds.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -517,6 +590,12 @@ app.MapPost("/api/admin/jobs/start", async (
             errors.Add($"{agentId}: 등록되지 않은 PC");
             continue;
         }
+
+        var os = agent.Agent.Os;
+        var (policy, policyWarnings) = await agentPolicies.ResolveForStartAsync(
+            agentId, os, request.Policy, request.SaveAsAgentPolicy,
+            agent.Agent.MachineName, cancellationToken);
+        warnings.AddRange(policyWarnings);
 
         if (!agent.Online)
         {
@@ -573,7 +652,12 @@ app.MapPost("/api/admin/jobs/start", async (
     }
 
     liveEvents.Signal();
-    return Results.Ok(new StartJobsResponse { JobIds = jobIds, Errors = errors });
+    return Results.Ok(new StartJobsResponse
+    {
+        JobIds = jobIds,
+        Errors = errors,
+        Warnings = warnings.Distinct(StringComparer.Ordinal).ToList(),
+    });
 });
 
 app.MapPost("/api/admin/jobs/{jobId}/pause", async (
@@ -698,15 +782,18 @@ app.MapPost("/api/admin/token", async (
 
 // ---------------- 정책/감사 ----------------
 
-app.MapGet("/api/admin/policy", async (LabStore labStore, CancellationToken cancellationToken) =>
-    Results.Ok(await GetDefaultPolicyAsync(labStore, cancellationToken)));
+app.MapGet("/api/admin/policy", async (
+    AgentPolicyService agentPolicies,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await agentPolicies.GetDefaultAsync(cancellationToken)));
 
 app.MapPut("/api/admin/policy", async (
     UpdatePolicy policy,
     LabStore labStore,
     CancellationToken cancellationToken) =>
 {
-    await labStore.SetSettingAsync("default-policy", UpdateAgentJson.Serialize(policy), cancellationToken);
+    await labStore.SetSettingAsync(
+        AgentPolicyService.DefaultSettingKey, UpdateAgentJson.Serialize(policy), cancellationToken);
     await labStore.AddAuditAsync(
         "teacher", "policy", "default", "기본 업데이트 정책 변경", cancellationToken);
     return Results.Ok(policy);
@@ -769,21 +856,6 @@ static AgentCommand NewCommand(string agentId, CommandType type, string payloadJ
     CreatedAt = DateTimeOffset.Now,
     ExpiresAt = DateTimeOffset.Now.AddHours(12),
 };
-
-static async Task<UpdatePolicy> GetDefaultPolicyAsync(LabStore store, CancellationToken cancellationToken)
-{
-    var json = await store.GetSettingAsync("default-policy", cancellationToken);
-    if (string.IsNullOrWhiteSpace(json)) return UpdatePolicy.Default;
-
-    try
-    {
-        return UpdateAgentJson.Deserialize<UpdatePolicy>(json) ?? UpdatePolicy.Default;
-    }
-    catch
-    {
-        return UpdatePolicy.Default;
-    }
-}
 
 static async Task<IResult> SendJobCommandAsync(
     string jobId,

@@ -16,12 +16,40 @@ public sealed record StartJobsRequest
 
     public string ConfirmedBy { get; init; } = "teacher";
     public string? Note { get; init; }
+
+    /// <summary>전달한 정책을 선택한 PC의 기본값으로 저장할지 여부.</summary>
+    public bool SaveAsAgentPolicy { get; init; }
 }
 
 public sealed record StartJobsResponse
 {
     public IReadOnlyList<string> JobIds { get; init; } = [];
     public IReadOnlyList<string> Errors { get; init; } = [];
+
+    /// <summary>OS에 맞지 않아 자동으로 조정된 옵션 설명.</summary>
+    public IReadOnlyList<string> Warnings { get; init; } = [];
+}
+
+/// <summary>PC별로 저장된 업데이트 옵션의 현재 상태.</summary>
+public sealed record AgentPolicyResponse
+{
+    public required string AgentId { get; init; }
+    public required UpdatePolicy Policy { get; init; }
+    public bool HasOverride { get; init; }
+    public string Source { get; init; } = "기본 정책";
+    public OsInfo? Os { get; init; }
+}
+
+public sealed record AgentPolicySummary
+{
+    public required string AgentId { get; init; }
+    public bool HasOverride { get; init; }
+    public string Source { get; init; } = "기본 정책";
+}
+
+public sealed record UpdateAgentPolicyRequest
+{
+    public required UpdatePolicy Policy { get; init; }
 }
 
 public sealed record CommandRequest

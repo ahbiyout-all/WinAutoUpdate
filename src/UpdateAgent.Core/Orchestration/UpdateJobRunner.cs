@@ -110,7 +110,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
     {
         EnsureInitialized();
         var scanner = new UpdateScanner(_wua, _os);
-        return await scanner.ScanAsync(policy, cancellationToken);
+        return await scanner.ScanAsync(policy.SanitizeFor(_os), cancellationToken);
     }
 
     public async Task<StartJobResult> StartAsync(
@@ -121,6 +121,9 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         EnsureInitialized();
+        // 서버가 정책을 잘못 전달하거나 구버전 에이전트 캐시가 남아 있어도
+        // 실행 직전에 OS 안전 규칙을 한 번 더 강제한다.
+        policy = policy.SanitizeFor(_os);
         await _control.WaitAsync(cancellationToken);
         try
         {

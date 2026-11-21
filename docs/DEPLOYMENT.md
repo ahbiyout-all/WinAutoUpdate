@@ -308,6 +308,64 @@ Invoke-WebRequest "http://127.0.0.1:5080/api/admin/audit" -Headers @{ "X-Admin-T
   -UseBasicParsing | Select-Object -ExpandProperty Content
 ```
 
+### 8-C. Windows 종류 구분과 업데이트 옵션 선택
+
+학생 PC 목록에서 Windows 종류를 구분해 필터링하고, OS에 맞는 업데이트 옵션을 선택할 수 있습니다.
+
+| OS 그룹 | 판단 근거 | 대시보드 표시 |
+|---|---|---|
+| Windows 11 | 빌드 22000 이상 / ProductName | 파란 칩 |
+| Windows 10 (ESU) | 빌드 10240~21999 | 주황 칩 + ESU 안내 |
+| LTSC / IoT LTSC | EditionID `EnterpriseS`/`IoTEnterpriseS` 등 | 보라 칩 |
+| Windows Server | InstallationType/ProductName | 초록 칩 + 빌드 기준 릴리스(2016/2019/2022/2025) |
+| Server Core | InstallationType `Server Core` | 회색 칩 + 헤드리스 안내 |
+
+**목록/필터 사용**
+
+- `학생 PC` 패널 상단의 OS 칩을 누르면 해당 종류만 남습니다. `전체`로 돌아갈 수 있습니다.
+- 운영체제 열에 OS 그룹 칩과 상세 이름/빌드를 함께 표시합니다.
+- PC별로 저장된 옵션이 있으면 **개별 옵션** 칩이 표시됩니다.
+- 행의 **옵션** 버튼으로 해당 PC의 정책을 조회·저장·초기화할 수 있습니다.
+- 체크박스 선택 방식은 그대로이며, 필터는 보이는 목록만 좁힙니다. `전체 선택`도 현재 필터에 적용됩니다.
+
+**업데이트 시작 창의 OS별 프리셋**
+
+| 프리셋 | 포함 항목 | 비고 |
+|---|---|---|
+| 표준 | 보안·중요·권장 | 드라이버 제외, 일반 기본값 |
+| 보안 중심 | 보안·중요 | 재부팅 상한 3회 |
+| 서버 안전 | 보안·중요·권장·Defender 정의 | 자동 재부팅 없음, 오버레이 없음 |
+| 전체 | 선택·드라이버·정의까지 포함 | 기능 업데이트는 여전히 제외 |
+
+- 선택한 PC의 OS 분포가 칩으로 표시되고, 프리셋을 고르면 체크박스가 일괄 설정됩니다.
+- 체크박스를 직접 바꾸면 `사용자 설정`으로 표시됩니다.
+- **선택한 PC에 이 옵션을 기본값으로 저장**을 체크하면 해당 PC들의 개별 정책으로 저장됩니다.
+- 기능 업데이트(OS 업그레이드)는 2차 승인 워크플로 전용이므로 모든 프리셋에서 비활성화됩니다.
+
+**PC별 옵션 저장/초기화 API**
+
+| 메서드 | 경로 | 동작 |
+|---|---|---|
+| GET | `/api/admin/agents/policies` | 개별 옵션이 저장된 PC 목록 |
+| GET | `/api/admin/agents/{id}/policy` | 해당 PC의 유효 정책과 출처(기본/PC별) |
+| PUT | `/api/admin/agents/{id}/policy` | OS에 맞게 정리한 뒤 개별 정책 저장 |
+| DELETE | `/api/admin/agents/{id}/policy` | 개별 정책 삭제 → 서버 기본 정책 사용 |
+
+저장/초기화는 감사 로그 `agent-policy` / `agent-policy-reset`에 기록됩니다.
+개별 정책은 LabManager DB의 `settings` 테이블에 `agent-policy:{agentId}` 키로 저장되며,
+기존 설치를 업그레이드해도 그대로 유지됩니다.
+
+**OS 안전 규칙(자동 적용)**
+
+- Windows 10 / LTSC / Windows Server: 기능 업데이트 옵션과 승인 릴리스를 자동으로 제거합니다.
+- Server Core: GUI가 없으므로 전체화면 오버레이를 자동으로 비활성화합니다.
+- 규칙은 ① 대시보드 프리셋, ② 작업 배정 시 서버, ③ 에이전트 실행 직전(작업/검색/정책 적용)에 각각 적용됩니다.
+- 서버가 옵션을 조정하면 작업 배정 응답의 `warnings`에 사유가 담겨 대시보드에 표시됩니다.
+- 체크인 응답의 `Policy`도 해당 PC의 유효 정책(개별 > 기본)으로 전달됩니다.
+
+> Windows 10 22H2는 ESU 라이선스가 필요하고 기능 업데이트 대상이 아닙니다.
+> Windows Server의 릴리스 표기는 `DisplayVersion`(예: `21H2`) 대신 빌드 번호를 사용합니다.
+
 ## 9. 보안 주의
 
 - `agent-token.txt`는 **공유 에이전트 토큰**입니다. 배포 폴더와 USB를 보호하고
@@ -322,3 +380,4 @@ Invoke-WebRequest "http://127.0.0.1:5080/api/admin/audit" -Headers @{ "X-Admin-T
 
 - 2026-11-21: 교사 PC 구성/검증(`setup-labmanager-lab.ps1`), 인벤토리 기반 패키지 생성
   (`deploy-agents.ps1`), 샘플 CSV, 이 런북 추가. 제품 코드 변경 없음(버전 유지 `0.1.13`).
+- 2026-11-21: Windows 종류 구분/필터, OS별 프리셋, PC별 옵션 저장, OS 안전 규칙 추가(`v0.1.15`).

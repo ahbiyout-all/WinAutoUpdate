@@ -10,6 +10,78 @@ let selected = new Set();
 let openJobId = null;
 let lastError = '';
 let pendingJobId = null;
+let osFilter = 'all';
+let agentPolicies = {};
+let startCapability = null;
+let agentPolicyCapability = null;
+let agentPolicyTargetId = null;
+
+const OS_GROUPS = [
+  { id: 'windows-11', label: 'Windows 11', tone: 'blue' },
+  { id: 'windows-10', label: 'Windows 10 ESU', tone: 'amber' },
+  { id: 'ltsc', label: 'LTSC / IoT LTSC', tone: 'purple' },
+  { id: 'server', label: 'Windows Server', tone: 'green' },
+  { id: 'server-core', label: 'Server Core', tone: 'gray' },
+  { id: 'unknown', label: '미확인 OS', tone: 'gray' },
+];
+
+const POLICY_PRESETS = {
+  custom: {
+    label: '사용자 설정',
+    hint: '체크박스를 직접 지정했습니다.',
+    values: null,
+  },
+  standard: {
+    label: '표준',
+    hint: '보안 · 중요 · 권장 업데이트를 설치합니다. 드라이버는 제외됩니다.',
+    values: {
+      security: true, critical: true, important: true, optional: false,
+      drivers: false, definitions: false, feature: false, overlay: true,
+      pauseUser: true, rebootNever: false, maxReboots: 5,
+    },
+  },
+  'security-only': {
+    label: '보안 중심',
+    hint: '보안 · 중요 업데이트만 설치하고 재부팅 횟수를 줄입니다.',
+    values: {
+      security: true, critical: true, important: false, optional: false,
+      drivers: false, definitions: false, feature: false, overlay: true,
+      pauseUser: true, rebootNever: false, maxReboots: 3,
+    },
+  },
+  'server-safe': {
+    label: '서버 안전',
+    hint: '정의 업데이트를 포함하고 자동 재부팅과 오버레이를 끕니다.',
+    values: {
+      security: true, critical: true, important: true, optional: false,
+      drivers: false, definitions: true, feature: false, overlay: false,
+      pauseUser: true, rebootNever: true, maxReboots: 5,
+    },
+  },
+  full: {
+    label: '전체',
+    hint: '선택 · 드라이버 · 정의 업데이트까지 모두 포함합니다.',
+    values: {
+      security: true, critical: true, important: true, optional: true,
+      drivers: true, definitions: true, feature: false, overlay: true,
+      pauseUser: true, rebootNever: false, maxReboots: 5,
+    },
+  },
+};
+
+const POLICY_IDS = {
+  security: 'security',
+  critical: 'critical',
+  important: 'important',
+  optional: 'optional',
+  drivers: 'drivers',
+  definitions: 'definitions',
+  feature: 'feature',
+  overlay: 'overlay',
+  pauseUser: 'pause-user',
+  rebootNever: 'reboot-never',
+  maxReboots: 'max-reboots',
+};
 
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, text) => {
@@ -109,6 +181,198 @@ function chip(label, tone) {
   return `<span class="chip chip-${tone}">${escapeHtml(label)}</span>`;
 }
 
+// ---------------- OS 구분 / 업데이트 옵션 ----------------
+
+function osGroup(os) {
+  const productName = String(os?.productName || '');
+  const id = os?.groupId || (
+    os?.isServerCore ? 'server-core'
+      : os?.isServer ? 'server'
+        : os?.isLtsc ? 'ltsc'
+          : os?.isWindows10 ? 'windows-10'
+            : (os?.build || 0) >= 22000 || /Windows 11/i.test(productName) ? 'windows-11'
+              : 'unknown'
+  );
+  return OS_GROUPS.find((group) => group.id === id) || OS_GROUPS[OS_GROUPS.length - 1];
+}
+
+function visibleAgents() {
+  return osFilter === 'all'
+    ? agents
+    : agents.filter((record) => osGroup(record.agent.os).id === osFilter);
+}
+
+function renderOsFilter() {
+  const host = $('#os-filter');
+  if (!host) return;
+  const counts = new Map();
+  for (const record of agents) {
+    const id = osGroup(record.agent.os).id;
+    counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  const entries = [{ id: 'all', label: `전체 ${agents.length}`, tone: 'blue' }]
+    .concat(OS_GROUPS.filter((group) => counts.has(group.id) || group.id === osFilter)
+      .map((group) => ({ ...group, label: `${group.label} ${counts.get(group.id) || 0}` })));
+  host.innerHTML = entries.map((entry) =>
+    `<button type="button" class="filter-chip${osFilter === entry.id ? ' active' : ''}" data-os-filter="${entry.id}">${escapeHtml(entry.label)}</button>`
+  ).join('');
+  host.querySelectorAll('button').forEach((button) => {
+    button.addEventListener('click', () => {
+      osFilter = button.dataset.osFilter;
+      renderOsFilter();
+      renderAgents();
+    });
+  });
+}
+
+function capabilitiesFor(records) {
+  const groups = new Map();
+  let supportsOverlay = true;
+  let supportsFeature = true;
+  for (const record of records) {
+    const os = record.agent.os || {};
+    const group = osGroup(os);
+    groups.set(group.id, (groups.get(group.id) || 0) + 1);
+    if (!(os.supportsOverlay ?? !os.isServerCore)) supportsOverlay = false;
+    if (!(os.supportsFeatureUpdates ?? (!os.isServer && !os.isLtsc && !os.isWindows10))) supportsFeature = false;
+  }
+  if (records.length === 0) {
+    supportsOverlay = false;
+    supportsFeature = false;
+  }
+  return { count: records.length, groups, supportsOverlay, supportsFeature };
+}
+
+function renderOsMix(selector, capability) {
+  const host = $(selector);
+  if (!host) return;
+  const parts = [...capability.groups.entries()].map(([id, count]) => {
+    const group = OS_GROUPS.find((item) => item.id === id) || OS_GROUPS[OS_GROUPS.length - 1];
+    return chip(`${group.label} ${count}대`, group.tone);
+  });
+  if (!capability.supportsOverlay) {
+    parts.push('<div class="muted small">Server Core: 전체화면 오버레이가 자동으로 비활성화됩니다.</div>');
+  }
+  if (!capability.supportsFeature) {
+    parts.push('<div class="muted small">선택된 OS는 기능 업데이트를 지원하지 않습니다.</div>');
+  }
+  host.innerHTML = parts.join(' ');
+}
+
+const fieldSel = (prefix, key) => `#${prefix}${POLICY_IDS[key]}`;
+const capabilityForPrefix = (prefix) => prefix === 'p-' ? startCapability : agentPolicyCapability;
+
+function readPolicyForm(prefix) {
+  const checked = (key) => !!$(fieldSel(prefix, key))?.checked;
+  return {
+    includeSecurity: checked('security'),
+    includeCritical: checked('critical'),
+    includeImportant: checked('important'),
+    includeOptional: checked('optional'),
+    includeDrivers: checked('drivers'),
+    includeDefinitionUpdates: checked('definitions'),
+    // 기능 업데이트는 2차 승인 워크플로에서만 사용한다.
+    includeFeatureUpdates: false,
+    maxRebootCount: Number($(fieldSel(prefix, 'maxReboots'))?.value) || 5,
+    maxRuntimeHours: 12,
+    pauseOnUserLogon: checked('pauseUser'),
+    rebootPolicy: checked('rebootNever') ? 'never' : 'auto',
+    rebootDelaySeconds: 60,
+    shutdownAfterComplete: false,
+    overlayEnabled: checked('overlay'),
+    requireMaestroManualConfirmation: true,
+    verifyRestoreMarkerAfterReboot: true,
+  };
+}
+
+function writePolicyForm(prefix, policy) {
+  const set = (key, value) => {
+    const input = $(fieldSel(prefix, key));
+    if (input && input.type === 'checkbox') input.checked = !!value;
+  };
+  set('security', policy.includeSecurity);
+  set('critical', policy.includeCritical);
+  set('important', policy.includeImportant);
+  set('optional', policy.includeOptional);
+  set('drivers', policy.includeDrivers);
+  set('definitions', policy.includeDefinitionUpdates);
+  set('feature', policy.includeFeatureUpdates);
+  set('overlay', policy.overlayEnabled);
+  set('pauseUser', policy.pauseOnUserLogon);
+  set('rebootNever', policy.rebootPolicy === 'never');
+  const maxReboots = $(fieldSel(prefix, 'maxReboots'));
+  if (maxReboots) maxReboots.value = policy.maxRebootCount ?? 5;
+}
+
+function applyPolicyCapabilities(prefix, capability) {
+  capability = capability || { supportsOverlay: true, supportsFeature: true };
+  const overlay = $(fieldSel(prefix, 'overlay'));
+  if (overlay) {
+    overlay.disabled = !capability.supportsOverlay;
+    if (!capability.supportsOverlay) overlay.checked = false;
+  }
+  const feature = $(fieldSel(prefix, 'feature'));
+  if (feature) {
+    feature.disabled = true;
+    feature.checked = false;
+    feature.parentElement.title = capability.supportsFeature
+      ? '기능 업데이트는 2차 승인 워크플로에서만 사용합니다.'
+      : '선택된 OS는 기능 업데이트를 지원하지 않습니다.';
+  }
+}
+
+function updatePresetHint(prefix, id, capability) {
+  const hint = $(`#${prefix}preset-hint`);
+  if (!hint) return;
+  const preset = POLICY_PRESETS[id] || POLICY_PRESETS.custom;
+  let text = preset.hint;
+  if (capability && (!capability.supportsOverlay || !capability.supportsFeature)) {
+    text = `${preset.hint} · 선택된 OS에서 지원되지 않는 옵션은 자동으로 비활성화됩니다.`;
+  }
+  hint.textContent = text;
+}
+
+function markCustom(prefix) {
+  const select = $(`#${prefix}preset`);
+  if (select) select.value = 'custom';
+  updatePresetHint(prefix, 'custom', capabilityForPrefix(prefix));
+}
+
+function setPolicyPreset(prefix, id, capability) {
+  const preset = POLICY_PRESETS[id];
+  if (!preset?.values) return;
+  const values = preset.values;
+  writePolicyForm(prefix, {
+    includeSecurity: values.security,
+    includeCritical: values.critical,
+    includeImportant: values.important,
+    includeOptional: values.optional,
+    includeDrivers: values.drivers,
+    includeDefinitionUpdates: values.definitions,
+    includeFeatureUpdates: values.feature,
+    overlayEnabled: values.overlay,
+    pauseOnUserLogon: values.pauseUser,
+    rebootPolicy: values.rebootNever ? 'never' : 'auto',
+    maxRebootCount: values.maxReboots,
+  });
+  applyPolicyCapabilities(prefix, capability);
+  const select = $(`#${prefix}preset`);
+  if (select) select.value = id;
+  updatePresetHint(prefix, id, capability);
+}
+
+function wirePolicyForm(prefix) {
+  const select = $(`#${prefix}preset`);
+  select?.addEventListener('change', () => {
+    const id = select.value;
+    if (id === 'custom') updatePresetHint(prefix, id, capabilityForPrefix(prefix));
+    else setPolicyPreset(prefix, id, capabilityForPrefix(prefix));
+  });
+  for (const key of Object.keys(POLICY_IDS)) {
+    $(fieldSel(prefix, key))?.addEventListener('change', () => markCustom(prefix));
+  }
+}
+
 function formatTime(value) {
   if (!value) return '';
   const date = new Date(value);
@@ -161,7 +425,15 @@ function renderAgents() {
     return;
   }
 
-  for (const record of agents) {
+  const rows = visibleAgents();
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" class="empty">선택한 OS 필터에 해당하는 PC가 없습니다.</td></tr>`;
+    $('#select-all').checked = false;
+    $('#selected-count').textContent = selected.size > 0 ? `${selected.size}대 선택됨` : '';
+    return;
+  }
+
+  for (const record of rows) {
     const agent = record.agent;
     const telemetry = record.telemetry || {};
     const online = record.online;
@@ -209,9 +481,13 @@ function renderAgents() {
     tr.appendChild(jobCell);
 
     const osCell = el('td');
-    osCell.innerHTML = `<div class="small">${escapeHtml(os.shortName || os.productName || '알 수 없음')}</div>
+    const group = osGroup(os);
+    const policyInfo = agentPolicies[agent.agentId];
+    osCell.innerHTML = `<div class="small">${chip(group.label, group.tone)}</div>
+      <div class="small">${escapeHtml(os.shortName || os.productName || '알 수 없음')}</div>
       <div class="muted small">${escapeHtml(os.versionString || '')}</div>
-      ${agent.maestroInstalled ? '<div class="small amber-text">Maestro 감지됨</div>' : ''}`;
+      ${policyInfo?.hasOverride ? chip('개별 옵션', 'purple') + ' ' : ''}
+      ${agent.maestroInstalled ? '<span class="small amber-text">Maestro 감지됨</span>' : ''}`;
     tr.appendChild(osCell);
 
     const freeCell = el('td');
@@ -228,6 +504,7 @@ function renderAgents() {
     const actionCell = el('td');
     actionCell.className = 'actions';
     actionCell.appendChild(actionButton('WoL', () => wakeAgent(agent), !online));
+    actionCell.appendChild(actionButton('옵션', () => openAgentPolicyDialog(agent)));
     actionCell.appendChild(actionButton('업데이트', () => openStartDialog([agent.agentId])));
     actionCell.appendChild(actionButton('해제', () => unlockAgent(agent)));
     actionCell.appendChild(actionButton('재부팅', () => rebootAgent(agent)));
@@ -238,7 +515,7 @@ function renderAgents() {
   }
 
   const selectAll = $('#select-all');
-  selectAll.checked = agents.length > 0 && agents.every((a) => selected.has(a.agent.agentId));
+  selectAll.checked = rows.length > 0 && rows.every((a) => selected.has(a.agent.agentId));
   $('#selected-count').textContent = selected.size > 0 ? `${selected.size}대 선택됨` : '';
 }
 
@@ -337,18 +614,21 @@ function renderAudit() {
 
 async function refresh() {
   try {
-    const [agentsData, jobsData, overviewData, auditData] = await Promise.all([
+    const [agentsData, policiesData, jobsData, overviewData, auditData] = await Promise.all([
       api('/api/admin/agents'),
+      api('/api/admin/agents/policies'),
       api('/api/admin/jobs?limit=60'),
       api('/api/admin/overview'),
       api('/api/admin/audit?limit=60'),
     ]);
     agents = agentsData || [];
+    agentPolicies = Object.fromEntries((policiesData || []).map((item) => [item.agentId, item]));
     jobs = jobsData || [];
     overview = overviewData || {};
     audit = auditData || [];
     setError('');
     renderOverview();
+    renderOsFilter();
     renderAgents();
     renderJobs();
     renderAudit();
@@ -439,24 +719,7 @@ function jobActionLabel(action) {
 }
 
 async function submitStart() {
-  const policy = {
-    includeSecurity: $('#p-security').checked,
-    includeCritical: $('#p-critical').checked,
-    includeImportant: $('#p-important').checked,
-    includeOptional: $('#p-optional').checked,
-    includeDrivers: $('#p-drivers').checked,
-    includeDefinitionUpdates: $('#p-definitions').checked,
-    includeFeatureUpdates: false,
-    maxRebootCount: Number($('#p-max-reboots').value) || 5,
-    maxRuntimeHours: 12,
-    pauseOnUserLogon: $('#p-pause-user').checked,
-    rebootPolicy: $('#p-reboot-never').checked ? 'never' : 'auto',
-    rebootDelaySeconds: 60,
-    shutdownAfterComplete: false,
-    overlayEnabled: $('#p-overlay').checked,
-    requireMaestroManualConfirmation: true,
-    verifyRestoreMarkerAfterReboot: true,
-  };
+  const policy = readPolicyForm('p-');
 
   const agentIds = [...selected];
   if (agentIds.length === 0) {
@@ -478,12 +741,16 @@ async function submitStart() {
       body: JSON.stringify({
         agentIds,
         policy,
+        saveAsAgentPolicy: $('#p-save-policy').checked,
         maestroConfirmed: true,
         confirmedBy: 'teacher',
         note,
       }),
     });
 
+    if (result.warnings && result.warnings.length > 0) {
+      toast(result.warnings.join(' / '), 'error');
+    }
     if (result.errors && result.errors.length > 0) {
       toast(result.errors.join(' / '), 'error');
     }
@@ -510,15 +777,74 @@ function openStartDialog(agentIds) {
     return;
   }
 
-  const anyMaestro = agents.some(
-    (a) => selected.has(a.agent.agentId) && a.agent.maestroInstalled
-  );
+  const records = agents.filter((a) => selected.has(a.agent.agentId));
+  const anyMaestro = records.some((a) => a.agent.maestroInstalled);
   $('#maestro-block').classList.toggle('hidden', !anyMaestro);
   if (anyMaestro) $('#p-maestro-confirm').checked = false;
   else $('#p-maestro-confirm').checked = true;
 
+  startCapability = capabilitiesFor(records);
+  renderOsMix('#start-os-mix', startCapability);
+  applyPolicyCapabilities('p-', startCapability);
+  const allServer = records.length > 0 && [...startCapability.groups.keys()]
+    .every((id) => id === 'server' || id === 'server-core');
+  setPolicyPreset('p-', allServer ? 'server-safe' : 'standard', startCapability);
+  $('#p-save-policy').checked = false;
+
   $('#start-target-count').textContent = `${selected.size}대`;
   $('#start-modal').classList.remove('hidden');
+}
+
+async function openAgentPolicyDialog(agent) {
+  try {
+    const data = await api(`/api/admin/agents/${encodeURIComponent(agent.agentId)}/policy`);
+    agentPolicyTargetId = agent.agentId;
+    $('#ap-agent-name').textContent = agent.machineName || agent.agentId;
+    $('#ap-source').textContent = data.source || '기본 정책';
+    agentPolicyCapability = capabilitiesFor([agent]);
+    renderOsMix('#ap-os-mix', agentPolicyCapability);
+    applyPolicyCapabilities('ap-', agentPolicyCapability);
+    writePolicyForm('ap-', data.policy || {});
+    $('#ap-preset').value = 'custom';
+    updatePresetHint('ap-', 'custom', agentPolicyCapability);
+    $('#agent-policy-modal').classList.remove('hidden');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+async function saveAgentPolicy() {
+  if (!agentPolicyTargetId) return;
+  const button = $('#ap-save');
+  button.disabled = true;
+  try {
+    await api(`/api/admin/agents/${encodeURIComponent(agentPolicyTargetId)}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({ policy: readPolicyForm('ap-') }),
+    });
+    toast('이 PC의 업데이트 옵션을 저장했습니다.', 'success');
+    $('#agent-policy-modal').classList.add('hidden');
+    await refresh();
+  } catch (error) {
+    toast(error.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function resetAgentPolicy() {
+  if (!agentPolicyTargetId) return;
+  if (!confirm('이 PC의 개별 옵션을 삭제하고 서버 기본 정책으로 되돌릴까요?')) return;
+  try {
+    await api(`/api/admin/agents/${encodeURIComponent(agentPolicyTargetId)}/policy`, {
+      method: 'DELETE',
+    });
+    toast('기본 정책으로 되돌렸습니다.', 'success');
+    $('#agent-policy-modal').classList.add('hidden');
+    await refresh();
+  } catch (error) {
+    toast(error.message, 'error');
+  }
 }
 
 function renderJobDetail(data) {
@@ -865,9 +1191,9 @@ function wireEvents() {
   $('#refresh-button').addEventListener('click', () => refresh());
   $('#select-all').addEventListener('change', (event) => {
     if (event.target.checked) {
-      for (const record of agents) selected.add(record.agent.agentId);
+      for (const record of visibleAgents()) selected.add(record.agent.agentId);
     } else {
-      selected.clear();
+      for (const record of visibleAgents()) selected.delete(record.agent.agentId);
     }
     renderAgents();
   });
@@ -876,6 +1202,10 @@ function wireEvents() {
   $('#start-close').addEventListener('click', () => $('#start-modal').classList.add('hidden'));
   $('#start-cancel').addEventListener('click', () => $('#start-modal').classList.add('hidden'));
   $('#start-submit').addEventListener('click', submitStart);
+  $('#ap-close').addEventListener('click', () => $('#agent-policy-modal').classList.add('hidden'));
+  $('#ap-cancel').addEventListener('click', () => $('#agent-policy-modal').classList.add('hidden'));
+  $('#ap-save').addEventListener('click', saveAgentPolicy);
+  $('#ap-reset').addEventListener('click', resetAgentPolicy);
   $('#detail-close').addEventListener('click', () => {
     $('#detail-modal').classList.add('hidden');
     openJobId = null;
@@ -889,6 +1219,8 @@ function wireEvents() {
 }
 
 setupTokenDialog();
+wirePolicyForm('p-');
+wirePolicyForm('ap-');
 wireEvents();
 setupUpdateDialog();
 pendingJobId = new URLSearchParams(location.search).get('job');
