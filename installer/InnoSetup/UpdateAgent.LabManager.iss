@@ -1,4 +1,4 @@
-﻿; ============================================================================
+; ============================================================================
 ;  UpdateAgent LabManager - Inno Setup 6 installer (교사 PC)
 ;
 ;  설치 흐름
@@ -17,7 +17,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.9"
+  #define AppVersion "0.1.10"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"

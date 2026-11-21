@@ -48,6 +48,36 @@ public sealed class LabManagerServiceTests
     }
 
     [Fact]
+    public async Task TokenAuthMiddleware_UsesTheChangedAdminTokenImmediately()
+    {
+        var options = new LabManagerOptions
+        {
+            AdminToken = UpdateAgentConstants.SampleAdminToken,
+            AgentToken = "agent-secret",
+        };
+        var monitor = new TestOptionsMonitor(options);
+        var overridePath = Path.Combine(Path.GetTempPath(), $"ua-token-test-{Guid.NewGuid():N}.json");
+        var tokenStore = new AdminTokenStore(
+            monitor, overridePath, NullLogger<AdminTokenStore>.Instance);
+
+        await tokenStore.SetTokenAsync("new-admin-secret-123");
+
+        var oldTokenContext = new DefaultHttpContext();
+        oldTokenContext.Request.Path = "/api/admin/update";
+        oldTokenContext.Request.Headers[UpdateAgentConstants.AdminTokenHeader] = options.AdminToken;
+        await CreateMiddleware(monitor, tokenStore, oldTokenContext).InvokeAsync(oldTokenContext);
+        Assert.Equal(StatusCodes.Status401Unauthorized, oldTokenContext.Response.StatusCode);
+
+        var newTokenContext = new DefaultHttpContext();
+        newTokenContext.Request.Path = "/api/admin/update";
+        newTokenContext.Request.Headers[UpdateAgentConstants.AdminTokenHeader] = "new-admin-secret-123";
+        await CreateMiddleware(monitor, tokenStore, newTokenContext).InvokeAsync(newTokenContext);
+        Assert.Equal(StatusCodes.Status204NoContent, newTokenContext.Response.StatusCode);
+
+        File.Delete(overridePath);
+    }
+
+    [Fact]
     public async Task UpdateCheckService_CachesSuccessfulChecksUnlessForced()
     {
         const string json = """
@@ -77,13 +107,27 @@ public sealed class LabManagerServiceTests
 
     private static TokenAuthMiddleware CreateMiddleware(LabManagerOptions options, HttpContext context)
     {
+        var monitor = new TestOptionsMonitor(options);
+        var tokenStore = new AdminTokenStore(
+            monitor,
+            Path.Combine(Path.GetTempPath(), $"ua-token-test-{Guid.NewGuid():N}.json"),
+            NullLogger<AdminTokenStore>.Instance);
+        return CreateMiddleware(monitor, tokenStore, context);
+    }
+
+    private static TokenAuthMiddleware CreateMiddleware(
+        IOptionsMonitor<LabManagerOptions> monitor,
+        AdminTokenStore tokenStore,
+        HttpContext context)
+    {
         return new TokenAuthMiddleware(
             _ =>
             {
                 context.Response.StatusCode = StatusCodes.Status204NoContent;
                 return Task.CompletedTask;
             },
-            new TestOptionsMonitor(options),
+            monitor,
+            tokenStore,
             NullLogger<TokenAuthMiddleware>.Instance);
     }
 

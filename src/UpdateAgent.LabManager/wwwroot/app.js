@@ -1,4 +1,6 @@
 const STORAGE_KEY = 'ua_admin_token';
+// 설치 파일에 들어가는 공개 샘플 값이다. 실제 배포 토큰은 절대 여기에 넣지 않는다.
+const SAMPLE_ADMIN_TOKEN = 'sample-admin-token-replace-before-pilot';
 let adminToken = localStorage.getItem(STORAGE_KEY) || '';
 let agents = [];
 let jobs = [];
@@ -736,6 +738,31 @@ function setupUpdateDialog() {
 function setupTokenDialog() {
   const dialog = $('#token-modal');
   const input = $('#token-input');
+  const newInput = $('#new-token-input');
+  const confirmInput = $('#new-token-confirm');
+  const status = $('#token-status');
+
+  $('#sample-token-text').textContent = SAMPLE_ADMIN_TOKEN;
+
+  // 인증된 경우에만 서버 토큰 상태를 조회한다. 실제 토큰 값은 응답에 포함하지 않는다.
+  const loadStatus = async () => {
+    if (!adminToken || dialog.classList.contains('hidden')) return;
+    try {
+      const info = await api('/api/admin/token');
+      status.classList.remove('hidden');
+      if (info.isPlaceholder) {
+        status.className = 'token-status warning';
+        status.textContent = '현재 기본(샘플) 토큰 사용 중 - 파일럿 전에 반드시 변경하세요.';
+      } else {
+        status.className = 'token-status ok';
+        status.textContent = info.hasRuntimeOverride
+          ? '사용자 지정 토큰 사용 중 (대시보드에서 변경됨).'
+          : '사용자 지정 토큰 사용 중.';
+      }
+    } catch {
+      status.classList.add('hidden');
+    }
+  };
 
   const save = () => {
     const value = input.value.trim();
@@ -749,16 +776,55 @@ function setupTokenDialog() {
     setError('');
     refresh();
     maybeCheckForUpdates(true);
+    loadStatus();
   };
 
+  const changeServerToken = async () => {
+    const value = newInput.value.trim();
+    if (value.length < 8) {
+      toast('새 토큰은 8자 이상이어야 합니다.', 'error');
+      return;
+    }
+    if (value !== confirmInput.value.trim()) {
+      toast('새 토큰과 확인 값이 일치하지 않습니다.', 'error');
+      return;
+    }
+    if (!adminToken) {
+      toast('먼저 현재 토큰을 저장하세요.', 'error');
+      return;
+    }
+    try {
+      await api('/api/admin/token', {
+        method: 'POST',
+        body: JSON.stringify({ newToken: value }),
+      });
+      adminToken = value;
+      localStorage.setItem(STORAGE_KEY, value);
+      input.value = value;
+      newInput.value = '';
+      confirmInput.value = '';
+      toast('서버 관리자 토큰이 변경되었습니다.', 'success');
+      await loadStatus();
+      refresh();
+    } catch (error) {
+      toast(`토큰 변경 실패: ${error.message}`, 'error');
+    }
+  };
+
+  $('#token-use-sample').addEventListener('click', () => {
+    input.value = SAMPLE_ADMIN_TOKEN;
+    input.focus();
+  });
   $('#token-save').addEventListener('click', save);
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') save();
   });
+  $('#token-change').addEventListener('click', changeServerToken);
   $('#token-cancel').addEventListener('click', () => dialog.classList.add('hidden'));
   $('#token-button').addEventListener('click', () => {
     input.value = adminToken;
     dialog.classList.remove('hidden');
+    loadStatus();
   });
 
   if (!adminToken) {

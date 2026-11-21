@@ -196,6 +196,10 @@ dotnet run --project src/UpdateAgent.LabManager
 - 데이터베이스: `%LOCALAPPDATA%\UpdateAgent\LabManager\labmanager.db`
 - 로그: 같은 폴더의 `logs\`
 - 관리자 토큰은 앱 모드 브라우저 프로필의 localStorage에 저장됩니다(첫 실행 시 입력).
+- 대시보드의 **토큰** 창에 설치 시 기본값인 샘플 관리자 토큰이 표시되며, **이 값 사용** 버튼으로 입력란을 채울 수 있습니다.
+  같은 창의 **서버 토큰 변경**에서 새 관리자 토큰을 저장하면 재시작 없이 즉시 적용되고 브라우저 토큰도 함께 갱신됩니다.
+  변경된 값은 `%LOCALAPPDATA%\UpdateAgent\LabManager\runtime-admin-token.json`에 저장되어 appsettings.json의 `AdminToken`보다 우선합니다.
+  이전 토큰은 변경 직후부터 거부되므로 새 토큰을 안전한 곳에 기록하세요. 에이전트 토큰은 이 화면에서 바뀌지 않습니다.
 - 앱 모드 창을 닫아도 서버는 계속 실행됩니다.
 
 실제 배포용으로는 파일럿 키트를 사용합니다.
@@ -311,7 +315,7 @@ LabManager 대시보드에 업데이트 팝업을 표시합니다. 설치 파일
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
-| `AdminToken` | `sample-admin-token-replace-before-pilot` | 관리자 API/대시보드 토큰. 설치 시 이 샘플 값이 들어가며, `change-me-*`는 시작이 거부되는 플레이스홀더 |
+| `AdminToken` | `sample-admin-token-replace-before-pilot` | 관리자 API/대시보드 토큰. 설치 시 이 샘플 값이 들어가며, `change-me-*`는 시작이 거부되는 플레이스홀더. 대시보드에서 변경하면 런타임 override가 우선 |
 | `AgentToken` | `sample-agent-token-replace-before-pilot` | 에이전트 체크인 토큰. `change-me-*`는 시작이 거부되는 플레이스홀더 |
 | `DatabasePath` | `%LOCALAPPDATA%\UpdateAgent\LabManager\labmanager.db` | SQLite 경로 |
 | `OnlineThresholdSeconds` | `90` | 온라인 판정 기준 |
@@ -354,6 +358,7 @@ $env:Agent__AgentToken = "<강력한-토큰>"
 - `/api/health`만 인증 없이 공개됩니다.
 - **기본 토큰은 파일럿 전 반드시 변경하세요.** 모든 학생 PC에 동일한 에이전트 토큰을 배포합니다.
 - LabManager API와 대시보드는 랩 LAN에서만 사용하고 외부에 노출하지 마세요.
+- 서버 관리자 토큰은 대시보드에서 변경할 수 있습니다. `%LOCALAPPDATA%`의 런타임 override에 저장되어 재시작 후에도 유지되며, 변경 즉시 이전 토큰은 무효가 됩니다.
 - 학생 PC가 로컬 관리자인 환경에서는 완전한 변조 방지가 불가능합니다.
 - 배포 전 코드 서명 인증서 적용을 권장합니다.
 
@@ -388,7 +393,8 @@ Maestro UI/API 자동화는 2단계로 미뤄져 있습니다.
 - [ ] 학생 PC 2~3대에 서비스 배포, 재부팅 후 자동 시작 및 체크인 확인
 - [ ] MSI 설치 → 업그레이드 → 제거 반복, `agent.json` 유지 및 데이터 보존 확인
 - [ ] MSI 설치 로그에 평문 토큰이 없는지 확인
-- [ ] 토큰 변경 후 기존 토큰이 거부되는지 확인
+- [ ] 대시보드 **토큰** 창에 샘플 관리자 토큰이 표시되는지 확인
+- [ ] 서버 토큰 변경 후 기존 토큰은 401, 새 토큰은 200으로 응답하는지 확인 (재시작 없이 적용)
 - [ ] 방화벽 5080 인바운드, 교사 PC 절전/종료 시 동작 정의
 - [ ] 결과 기록 및 롤백 절차(서비스 중지/제거, Maestro 자동 복구 재설정) 문서화
 

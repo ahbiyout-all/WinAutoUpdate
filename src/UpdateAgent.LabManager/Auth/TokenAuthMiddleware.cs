@@ -11,15 +11,18 @@ public sealed class TokenAuthMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly IOptionsMonitor<LabManagerOptions> _options;
+    private readonly AdminTokenStore _adminTokenStore;
     private readonly ILogger<TokenAuthMiddleware> _logger;
 
     public TokenAuthMiddleware(
         RequestDelegate next,
         IOptionsMonitor<LabManagerOptions> options,
+        AdminTokenStore adminTokenStore,
         ILogger<TokenAuthMiddleware> logger)
     {
         _next = next;
         _options = options;
+        _adminTokenStore = adminTokenStore;
         _logger = logger;
     }
 
@@ -37,7 +40,7 @@ public sealed class TokenAuthMiddleware
         }
         else if (path.StartsWithSegments("/api/admin"))
         {
-            if (!IsAuthorized(context, UpdateAgentConstants.AdminTokenHeader, _options.CurrentValue.AdminToken))
+            if (!IsAuthorized(context, UpdateAgentConstants.AdminTokenHeader, _adminTokenStore.CurrentToken))
             {
                 await RejectAsync(context, "관리자 토큰이 올바르지 않습니다.");
                 return;

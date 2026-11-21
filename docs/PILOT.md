@@ -137,8 +137,10 @@ Set-Location .\publish\labmanager
 - 데이터: `%LOCALAPPDATA%\UpdateAgent\LabManager\labmanager.db`
 - 로그: `%LOCALAPPDATA%\UpdateAgent\LabManager\logs\`
 
-대시보드 우측 상단에 **관리자 토큰**을 입력합니다.
-서버만 띄우려면 `.\UpdateAgent.LabManager.exe`를 직접 실행해도 됩니다.
+대시보드 우측 상단의 **토큰** 버튼을 누르면 설치 시 기본값인 샘플 관리자 토큰이 화면에 표시됩니다.
+**이 값 사용**으로 입력란을 채워 서버에 연결한 뒤, 같은 창의 **서버 토큰 변경**에서 3-1에서 준비한 실제
+토큰으로 교체하세요. 변경은 재시작 없이 즉시 적용되고 브라우저 localStorage도 새 값으로 갱신되며,
+이전 토큰은 바로 거부됩니다. 서버만 띄우려면 `.\UpdateAgent.LabManager.exe`를 직접 실행해도 됩니다.
 
 ## 4. 학생 PC 설치
 
@@ -165,7 +167,7 @@ Phase 0 파일럿에서는 Inno Setup을 먼저 검증하고, 문제가 있으�
 ```powershell
 Set-Location "<복사한 폴더>"
 
-.\UpdateAgent.Agent-Setup-0.1.9-x64.exe `
+.\UpdateAgent.Agent-Setup-0.1.10-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LabManagerUrl=http://<교사-PC-IP>:5080 `
   /AgentTokenFile="<agent-token.txt 경로>"
@@ -195,7 +197,7 @@ Set-Location "<복사한 폴더>"
 
 $env:UPDATEAGENT_AGENT_TOKEN = Get-Content "<agent-token.txt 경로>" -Raw
 .\scripts\install-agent-msi.ps1 `
-  -MsiPath ".\UpdateAgent.Agent-0.1.9-x64.msi" `
+  -MsiPath ".\UpdateAgent.Agent-0.1.10-x64.msi" `
   -LabManagerUrl "http://<교사-PC-IP>:5080" `
   -ConfirmMaestro
 ```
@@ -384,6 +386,8 @@ DRY RUN에서는 실제 다운로드/설치/재부팅 없이 작업 흐름만 �
 
 - [ ] 잘못된 에이전트 토큰으로 체크인 시 401
 - [ ] 잘못된 관리자 토큰으로 관리 API 접근 시 401
+- [ ] 대시보드 토큰 창에 샘플 관리자 토큰이 표시되고 **이 값 사용**으로 로그인 가능
+- [ ] 서버 토큰 변경 후 기존 토큰은 401, 새 토큰은 200 (재시작 없이 적용, localStorage 갱신 확인)
 - [ ] 감사 로그에 `job-start`, `job-state`, `command-ok`, `job-failed` 기록
 - [ ] 서비스 재시작 후에도 진행 중 작업이 재개됨
 - [ ] (선택) Wake-on-LAN으로 PC 부팅

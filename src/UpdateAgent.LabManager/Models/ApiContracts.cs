@@ -48,6 +48,12 @@ public sealed record MaestroRestoreRequest
     public bool ProtectionRestored { get; init; }
 }
 
+/// <summary>대시보드에서 서버의 관리자 토큰을 변경할 때 사용한다.</summary>
+public sealed record UpdateAdminTokenRequest
+{
+    public string NewToken { get; init; } = string.Empty;
+}
+
 public sealed record OverviewResponse
 {
     public int AgentCount { get; init; }

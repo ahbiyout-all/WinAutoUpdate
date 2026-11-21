@@ -32,6 +32,22 @@ public static class UpdateAgentConstants
 
     public const string DefaultAdminToken = "change-me-admin-token";
 
+    /// <summary>설치 파일에 기본으로 들어가는 샘플 관리자 토큰. 공개된 예시 값이므로 배포 전 교체해야 한다.</summary>
+    public const string SampleAdminToken = "sample-admin-token-replace-before-pilot";
+
+    /// <summary>설치 파일에 기본으로 들어가는 샘플 에이전트 토큰.</summary>
+    public const string SampleAgentToken = "sample-agent-token-replace-before-pilot";
+
+    /// <summary>기본값/샘플 토큰인지 판별한다. 실제 배포 토큰으로 교체해야 하는 값이다.</summary>
+    public static bool IsPlaceholderToken(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return true;
+        return string.Equals(token.Trim(), DefaultAdminToken, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(token.Trim(), DefaultAgentToken, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(token.Trim(), SampleAdminToken, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(token.Trim(), SampleAgentToken, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>%ProgramData%\UpdateAgent</summary>
     public static string DataDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), ProductName);

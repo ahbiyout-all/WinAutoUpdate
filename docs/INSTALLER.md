@@ -144,10 +144,10 @@ C:\Program Files\UpdateAgent\LabManager\
 
 ```powershell
 # 가장 단순한 무인 설치(설정은 나중에 configure-agent.ps1로 적용)
-.\UpdateAgent.Agent-Setup-0.1.9-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+.\UpdateAgent.Agent-Setup-0.1.10-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # 설치와 동시에 LabManager URL/토큰 적용(토큰은 파일로 전달)
-.\UpdateAgent.Agent-Setup-0.1.9-x64.exe `
+.\UpdateAgent.Agent-Setup-0.1.10-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LabManagerUrl=http://192.168.0.10:5080 `
   /AgentTokenFile=C:\pilot-agent-token.txt
@@ -161,7 +161,7 @@ C:\Program Files\UpdateAgent\LabManager\
 ### 교사 PC
 
 ```powershell
-.\UpdateAgent.LabManager-Setup-0.1.9-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+.\UpdateAgent.LabManager-Setup-0.1.10-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 설치 후에는 샘플 토큰(`sample-*-token-replace-before-pilot`)으로 서버가 바로 시작되지만,
@@ -169,8 +169,17 @@ C:\Program Files\UpdateAgent\LabManager\
 `C:\Program Files\UpdateAgent\LabManager\appsettings.json`의 `AdminToken`과 `AgentToken`을 모두 변경하세요.
 `change-me-*`가 남아 있으면 서버가 시작되지 않습니다.
 `AgentToken`은 에이전트와 동일한 값으로 설정합니다. 관리자 토큰(`AdminToken`)은 서버 설정이면서
-대시보드 첫 실행 시 입력하는 값이기도 합니다. 대시보드의 **토큰** 버튼으로 변경할 수 있으며,
-입력한 값은 앱 모드 브라우저 프로필의 localStorage에 저장됩니다.
+대시보드 첫 실행 시 입력하는 값이기도 합니다. 대시보드의 **토큰** 버튼으로 열리는 창에는
+설치 시 기본값인 샘플 관리자 토큰(`sample-admin-token-replace-before-pilot`)이 화면에 표시되고,
+**이 값 사용** 버튼으로 입력란을 채울 수 있습니다. 입력한 값은 앱 모드 브라우저 프로필의
+localStorage에 저장됩니다.
+
+같은 창의 **서버 토큰 변경**에서 새 관리자 토큰을 입력하면 서버에 즉시 반영됩니다.
+변경된 값은 `%LOCALAPPDATA%\UpdateAgent\LabManager\runtime-admin-token.json`에 저장되어
+Program Files의 `appsettings.json`보다 우선하며 재시작 후에도 유지됩니다. 재시작이 필요 없고
+브라우저에 저장된 토큰도 새 값으로 갱신되지만, 이전 토큰은 변경 직후부터 거부됩니다.
+에이전트 토큰(`AgentToken`)은 이 화면에서 변경되지 않으므로
+`configure-labmanager.ps1`로 별도 교체해야 합니다.
 
 ### 설치 로그
 

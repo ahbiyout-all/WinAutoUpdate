@@ -91,6 +91,10 @@ builder.Services.AddHttpClient("github", client =>
 });
 builder.Services.AddSingleton<UpdateCheckService>();
 
+// 대시보드에서 변경한 관리자 토큰은 %LOCALAPPDATA%의 override 파일에 저장되며,
+// 미들웨어가 요청마다 최신 값을 읽으므로 재시작 없이 즉시 적용된다.
+builder.Services.AddSingleton<AdminTokenStore>();
+
 var app = builder.Build();
 
 app.UseSerilogRequestLogging(options =>
@@ -569,6 +573,41 @@ app.MapPost("/api/admin/jobs/{jobId}/maestro/restored", async (
         cancellationToken);
 
     return Results.Ok(updated);
+});
+
+// ---------------- 관리자 토큰 ----------------
+
+// 이 엔드포인트들은 /api/admin 아래에 있어 현재 관리자 토큰으로 인증된 사용자만 호출할 수 있다.
+app.MapGet("/api/admin/token", (AdminTokenStore adminTokenStore) =>
+    Results.Ok(new
+    {
+        isPlaceholder = adminTokenStore.IsUsingPlaceholder,
+        hasRuntimeOverride = adminTokenStore.HasRuntimeOverride,
+        sampleAdminToken = UpdateAgentConstants.SampleAdminToken,
+    }));
+
+app.MapPost("/api/admin/token", async (
+    UpdateAdminTokenRequest request,
+    AdminTokenStore adminTokenStore,
+    LabStore labStore,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        await adminTokenStore.SetTokenAsync(request.NewToken, cancellationToken);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+
+    await labStore.AddAuditAsync(
+        "teacher", "token-change", "admin", "관리자 토큰 변경", cancellationToken);
+    return Results.Ok(new
+    {
+        isPlaceholder = false,
+        hasRuntimeOverride = true,
+    });
 });
 
 // ---------------- 정책/감사 ----------------
