@@ -5,6 +5,44 @@
 
 ---
 
+## 2026-11-21 — 개별 수동 업데이트 강제 중단 (대시보드 + 오버레이 단축키)
+
+### 배경
+
+- 학생이 시작한 수동 업데이트를 교사가 개별적으로 즉시 중단할 수 있는 기능 요청.
+- 중단 주체는 **(1) 교사 대시보드의 개별 작업 강제 중단**과 **(2) 오버레이 긴급 중단 단축키** 두 경로로 확정.
+
+### 구현
+
+| 경로 | 변경 |
+|---|---|
+| 공통 모델 | `LocalControlActions.CancelUpdate`, `CancelJobCommandPayload { Force }` 추가 |
+| 작업 러너 | `CancelAsync(bool force, CancellationToken)` 오버로드 추가. 기존 `CancelAsync(ct)`는 force=false로 유지. `MarkCancelled`로 단계/메시지 통일(`강제 중단됨`), `_forceCancelled` 체크포인트 추가 |
+| LabManager | `POST /api/admin/jobs/{jobId}/force-stop` 추가. `CancelJob` 명령에 `Force=true` 본문 전송, 감사 액션 `force-stop` |
+| CommandExecutor | `CancelJob`이 payload의 `Force`를 읽어 러너에 전달하고, 강제 중단 시 오버레이에 안내 메시지 전송 |
+| 대시보드 | 작업 행에 **강제 중단** 버튼(빨강) 추가. 경고 확인창(재부팅 취소·남은 업데이트 미설치·설치 중 항목 완료 가능) 후 전송 |
+| 로컬 제어 | `LocalUpdateTrigger`에 취소 대리자/오버레이 숨김 콜백 추가(기존 생성자 호출 호환). `cancel-update` 요청은 항상 force로 처리 |
+| 오버레이 | 저수준 키보드 훅에 `Ctrl+Shift+U` 2회 감지기(`EmergencyStopDetector`, 2초 창, 자동 반복 입력 제외) 추가. 첫 입력 시 안내, 두 번째 입력 시 로컬 파이프로 중단 요청 |
+| 오버레이 UI | 안내 Notice 텍스트/표시 속성과 단축키 힌트 추가. 숨김 메시지에 안내가 있으면 4초간 표시 후 닫고, 입력 잠금은 즉시 해제 |
+
+### 안전 경계
+
+- 강제 중단도 **진행 중인 WUA 설치 자체**는 멈추지 않습니다. 설치가 끝나는 시점에 `취소됨`으로 마무리하고
+  남은 업데이트는 설치하지 않습니다(시스템 손상 방지). 예약 재부팅은 즉시 취소됩니다.
+- `LocalControlPipeServer`는 기존처럼 인증 사용자에게 읽기-쓰기를 허용하므로 학생 세션에서도 단축키 요청이 동작합니다.
+- `OverlayJobProgressSink`에 숨김 후 suppression 추가: 강제 중단/입력 해제 뒤 러너가 마지막 `취소됨` 진행률을
+  보내도 오버레이가 다시 나타나지 않습니다(새 작업 시작 시 자동 해제).
+- 학생 암호 저장/자동 로그온/`runas`/`schtasks /RP`는 여전히 구현하지 않습니다.
+
+### 테스트·문서
+
+- 테스트 추가: 로컬 취소 트리거(force 전달·오버레이 숨김·작업 없음), `CancelJobCommandPayload` 직렬화,
+  `IsCombo` 보조키 조합, 2회 입력 감지(창 내/창 초과/리셋).
+- `docs/DEPLOYMENT.md`에 **8-B. 개별 수동 업데이트 강제 중단** 추가, `docs/PILOT.md` 체크리스트·제한 사항 갱신.
+- 검증: 빌드 경고 0/오류 0, 테스트 **126개 통과**(기존 113개 + 신규 13개).
+
+---
+
 ## 2026-11-21 — 재부팅 후 로그온 암호 대비 안내 보강
 
 ### 배경

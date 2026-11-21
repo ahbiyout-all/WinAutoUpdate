@@ -104,10 +104,13 @@ try
     builder.Services.AddSingleton(sp =>
     {
         var runner = sp.GetRequiredService<UpdateJobRunner>();
+        var overlay = sp.GetRequiredService<OverlayJobProgressSink>();
         var trigger = new LocalUpdateTrigger(
             (policy, confirmed, by, ct) => runner.StartAsync(policy, confirmed, by, null, ct),
             sp.GetRequiredService<ServerPolicyProvider>(),
-            sp.GetRequiredService<ILogger<LocalUpdateTrigger>>());
+            sp.GetRequiredService<ILogger<LocalUpdateTrigger>>(),
+            (force, ct) => runner.CancelAsync(force, ct),
+            (notice, ct) => overlay.HideAsync(notice, ct));
         return new LocalControlPipeServer(trigger.HandleAsync);
     });
 

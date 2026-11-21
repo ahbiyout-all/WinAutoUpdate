@@ -588,6 +588,18 @@ app.MapPost("/api/admin/jobs/{jobId}/cancel", async (
     string jobId, LabStore labStore, LiveEventBus liveEvents, CancellationToken cancellationToken) =>
     await SendJobCommandAsync(jobId, CommandType.CancelJob, "{}", "cancel", labStore, liveEvents, cancellationToken));
 
+// 개별 수동 업데이트 강제 중단: 예약 재부팅·남은 업데이트·오버레이 잠금을 즉시 해제한다.
+app.MapPost("/api/admin/jobs/{jobId}/force-stop", async (
+    string jobId, LabStore labStore, LiveEventBus liveEvents, CancellationToken cancellationToken) =>
+    await SendJobCommandAsync(
+        jobId,
+        CommandType.CancelJob,
+        UpdateAgentJson.Serialize(new CancelJobCommandPayload { Force = true }),
+        "force-stop",
+        labStore,
+        liveEvents,
+        cancellationToken));
+
 // ---------------- Maestro 수동 확인 ----------------
 
 app.MapGet("/api/admin/jobs/{jobId}/maestro", async (

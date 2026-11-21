@@ -4,6 +4,9 @@ namespace UpdateAgent.Shared.Models;
 public static class LocalControlActions
 {
     public const string StartUpdate = "start-update";
+
+    /// <summary>오버레이 긴급 중단 단축키가 서비스에 보내는 요청.</summary>
+    public const string CancelUpdate = "cancel-update";
 }
 
 /// <summary>학생용 상태 앱 → 서비스 로컬 제어 요청.</summary>

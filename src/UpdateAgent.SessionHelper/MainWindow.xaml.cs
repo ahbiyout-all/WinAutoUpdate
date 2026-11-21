@@ -4,6 +4,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using UpdateAgent.Core.Comms;
 using UpdateAgent.Shared.Models;
 
 namespace UpdateAgent.SessionHelper;
@@ -23,9 +24,11 @@ public partial class MainWindow : Window
     private const uint SwpNoActivate = 0x0010;
 
     private readonly OverlayViewModel _viewModel = new();
+    private readonly LocalControlPipeClient _localControl = new();
     private readonly int _sessionId;
     private readonly DispatcherTimer _topmostTimer;
     private readonly DispatcherTimer _cursorTimer;
+    private DispatcherTimer? _noticeTimer;
     private KeyboardBlocker? _keyboardBlocker;
     private bool _allowClose;
 
@@ -61,7 +64,7 @@ public partial class MainWindow : Window
                 break;
 
             case OverlayMessageKind.Hide:
-                HideOverlay();
+                HideOverlay(message.Notice);
                 break;
 
             case OverlayMessageKind.Ping:
@@ -82,6 +85,7 @@ public partial class MainWindow : Window
 
     private void ShowOverlay()
     {
+        _noticeTimer?.Stop();
         if (!IsVisible)
         {
             PositionWindow();
@@ -92,20 +96,77 @@ public partial class MainWindow : Window
         ReassertTopmost();
         HideCursor();
 
-        _keyboardBlocker ??= new KeyboardBlocker();
+        if (_keyboardBlocker is null)
+        {
+            _keyboardBlocker = new KeyboardBlocker();
+            _keyboardBlocker.EmergencyArmed += OnEmergencyArmed;
+            _keyboardBlocker.EmergencyStopTriggered += OnEmergencyStopTriggered;
+        }
         _topmostTimer.Start();
         _cursorTimer.Start();
     }
 
-    internal void HideOverlay()
+    internal void HideOverlay(string? notice = null)
     {
         _topmostTimer.Stop();
         _cursorTimer.Stop();
-        _keyboardBlocker?.Dispose();
-        _keyboardBlocker = null;
+        if (_keyboardBlocker is not null)
+        {
+            _keyboardBlocker.EmergencyArmed -= OnEmergencyArmed;
+            _keyboardBlocker.EmergencyStopTriggered -= OnEmergencyStopTriggered;
+            _keyboardBlocker.Dispose();
+            _keyboardBlocker = null;
+        }
 
+        // 입력 잠금은 즉시 해제한다.
         Mouse.OverrideCursor = null;
+
+        // 안내가 있으면 짧게 보여준 뒤 숨긴다. 안내가 없으면(자동 숨김/재동기화) 즉시 숨긴다.
+        if (!string.IsNullOrWhiteSpace(notice) && IsVisible)
+        {
+            _viewModel.SetNotice(notice);
+            _noticeTimer ??= new DispatcherTimer(TimeSpan.FromSeconds(4), DispatcherPriority.Normal,
+                (_, _) => FinishHide(), Dispatcher);
+            _noticeTimer.Stop();
+            _noticeTimer.Start();
+            return;
+        }
+
+        FinishHide();
+    }
+
+    private void FinishHide()
+    {
+        _noticeTimer?.Stop();
+        _viewModel.ClearNotice();
         Hide();
+    }
+
+    private void OnEmergencyArmed() =>
+        Dispatcher.BeginInvoke(() =>
+            _viewModel.SetNotice("긴급 중단: Ctrl+Shift+U를 한 번 더 누르면 업데이트를 중단합니다."));
+
+    private void OnEmergencyStopTriggered() =>
+        Dispatcher.BeginInvoke(() => _ = SendEmergencyStopAsync());
+
+    private async Task SendEmergencyStopAsync()
+    {
+        try
+        {
+            _viewModel.SetNotice("긴급 중단 요청을 보냈습니다.");
+            var response = await _localControl.SendAsync(new LocalControlRequest
+            {
+                Action = LocalControlActions.CancelUpdate,
+            }).ConfigureAwait(true);
+
+            _viewModel.SetNotice(response.Success
+                ? "긴급 중단 요청이 처리되었습니다."
+                : "중단 요청을 처리하지 못했습니다: " + response.Message);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetNotice("중단 요청 전송 실패: " + ex.Message);
+        }
     }
 
     private void PositionWindow()
@@ -186,12 +247,24 @@ internal sealed class KeyboardBlocker : IDisposable
     internal const int VkMenu = 0x12;
     internal const int VkD = 0x44;
     internal const int VkM = 0x4D;
+    internal const int VkU = 0x55;
+
+    private const int KfRepeat = 0x80;
 
     private readonly NativeMethods.LowLevelKeyboardProc _proc;
+    private readonly EmergencyStopDetector _emergency = new();
     private IntPtr _hook;
+
+    /// <summary>Ctrl+Shift+U 첫 입력. 두 번째 입력 전까지 안내를 표시한다.</summary>
+    internal event Action? EmergencyArmed;
+
+    /// <summary>Ctrl+Shift+U 두 번 입력. 오버레이가 긴급 중단 요청을 보낸다.</summary>
+    internal event Action? EmergencyStopTriggered;
 
     public KeyboardBlocker()
     {
+        _emergency.Armed += () => EmergencyArmed?.Invoke();
+        _emergency.Triggered += () => EmergencyStopTriggered?.Invoke();
         _proc = HookCallback;
         _hook = NativeMethods.SetWindowsHookEx(WhKeyboardLl, _proc,
             NativeMethods.GetModuleHandle(null), 0);
@@ -202,6 +275,19 @@ internal sealed class KeyboardBlocker : IDisposable
         if (nCode >= 0 && (wParam == WmKeyDown || wParam == WmSysKeyDown))
         {
             var info = Marshal.PtrToStructure<NativeMethods.KbdLlHookStruct>(lParam);
+
+            // 키를 누른 채 반복되는 자동 반복 입력은 중단 카운트로 세지 않는다.
+            if ((info.flags & KfRepeat) == 0 &&
+                EmergencyStopDetector.IsCombo(
+                    info.vkCode,
+                    IsDown(VkControl),
+                    IsDown(VkShift),
+                    IsDown(VkMenu),
+                    IsDown(VkLWin) || IsDown(VkRWin)))
+            {
+                _emergency.RegisterPress(Environment.TickCount64);
+            }
+
             if (ShouldBlock(info.vkCode))
             {
                 // 반환값 1: 메시지를 삼킨다(저수준 훅만 사용하며 BlockInput은 하지 않는다).
@@ -247,6 +333,42 @@ internal sealed class KeyboardBlocker : IDisposable
         NativeMethods.UnhookWindowsHookEx(_hook);
         _hook = IntPtr.Zero;
     }
+}
+
+/// <summary>
+/// 지정한 시간 창 안에 Ctrl+Shift+U를 두 번 눌러야만 발동하는 긴급 중단 감지기.
+/// 시간 값을 인자로 받아 단위 테스트에서 결정적으로 검증할 수 있다.
+/// </summary>
+internal sealed class EmergencyStopDetector
+{
+    private const long NoPress = long.MinValue;
+    private readonly long _windowMs;
+    private long _firstPressAt = NoPress;
+
+    public EmergencyStopDetector(long windowMs = 3000) => _windowMs = windowMs;
+
+    internal event Action? Armed;
+    internal event Action? Triggered;
+
+    internal static bool IsCombo(int vk, bool ctrl, bool shift, bool alt, bool win) =>
+        vk == KeyboardBlocker.VkU && ctrl && shift && !alt && !win;
+
+    /// <summary>조합키 입력을 등록한다. true를 반환하면 두 번째 입력으로 발동된 것이다.</summary>
+    internal bool RegisterPress(long nowTicks)
+    {
+        if (_firstPressAt == NoPress || nowTicks - _firstPressAt > _windowMs)
+        {
+            _firstPressAt = nowTicks;
+            Armed?.Invoke();
+            return false;
+        }
+
+        _firstPressAt = NoPress;
+        Triggered?.Invoke();
+        return true;
+    }
+
+    internal void Reset() => _firstPressAt = NoPress;
 }
 
 internal static partial class NativeMethods

@@ -177,9 +177,17 @@ public sealed class CommandExecutor
 
             case CommandType.CancelJob:
             {
-                var summary = await _runner.CancelAsync(cancellationToken);
-                await _overlay.HideAsync("작업이 취소되었습니다.", cancellationToken);
-                return Ok(command, summary is null ? "취소할 작업이 없습니다." : "작업을 취소했습니다.");
+                var payload = Deserialize<CancelJobCommandPayload>(command.PayloadJson)
+                              ?? new CancelJobCommandPayload();
+                var summary = await _runner.CancelAsync(payload.Force, cancellationToken);
+                var notice = payload.Force
+                    ? "긴급 중단으로 업데이트가 중지되었습니다."
+                    : "작업이 취소되었습니다.";
+                await _overlay.HideAsync(notice, cancellationToken);
+                return Ok(command,
+                    summary is null
+                        ? "중단할 작업이 없습니다."
+                        : payload.Force ? "작업을 강제 중단했습니다." : "작업을 취소했습니다.");
             }
 
             case CommandType.ScanNow:

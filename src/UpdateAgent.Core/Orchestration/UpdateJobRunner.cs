@@ -53,6 +53,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
     private volatile bool _isRunning;
     private volatile bool _manualPause;
     private volatile bool _cancelRequested;
+    private volatile bool _forceCancelled;
     private volatile PauseReason _pauseReason;    private DateTimeOffset? _pausedSince;
 
     public UpdateJobRunner(
@@ -351,8 +352,17 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         return await ResumeIfNeededAsync(cancellationToken);
     }
 
-    public async Task<JobSummary?> CancelAsync(CancellationToken cancellationToken = default)
+    /// <summary>기존 협력적 취소. 일반 "취소" 명령은 이 경로를 그대로 사용한다.</summary>
+    public Task<JobSummary?> CancelAsync(CancellationToken cancellationToken = default) =>
+        CancelAsync(false, cancellationToken);
+
+    /// <summary>
+    /// 작업 중단. force=true면 예약 재부팅·남은 업데이트를 취소하고 오버레이 잠금도 즉시 해제 대상으로 표시한다.
+    /// 진행 중인 Windows Update 설치 자체는 안전한 체크포인트까지 기다린 뒤 멈춘다(설치 도중 강제 종료 불가).
+    /// </summary>
+    public async Task<JobSummary?> CancelAsync(bool force, CancellationToken cancellationToken = default)
     {
+        if (force) _forceCancelled = true;
         _cancelRequested = true;
         _manualPause = false;
         _pauseReason = PauseReason.None;
@@ -382,12 +392,10 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             {
                 if (!_isRunning)
                 {
-                    _activeContext.State = UpdateJobState.Cancelled;
-                    _activeContext.Phase = "취소됨";
-                    _activeContext.Message = "교사가 작업을 취소했습니다.";
-                    _activeContext.CompletedAt = DateTimeOffset.Now;
+                    MarkCancelled(_activeContext);
                     await PersistAsync(_activeContext, cancellationToken);
                 }
+                // 실행 중이면 런루프가 다음 체크포인트에서 MarkCancelled + 저장을 수행한다.
             }
             else
             {
@@ -395,10 +403,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
                 if (detail is not null)
                 {
                     var context = JobContext.FromDetail(detail);
-                    context.State = UpdateJobState.Cancelled;
-                    context.Phase = "취소됨";
-                    context.Message = "교사가 작업을 취소했습니다.";
-                    context.CompletedAt = DateTimeOffset.Now;
+                    MarkCancelled(context);
                     await PersistAsync(context, cancellationToken);
                     _current = context.ToDetail();
                 }
@@ -412,12 +417,23 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         }
     }
 
+    private void MarkCancelled(JobContext context)
+    {
+        context.State = UpdateJobState.Cancelled;
+        context.Phase = _forceCancelled ? "강제 중단됨" : "취소됨";
+        context.Message = _forceCancelled
+            ? "강제 중단 요청으로 업데이트를 중지했습니다. 설치 중이던 항목은 완료될 수 있습니다."
+            : "교사가 작업을 취소했습니다.";
+        context.CompletedAt = DateTimeOffset.Now;
+    }
+
     private void StartRunLoop(JobContext context)
     {
         _activeContext = context;
         _current = context.ToDetail();
         _isRunning = true;
         _cancelRequested = false;
+        _forceCancelled = false;
         _pauseReason = PauseReason.None;
         _pausedSince = null;
         _manualPause = false;
@@ -433,6 +449,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (_forceCancelled) throw new OperationCanceledException(cancellationToken);
                 await WaitForResumeAsync(context, cancellationToken);
                 CheckRuntimeLimit(context);
 
@@ -616,12 +633,9 @@ public sealed class UpdateJobRunner : IAsyncDisposable
                 // 재부팅 없이 추가 업데이트가 있을 수 있으므로 다시 검색한다.
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _forceCancelled)
         {
-            context.State = UpdateJobState.Cancelled;
-            context.Phase = "취소됨";
-            context.Message = "교사가 작업을 취소했습니다.";
-            context.CompletedAt = DateTimeOffset.Now;
+            MarkCancelled(context);
             await PersistSafeAsync(context);
         }
         catch (JobFailureException ex)

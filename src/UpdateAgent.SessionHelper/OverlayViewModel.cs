@@ -22,6 +22,8 @@ public sealed class OverlayViewModel : INotifyPropertyChanged
     private string _detailText = "";
     private string _rebootText = "";
     private Visibility _rebootVisibility = Visibility.Collapsed;
+    private string _noticeText = "";
+    private Visibility _noticeVisibility = Visibility.Collapsed;
     private Brush _accent = RunningAccent;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -78,6 +80,36 @@ public sealed class OverlayViewModel : INotifyPropertyChanged
     {
         get => _accent;
         private set => Set(ref _accent, value);
+    }
+
+    public string NoticeText
+    {
+        get => _noticeText;
+        private set => Set(ref _noticeText, value);
+    }
+
+    public Visibility NoticeVisibility
+    {
+        get => _noticeVisibility;
+        private set => Set(ref _noticeVisibility, value);
+    }
+
+    public void SetNotice(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            ClearNotice();
+            return;
+        }
+
+        NoticeText = text;
+        NoticeVisibility = Visibility.Visible;
+    }
+
+    public void ClearNotice()
+    {
+        NoticeText = "";
+        NoticeVisibility = Visibility.Collapsed;
     }
 
     public void Apply(JobSummary summary)

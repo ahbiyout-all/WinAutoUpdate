@@ -27,6 +27,16 @@ public sealed class LocalControlTests
     }
 
     [Fact]
+    public void CancelJobCommandPayload_Force_RoundTripsThroughSharedJson()
+    {
+        var json = UpdateAgentJson.Serialize(new CancelJobCommandPayload { Force = true });
+        var parsed = UpdateAgentJson.Deserialize<CancelJobCommandPayload>(json);
+
+        Assert.NotNull(parsed);
+        Assert.True(parsed!.Force);
+    }
+
+    [Fact]
     public async Task ServerPolicyProvider_UsesCachedPolicy()
     {
         var json = UpdateAgentJson.Serialize(new UpdatePolicy { IncludeOptional = true, MaxRebootCount = 2 });
@@ -159,6 +169,72 @@ public sealed class LocalControlTests
     }
 
     [Fact]
+    public async Task LocalUpdateTrigger_CancelUpdate_ForcesStopAndHidesOverlay()
+    {
+        bool? usedForce = null;
+        string? notice = null;
+        var trigger = CreateTrigger(
+            (_, _, _, _) => Task.FromResult(Started()),
+            cancel: (force, _) =>
+            {
+                usedForce = force;
+                return Task.FromResult<JobSummary?>(new JobSummary { JobId = "job-cancel-1" });
+            },
+            hide: (text, _) =>
+            {
+                notice = text;
+                return Task.CompletedTask;
+            });
+
+        var response = await trigger.HandleAsync(new LocalControlRequest
+        {
+            Action = LocalControlActions.CancelUpdate,
+        });
+
+        Assert.True(response.Success);
+        Assert.Equal("job-cancel-1", response.JobId);
+        Assert.True(usedForce);
+        Assert.False(string.IsNullOrWhiteSpace(notice));
+    }
+
+    [Fact]
+    public async Task LocalUpdateTrigger_CancelUpdate_WithoutDelegate_Fails()
+    {
+        var trigger = CreateTrigger((_, _, _, _) => Task.FromResult(Started()));
+
+        var response = await trigger.HandleAsync(new LocalControlRequest
+        {
+            Action = LocalControlActions.CancelUpdate,
+        });
+
+        Assert.False(response.Success);
+        Assert.Contains("로컬 중단", response.Message);
+    }
+
+    [Fact]
+    public async Task LocalUpdateTrigger_CancelUpdate_NoActiveJob_ReportsNoJob()
+    {
+        var hideCalled = false;
+        var trigger = CreateTrigger(
+            (_, _, _, _) => Task.FromResult(Started()),
+            cancel: (_, _) => Task.FromResult<JobSummary?>(null),
+            hide: (_, _) =>
+            {
+                hideCalled = true;
+                return Task.CompletedTask;
+            });
+
+        var response = await trigger.HandleAsync(new LocalControlRequest
+        {
+            Action = LocalControlActions.CancelUpdate,
+        });
+
+        Assert.False(response.Success);
+        Assert.Contains("중단할 작업이 없습니다", response.Message);
+        Assert.True(hideCalled);
+    }
+
+    [Fact]
     public async Task LocalControlPipe_RoundTripsRequestAndResponse()
     {
         var pipeName = "UpdateAgent.Test." + Guid.NewGuid().ToString("N");
@@ -193,11 +269,18 @@ public sealed class LocalControlTests
 
     private static LocalUpdateTrigger CreateTrigger(
         StartJobDelegate start,
-        UpdatePolicy? policy = null)
+        UpdatePolicy? policy = null,
+        CancelJobDelegate? cancel = null,
+        Func<string, CancellationToken, Task>? hide = null)
     {
         var policies = new ServerPolicyProvider((_, _) => Task.FromResult<string?>(
             policy is null ? null : UpdateAgentJson.Serialize(policy)));
-        return new LocalUpdateTrigger(start, policies, NullLogger<LocalUpdateTrigger>.Instance);
+        return new LocalUpdateTrigger(
+            start,
+            policies,
+            NullLogger<LocalUpdateTrigger>.Instance,
+            cancel,
+            hide);
     }
 
     private static StartJobResult Started(string jobId = "job-test") => new()

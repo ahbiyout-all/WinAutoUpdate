@@ -19,6 +19,7 @@ public sealed class OverlayJobProgressSink : IJobProgressSink, IDisposable
 
     private CancellationTokenSource? _hideCts;
     private JobSummary? _lastSummary;
+    private string? _suppressedJobId;
 
     public OverlayJobProgressSink(
         OverlayPipeServer pipe,
@@ -32,6 +33,14 @@ public sealed class OverlayJobProgressSink : IJobProgressSink, IDisposable
 
     public async Task OnProgressAsync(JobDetail detail, CancellationToken cancellationToken = default)
     {
+        // 명시적으로 숨긴 작업의 잔여 진행률(취소 완료 포함)은 오버레이를 다시 띄우지 않는다.
+        // 새 작업이 시작되면 suppression이 해제된다.
+        if (_suppressedJobId is not null)
+        {
+            if (_suppressedJobId == detail.Summary.JobId) return;
+            _suppressedJobId = null;
+        }
+
         var options = _options.CurrentValue;
         if (!options.OverlayEnabled ||
             !detail.Policy.OverlayEnabled ||
@@ -56,9 +65,10 @@ public sealed class OverlayJobProgressSink : IJobProgressSink, IDisposable
         }
     }
 
-    /// <summary>교사가 원격으로 입력 잠금을 해제할 때 사용한다.</summary>
+    /// <summary>교사가 원격으로 입력 잠금을 해제하거나 작업을 중단할 때 사용한다.</summary>
     public async Task HideAsync(string? notice = null, CancellationToken cancellationToken = default)
     {
+        _suppressedJobId = _lastSummary?.JobId;
         CancelHide();
         try
         {

@@ -12,8 +12,13 @@ public delegate Task<StartJobResult> StartJobDelegate(
     string confirmedBy,
     CancellationToken cancellationToken);
 
+/// <summary>작업 중단 대리자. force=true는 긴급 중단을 뜻한다.</summary>
+public delegate Task<JobSummary?> CancelJobDelegate(
+    bool force,
+    CancellationToken cancellationToken);
+
 /// <summary>
-/// 학생용 상태 앱의 로컬 시작 요청을 검증한 뒤 서비스의 작업 러너를 실행한다.
+/// 학생용 상태 앱/오버레이의 로컬 시작·중단 요청을 검증한 뒤 서비스의 작업 러너를 실행한다.
 /// 확인 주체는 서버에서 "student"로 고정해 교사 확인으로 위조되지 않게 한다.
 /// </summary>
 public sealed class LocalUpdateTrigger
@@ -21,23 +26,34 @@ public sealed class LocalUpdateTrigger
     public const string ConfirmedBy = "student";
 
     private readonly StartJobDelegate _startJob;
+    private readonly CancelJobDelegate? _cancelJob;
+    private readonly Func<string, CancellationToken, Task>? _hideOverlay;
     private readonly ServerPolicyProvider _policies;
     private readonly ILogger<LocalUpdateTrigger> _logger;
 
     public LocalUpdateTrigger(
         StartJobDelegate startJob,
         ServerPolicyProvider policies,
-        ILogger<LocalUpdateTrigger> logger)
+        ILogger<LocalUpdateTrigger> logger,
+        CancelJobDelegate? cancelJob = null,
+        Func<string, CancellationToken, Task>? hideOverlay = null)
     {
         _startJob = startJob;
         _policies = policies;
         _logger = logger;
+        _cancelJob = cancelJob;
+        _hideOverlay = hideOverlay;
     }
 
     public async Task<LocalControlResponse> HandleAsync(
         LocalControlRequest request,
         CancellationToken cancellationToken = default)
     {
+        if (string.Equals(request.Action, LocalControlActions.CancelUpdate, StringComparison.OrdinalIgnoreCase))
+        {
+            return await HandleCancelAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         if (!string.Equals(request.Action, LocalControlActions.StartUpdate, StringComparison.OrdinalIgnoreCase))
         {
             return Fail("지원하지 않는 로컬 제어 요청입니다.");
@@ -70,6 +86,49 @@ public sealed class LocalUpdateTrigger
         {
             _logger.LogError(ex, "학생 요청 작업 시작 실패");
             return Fail("작업을 시작하지 못했습니다: " + ex.Message);
+        }
+    }
+
+    /// <summary>오버레이 긴급 중단 단축키 요청을 처리한다. 항상 force 중단이며 확인 주체는 student다.</summary>
+    private async Task<LocalControlResponse> HandleCancelAsync(CancellationToken cancellationToken)
+    {
+        if (_cancelJob is null)
+        {
+            return Fail("이 에이전트에서는 로컬 중단을 사용할 수 없습니다.");
+        }
+
+        _logger.LogInformation("오버레이 긴급 중단 요청 수신: by={ConfirmedBy}", ConfirmedBy);
+        try
+        {
+            var summary = await _cancelJob(true, cancellationToken).ConfigureAwait(false);
+
+            if (_hideOverlay is not null)
+            {
+                try
+                {
+                    await _hideOverlay(
+                        "긴급 중단 요청으로 업데이트를 중지했습니다.",
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "긴급 중단 후 오버레이 숨김 전송 실패");
+                }
+            }
+
+            return new LocalControlResponse
+            {
+                Success = summary is not null,
+                Message = summary is null
+                    ? "중단할 작업이 없습니다."
+                    : "업데이트를 긴급 중단했습니다.",
+                JobId = summary?.JobId,
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "오버레이 긴급 중단 처리 실패");
+            return Fail("작업을 중단하지 못했습니다: " + ex.Message);
         }
     }
 

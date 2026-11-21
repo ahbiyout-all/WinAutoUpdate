@@ -242,8 +242,8 @@ function renderAgents() {
   $('#selected-count').textContent = selected.size > 0 ? `${selected.size}대 선택됨` : '';
 }
 
-function actionButton(label, handler, disabled = false) {
-  const button = el('button', 'btn btn-mini', label);
+function actionButton(label, handler, disabled = false, style = '') {
+  const button = el('button', `btn btn-mini${style ? ` btn-${style}` : ''}`, label);
   button.disabled = disabled;
   button.addEventListener('click', async () => {
     try {
@@ -304,6 +304,7 @@ function renderJobs() {
         actionCell.appendChild(actionButton('일시중지', () => jobCommand(job, 'pause')));
       }
       actionCell.appendChild(actionButton('취소', () => jobCommand(job, 'cancel')));
+      actionCell.appendChild(actionButton('강제 중단', () => jobCommand(job, 'force-stop'), false, 'danger'));
     }
     if (job.requiresMaestroAttention) {
       actionCell.appendChild(actionButton('Maestro 확인', () => openJobDetail(job.jobId)));
@@ -414,11 +415,27 @@ async function shutdownAgent(agent) {
 }
 
 async function jobCommand(job, action) {
-  const label = action === 'pause' ? '일시중지' : action === 'resume' ? '재개' : '취소';
-  if (!confirm(`${job.agentName || job.jobId} 작업을 ${label}할까요?`)) return;
+  const target = job.agentName || job.jobId;
+  if (action === 'force-stop') {
+    const ok = confirm(
+      `[강제 중단] ${target} 작업을 지금 중단할까요?\n\n` +
+      '· 예약된 재부팅이 취소되고 남은 업데이트는 설치되지 않습니다.\n' +
+      '· 학생 PC의 입력 잠금 오버레이가 즉시 해제됩니다.\n' +
+      '· 이미 설치를 시작한 항목은 안전한 지점까지 완료될 수 있습니다.\n' +
+      '  작업 상태는 체크인에서 취소됨으로 표시됩니다.'
+    );
+    if (!ok) return;
+  } else {
+    const label = action === 'pause' ? '일시중지' : action === 'resume' ? '재개' : '취소';
+    if (!confirm(`${target} 작업을 ${label}할까요?`)) return;
+  }
   await api(`/api/admin/jobs/${encodeURIComponent(job.jobId)}/${action}`, { method: 'POST' });
-  toast(`${label} 명령을 보냈습니다.`, 'success');
+  toast(action === 'force-stop' ? '강제 중단 명령을 보냈습니다.' : `${jobActionLabel(action)} 명령을 보냈습니다.`, 'success');
   await refresh();
+}
+
+function jobActionLabel(action) {
+  return action === 'pause' ? '일시중지' : action === 'resume' ? '재개' : '취소';
 }
 
 async function submitStart() {

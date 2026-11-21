@@ -182,6 +182,12 @@ public sealed record StartJobCommandPayload
     public string ConfirmedBy { get; init; } = "teacher";
 }
 
+/// <summary>작업 중단 명령 본문. Force=true면 예약 재부팅·남은 업데이트·오버레이 잠금을 즉시 해제한다.</summary>
+public sealed record CancelJobCommandPayload
+{
+    public bool Force { get; init; }
+}
+
 public sealed record RebootCommandPayload
 {
     public int DelaySeconds { get; init; } = 60;
