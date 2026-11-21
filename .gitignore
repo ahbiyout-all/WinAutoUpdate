@@ -63,6 +63,7 @@ TestResults/
 !scripts/
 !scripts/*.ps1
 !scripts/*.bat
+!scripts/*.csv
 scripts/github-push.ps1
 scripts/github-push.bat
 

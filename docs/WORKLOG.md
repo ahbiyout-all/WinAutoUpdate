@@ -5,6 +5,46 @@
 
 ---
 
+## 2026-11-21 — 50대 랩 연결 배포 스크립트·런북
+
+### 배경
+
+- 교사 PC 1대를 허브로 두고 학생 PC 약 50대가 교사 PC만 바라보는 폴링 토폴로지는 설계되어 있었으나,
+  실제 배포에 쓸 교사 PC 구성 스크립트와 학생 PC 일괄 배포 산출물, 운영 런북이 없었다.
+- WORKGROUP 환경에서는 원격 실행 수단이 환경마다 다르므로, 특정 방식에 묶이지 않는 패키지 생성 방식을 택했다.
+
+### 변경
+
+| 항목 | 내용 |
+|---|---|
+| `scripts/setup-labmanager-lab.ps1` (신규) | 교사 PC에서 토큰/수신 URL 설정, TCP 5080 방화벽, 로그온 시 헤드리스 서버 자동 시작 예약 작업, `/api/health` 검증. `-DryRun` 및 단계별 `-Skip*` 지원 |
+| `scripts/deploy-agents.ps1` (신규) | 인벤토리 CSV → PC별 자체 완결 패키지(인스톨러 + 토큰 파일 + `install-agent.cmd`) 생성. 토큰은 `/AgentTokenFile`로만 전달되고 성공 시 삭제. `-ExecuteLocal`로 1대 로컬 설치 가능 |
+| `scripts/install-agent.cmd` (생성물) | 관리자 확인 → ACL 적용 → `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART` 설치 → 토큰 파일 정리. CRLF/ASCII 유지 |
+| `scripts/agents.sample.csv` (신규) | `ComputerName,MAC,IP` 인벤토리 양식 |
+| `.gitignore` | `!scripts/*.csv` 추가. 생성되는 `deploy/`는 기본적으로 제외되어 토큰 파일이 커밋되지 않음 |
+| `docs/DEPLOYMENT.md` (신규) | 50대 연결 토폴로지, IP/DNS, 토큰, 패키지 생성/실행(PsExec·WinRM·USB), 검증, 운영, 문제 해결, 보안 런북 |
+| `README.md` | 새 문서/스크립트 링크와 표 행 추가 |
+
+- 제품 코드와 인스톨러 소스는 변경하지 않았다. 문서·배포 도구 추가이므로
+  `Directory.Build.props`의 버전은 `0.1.13`으로 유지하고 새 릴리스/태그를 만들지 않았다.
+- 학생 계정 암호는 수집·저장하지 않는다. 헤드리스 서버는 교사 로그온 시 예약 작업으로 시작되며,
+  앱 모드 창을 닫아도 서버는 유지된다.
+
+### 검증
+
+- 두 신규 `.ps1` 파일의 PowerShell 파서 구문 검사 통과.
+- `deploy-agents.ps1`을 임시 인스톨러/토큰/샘플 CSV로 실제 실행해 3개 패키지 생성 확인.
+  생성된 `install-agent.cmd`의 URL·PC명·인스톨러명 치환, CRLF 35개/LF 0개, `manifest.csv` 내용 확인.
+- `setup-labmanager-lab.ps1`은 관리자 권한이 필요한 환경이라 실제 실행은 하지 못했다.
+  관리자 검사만 우회한 임시 복사본으로 `-DryRun` 경로(설정/방화벽/예약 작업 계획 출력)와
+  샘플 토큰 거부 동작을 확인했다.
+- `scripts\github-push.ps1 -Bump none -AllowSameVersion -DryRun` 실행 결과:
+  빌드 경고 0/오류 0, 테스트 113개 통과, 비밀값·개인정보 검사(158개 텍스트 파일) 이상 없음.
+- 실제 50대 설치, 교사 PC 방화벽/예약 작업 변경, PsExec/WinRM 원격 실행은
+  대상 PC와 자격 증명이 없어 로컬에서 검증하지 못했다.
+
+---
+
 ## 2026-11-21 — 인스톨러 단계 안내 및 자동 진행 (v0.1.13)
 
 ### 배경

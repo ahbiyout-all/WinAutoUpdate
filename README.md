@@ -49,6 +49,7 @@ Edge를 우선, 없으면 Chrome을 찾아 `--app=http://127.0.0.1:5080/` 창을
 | `docs/RELEASE.md` | 버전 관리·GitHub 릴리스·자동 업데이트 운영 |
 | `docs/WORKLOG.md` | 날짜별 작업 로그와 검증 결과 |
 | `docs/PILOT.md` | Phase 0 실 PC 파일럿 런북 |
+| `docs/DEPLOYMENT.md` | 50대 랩 연결·일괄 배포·운영 런북 |
 | `docs/MSI.md` | MSI 패키징 설계·구현 상태·검증 매트릭스 |
 | `docs/AI-WORK-INSTRUCTIONS.md` | AI 에이전트용 범용 작업 지시서·자아성찰 검증 게이트 |
 
@@ -110,6 +111,7 @@ build\agent\<버전>\
 
 실 PC 파일럿에 필요한 스크립트와 런북이 포함되어 있습니다. 상세 절차는 [`docs/PILOT.md`](docs/PILOT.md)를 참고하세요.
 설치 프로그램 설계와 무인 설치 옵션은 [`docs/INSTALLER.md`](docs/INSTALLER.md),
+여러 대의 학생 PC를 교사 PC에 연결하는 절차는 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md),
 버전/릴리스/자동 업데이트 운영은 [`docs/RELEASE.md`](docs/RELEASE.md),
 작업 이력은 [`docs/WORKLOG.md`](docs/WORKLOG.md)에 있습니다.
 MSI 패키징 설계와 제약은 [`docs/MSI.md`](docs/MSI.md)에 있습니다.
@@ -122,6 +124,9 @@ MSI 패키징 설계와 제약은 [`docs/MSI.md`](docs/MSI.md)에 있습니다.
 | `scripts/build-msi.ps1` | 개발 PC | 게시물 스테이징 → WiX MSI 빌드/ICE 검증/해시 (대안) |
 | `scripts/configure-labmanager.ps1` | 교사 PC | 관리자/에이전트 토큰, 수신 URL 설정 |
 | `scripts/allow-labmanager.ps1` | 교사 PC | TCP 5080 인바운드 방화벽 규칙 (Private/Domain) |
+| `scripts/setup-labmanager-lab.ps1` | 교사 PC | 50대 랩용 토큰·방화벽·헤드리스 자동 시작 구성/검증 |
+| `scripts/deploy-agents.ps1` | 개발 PC | 인벤토리 CSV로 학생 PC별 무인 설치 패키지 생성 |
+| `scripts/agents.sample.csv` | 개발 PC | 학생 PC 인벤토리 CSV 양식 |
 | `scripts/install-agent-msi.ps1` | 학생 PC | MSI 설치 + `agent.json` 설정 + 서비스 시작 (대안) |
 | `scripts/uninstall-agent-msi.ps1` | 학생 PC | MSI 제거, 필요 시 데이터 삭제 |
 | `scripts/install-service.ps1` | 학생 PC | 레거시 스크립트 설치 (서비스+오버레이) |
