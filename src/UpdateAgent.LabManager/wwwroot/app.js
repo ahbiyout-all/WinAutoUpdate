@@ -227,20 +227,24 @@ function renderOsFilter() {
 
 function capabilitiesFor(records) {
   const groups = new Map();
-  let supportsOverlay = true;
+  let supportsOverlayAny = false;
+  let supportsOverlayAll = true;
   let supportsFeature = true;
   for (const record of records) {
     const os = record.agent.os || {};
     const group = osGroup(os);
     groups.set(group.id, (groups.get(group.id) || 0) + 1);
-    if (!(os.supportsOverlay ?? !os.isServerCore)) supportsOverlay = false;
+    const overlay = os.supportsOverlay ?? !os.isServerCore;
+    if (overlay) supportsOverlayAny = true;
+    else supportsOverlayAll = false;
     if (!(os.supportsFeatureUpdates ?? (!os.isServer && !os.isLtsc && !os.isWindows10))) supportsFeature = false;
   }
   if (records.length === 0) {
-    supportsOverlay = false;
+    supportsOverlayAny = false;
     supportsFeature = false;
   }
-  return { count: records.length, groups, supportsOverlay, supportsFeature };
+  // supportsOverlay: 적어도 한 대라면 UI에서 선택 가능(서버가 OS별로 자동 조정).
+  return { count: records.length, groups, supportsOverlay: supportsOverlayAny, supportsOverlayAll, supportsFeature };
 }
 
 function renderOsMix(selector, capability) {
@@ -250,8 +254,8 @@ function renderOsMix(selector, capability) {
     const group = OS_GROUPS.find((item) => item.id === id) || OS_GROUPS[OS_GROUPS.length - 1];
     return chip(`${group.label} ${count}대`, group.tone);
   });
-  if (!capability.supportsOverlay) {
-    parts.push('<div class="muted small">Server Core: 전체화면 오버레이가 자동으로 비활성화됩니다.</div>');
+  if (!capability.supportsOverlayAll) {
+    parts.push('<div class="muted small">Server Core: 전체화면 오버레이가 OS별로 자동 비활성화됩니다.</div>');
   }
   if (!capability.supportsFeature) {
     parts.push('<div class="muted small">선택된 OS는 기능 업데이트를 지원하지 않습니다.</div>');
@@ -305,7 +309,7 @@ function writePolicyForm(prefix, policy) {
 }
 
 function applyPolicyCapabilities(prefix, capability) {
-  capability = capability || { supportsOverlay: true, supportsFeature: true };
+  capability = capability || { supportsOverlay: true, supportsOverlayAll: true, supportsFeature: true };
   const overlay = $(fieldSel(prefix, 'overlay'));
   if (overlay) {
     overlay.disabled = !capability.supportsOverlay;
@@ -326,8 +330,8 @@ function updatePresetHint(prefix, id, capability) {
   if (!hint) return;
   const preset = POLICY_PRESETS[id] || POLICY_PRESETS.custom;
   let text = preset.hint;
-  if (capability && (!capability.supportsOverlay || !capability.supportsFeature)) {
-    text = `${preset.hint} · 선택된 OS에서 지원되지 않는 옵션은 자동으로 비활성화됩니다.`;
+  if (capability && (!capability.supportsOverlayAll || !capability.supportsFeature)) {
+    text = `${preset.hint} · 선택된 OS에서 지원되지 않는 옵션은 OS별로 자동 조정됩니다.`;
   }
   hint.textContent = text;
 }

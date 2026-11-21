@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-11-21 — 혼합 OS 선택 시 오버레이 옵션 유지 (v0.1.16)
+
+### 배경
+
+- v0.1.15 릴리스 검토 중, Windows 11과 Server Core를 함께 선택하면
+  Server Core 때문에 오버레이 체크박스가 **전체 비활성화**되어 Windows 11 PC의 오버레이까지 꺼지는 문제를 발견.
+- 서버·에이전트는 이미 PC별 OS로 정책을 정리하므로 UI도 같은 기준을 따라야 합니다.
+
+### 변경
+
+| 파일 | 변경 |
+|---|---|
+| `app.js` | `capabilitiesFor`가 `supportsOverlayAny`(한 대라도 지원)와 `supportsOverlayAll`(모두 지원)를 분리 반환 |
+| `app.js` | 오버레이 체크박스는 `supportsOverlayAny`에서 선택 가능. OS mix/프리셋 안내는 `supportsOverlayAll` 기준으로 "OS별로 자동 조정" 표시 |
+| `app.js` | 대상 선택이 없을 때 Server Core 안내가 잘못 표시되지 않도록 처리 |
+
+### 검증
+
+- `node --check` 통과, Release 빌드 경고 0/오류 0, 테스트 **143개 통과**, 비밀정보 스캔 162개 파일 정상.
+
+---
+
 ## 2026-11-21 — Windows 종류 구분과 업데이트 옵션 선택 (v0.1.15)
 
 ### 배경
@@ -37,6 +59,15 @@
 - 빌드 경고 0/오류 0, 테스트 **143개 통과**(기존 126개 + 신규 17개).
 - 신규 테스트: OS 그룹 분류/릴리스 표기, 정책 정리, 프리셋, PC별 정책 저장·삭제·요약.
 - `docs/DEPLOYMENT.md`에 **8-C. Windows 종류 구분과 업데이트 옵션 선택** 추가.
+
+### 릴리스 검증
+
+- 워크플로: https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/44898414773 (성공)
+- 릴리스: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.15
+- 자산 3개(설치 파일 2개 + MSI 1개) 확인, 릴리스 노트 해시와 API `digest` 일치:
+  - `UpdateAgent.Agent-Setup-0.1.15-x64.exe`: `dc5b8fb615975232a973dc92f753db05127e7687f348b355c529ad948f9e48ac`
+  - `UpdateAgent.LabManager-Setup-0.1.15-x64.exe`: `68937a2d7bb35a1a4fc7fe2314bdb212c6c871bb836d00fdeae8947b4362510d`
+  - `UpdateAgent.Agent-0.1.15-x64.msi`: `16ec1211defdd6dab1114e24042a4f525ff21304e1dd1061e48f3332537d2fe3`
 
 ---
 
