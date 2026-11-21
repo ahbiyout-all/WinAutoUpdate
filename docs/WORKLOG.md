@@ -5,6 +5,43 @@
 
 ---
 
+## 2026-11-21 — 대시보드에서 관리자 기본 토큰 표시 및 서버 토큰 변경 (v0.1.10)
+
+### 배경
+
+- LabManager 대시보드는 설치 시 기본값인 샘플 관리자 토큰(`sample-*-token-replace-before-pilot`)을 화면에 표시하지 않아 첫 실행 시 어떤 값을 입력해야 하는지 알기 어려웠다.
+- 기존 **토큰** 창은 브라우저 localStorage 값만 바꿀 수 있어, 서버의 `AdminToken`을 변경하려면 쓰기 권한이 필요한 Program Files의 `appsettings.json`을 직접 수정해야 했다.
+
+### 변경
+
+| 항목 | 내용 |
+|---|---|
+| `wwwroot/index.html`, `app.js`, `styles.css` | 토큰 창에 샘플 관리자 토큰 표시 + **이 값 사용** 버튼, 서버 토큰 변경 입력/확인/버튼, 상태 배지 추가 |
+| `Auth/AdminTokenStore.cs` (신규) | 변경된 토큰을 `%LOCALAPPDATA%\UpdateAgent\LabManager\runtime-admin-token.json`에 원자적으로 저장. 8자 이상, 기본/샘플 토큰 거부 |
+| `Auth/TokenAuthMiddleware.cs` | `/api/admin` 인증을 `AdminTokenStore.CurrentToken`으로 수행 → 변경 즉시 반영 |
+| `Program.cs` | `GET/POST /api/admin/token` 추가(인증 필수). GET은 상태만, POST는 변경 및 감사 로그 `token-change` 기록 |
+| `UpdateAgent.Shared/UpdateAgentConstants.cs` | `SampleAdminToken`, `SampleAgentToken`, `IsPlaceholderToken` 추가 |
+| 테스트 | 즉시 반영, override 저장/재시작/검증 등 9개 추가(전체 98개 통과) |
+
+- 서버 토큰을 바꾸면 브라우저 localStorage도 새 값으로 갱신되어 다음 요청부터 새 토큰이 사용된다.
+- `appsettings.json`의 `AdminToken`은 그대로 두고 런타임 override가 우선하므로 Program Files 쓰기 권한이 필요 없다.
+- 에이전트 토큰(`AgentToken`)은 이번 범위 밖이며 기존 `configure-labmanager.ps1`로 별도 교체한다.
+- 공개된 샘플 값은 화면에만 표시하고, 실제 현재 토큰 값은 API 응답에 포함하지 않는다.
+
+### 검증
+
+- 빌드 경고 0/오류 0, 테스트 98개 통과, 정적 검사 통과.
+- 실제 LabManager 프로세스에서 `/api/admin/token` 흐름 확인: 미인증 401 → 샘플 토큰 200 → 변경 200 → 기존 토큰 401 → 새 토큰 200, override 파일 생성 확인.
+- 로컬 Inno Setup 및 MSI 빌드 성공.
+- 공개된 `v0.1.10` 릴리스의 설치 파일 3개 해시가 릴리스 노트와 일치함을 확인:
+  - `UpdateAgent.Agent-Setup-0.1.10-x64.exe` `740852cc228c23a509025acd5ed48a1bce3f03b165bd956cff4bda021c659aff`
+  - `UpdateAgent.LabManager-Setup-0.1.10-x64.exe` `853db7a5b1a3768d327bcd832d1965861bf08abe8510fab9088c223e16ddb7d6`
+  - `UpdateAgent.Agent-0.1.10-x64.msi` `06411ee9478a0d1fc4d79e219e957ca52d96c2ba36ed5f043d0d7b542003ae7d`
+- 릴리스 워크플로 실행 #44877569180 성공. 업로드 자산은 설치 파일 3개뿐이다.
+- 최초 실행 #44876909662은 `.iss` 파일의 UTF-8 BOM 누락으로 실패했고, BOM 복구 커밋(`a96fae2`)으로 태그를 갱신한 뒤 재실행해 성공했다.
+
+---
+
 ## 2026-11-20 — 업그레이드 시 기본 토큰 자동 교체 (v0.1.9)
 
 ### 발견한 오류
