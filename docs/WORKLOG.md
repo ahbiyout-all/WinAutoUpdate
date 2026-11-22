@@ -30,6 +30,14 @@
 - 토큰 주입 빌드 로그에서 `agent-token.txt`/`labmanager-token.txt` 컴파일 확인, 플레이스홀더 토큰 주입 시 빌드 중단 확인.
 - `deploy-agents.ps1`의 외부 토큰/내장 토큰 두 모드 패키지 생성 확인.
 
+### 릴리스 검증
+
+- 릴리스 워크플로 [`45016968809`](https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/45016968809) 성공.
+- release [`v0.1.25`](https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.25) 생성 및 자산 3개 다운로드·해시 검증 완료:
+  - `UpdateAgent.Agent-Setup-0.1.25-x64.exe` — `ac956e321a1b554e9f456a53d23c7c50e2d49663d6a0b962f9d814f3a4fe6086`
+  - `UpdateAgent.LabManager-Setup-0.1.25-x64.exe` — `8eea1642607b2f36edb5479a8904d30bebbceb693c227cef81db875ccca81212`
+  - `UpdateAgent.Agent-0.1.25-x64.msi` — `4c332aaac4e08cbcf18f1dce96dcf0658c65d5c69599aa26520917dded2c2b51`
+
 ---
 
 ## 2026-11-22 — 자아성찰 심층 감사와 설치/배포 오류 수정 (v0.1.24)
