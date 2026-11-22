@@ -7,7 +7,7 @@ rem  UpdateAgent Agent build (Windows)
 rem
 rem  What this does
 rem    1) Reads the version from Directory.Build.props (single version source).
-rem    2) Publishes only the student-PC apps: Service, SessionHelper, Cli.
+rem    2) Publishes only the student-PC apps: Service, SessionHelper, Desktop, Cli.
 rem    3) Builds the Agent Inno Setup installer, whose file name carries the
 rem       version: UpdateAgent.Agent-Setup-<version>-x64.exe
 rem    4) Collects the result in a per-version folder and opens it in Explorer.
@@ -59,7 +59,7 @@ echo.
 if exist "%STAGING_DIR%" rmdir /s /q "%STAGING_DIR%"
 
 rem --- 3) publish the agent ---------------------------------------------------
-echo [1/3] Publishing the agent (Service, SessionHelper, Cli)...
+echo [1/3] Publishing the agent (Service, SessionHelper, Desktop, Cli)...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%scripts\publish.ps1" -AgentOnly -OutputRoot "%PUBLISH_ROOT%"
 if errorlevel 1 (
     echo.

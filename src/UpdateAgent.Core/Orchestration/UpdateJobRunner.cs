@@ -365,32 +365,35 @@ public sealed class UpdateJobRunner : IAsyncDisposable
     /// </summary>
     public async Task<JobSummary?> CancelAsync(bool force, CancellationToken cancellationToken = default)
     {
-        if (force) _forceCancelled = true;
-        _cancelRequested = true;
-        _manualPause = false;
-        _pauseReason = PauseReason.None;
-
-        try
-        {
-            await _reboot.CancelRebootAsync(CancellationToken.None);
-        }
-        catch
-        {
-            // 예약된 재부팅이 없으면 실패한다. 무시한다.
-        }
-
-        try
-        {
-            _runCts?.Cancel();
-        }
-        catch
-        {
-            // ignore
-        }
-
+        // 시작 요청이 사전 점검/저장을 위해 _control을 쥐고 있는 동안 취소 플래그를 먼저 세팅하면
+        // StartRunLoop가 플래그를 초기화해 중단 요청이 사라진다. 플래그 설정과 런루프 취소를
+        // 시작과 같은 임계구역에서 수행해 이 경쟁을 막는다.
         await _control.WaitAsync(cancellationToken);
         try
         {
+            if (force) _forceCancelled = true;
+            _cancelRequested = true;
+            _manualPause = false;
+            _pauseReason = PauseReason.None;
+
+            try
+            {
+                await _reboot.CancelRebootAsync(CancellationToken.None);
+            }
+            catch
+            {
+                // 예약된 재부팅이 없으면 실패한다. 무시한다.
+            }
+
+            try
+            {
+                _runCts?.Cancel();
+            }
+            catch
+            {
+                // ignore
+            }
+
             if (_activeContext is not null && !_activeContext.IsTerminal)
             {
                 if (!_isRunning)

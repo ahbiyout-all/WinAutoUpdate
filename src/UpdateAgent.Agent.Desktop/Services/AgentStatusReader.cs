@@ -28,13 +28,14 @@ public sealed class AgentStatusReader
         JobSummary? active = null;
         IReadOnlyList<JobSummary> recent = [];
         string? error = null;
+        var agentId = "unknown";
 
         try
         {
             var store = new SqliteJobStore();
             await store.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
-            var agentId = AgentIdentity.GetAgentId();
+            agentId = AgentIdentity.GetAgentId();
             var detail = await store.GetActiveJobAsync(agentId, cancellationToken).ConfigureAwait(false);
             active = detail?.Summary;
             recent = await store.GetRecentJobsAsync(agentId, 10, cancellationToken).ConfigureAwait(false);
@@ -47,7 +48,7 @@ public sealed class AgentStatusReader
         return new AgentStatusSnapshot(
             ReadServiceStatus(),
             ReadLabManagerUrl(),
-            AgentIdentity.GetAgentId(),
+            agentId,
             Environment.MachineName,
             active,
             recent,

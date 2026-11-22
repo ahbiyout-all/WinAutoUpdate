@@ -104,7 +104,8 @@ C:\Program Files\UpdateAgent\LabManager\
    - 실제 제거 실행이 실패하면 새 설치를 중단하고 오류를 표시합니다.
 4. **설치**
    - 개별 파일을 `Program Files`에 복사합니다.
-   - Agent는 `[InstallDelete]`로 이전 버전의 Service/SessionHelper/Cli 폴더를 정리한 뒤 복사합니다.
+   - Agent는 `[InstallDelete]`로 이전 버전의 Desktop/Service/SessionHelper/Cli 폴더를 정리한 뒤 복사합니다.
+      따라서 이전 버전의 `UpdateAgent.Agent.Desktop.exe/DLL`이 남아 새 버튼이 보이지 않는 일이 없습니다.
 5. **바탕화면 바로가기 선택**
    - `바로가기:` 작업에서 체크/해제할 수 있습니다(기본 체크).
 6. **서비스·방화벽·설정 적용** (Agent)
@@ -112,7 +113,8 @@ C:\Program Files\UpdateAgent\LabManager\
 7. **앱 실행**
    - Agent: 서비스를 시작하고 마지막 화면에서 `UpdateAgent 상태 확인` 데스크톱 앱을 실행할 수 있습니다.
      시작 메뉴/바탕화면 바로가기도 같은 앱(`{app}\Desktop\UpdateAgent.Agent.Desktop.exe`)을 엽니다.
-      이 앱은 상태 조회와 함께 **업데이트 시작** 버튼을 제공하며, 로컬 제어 파이프(`UpdateAgent.LocalControl.v1`)로
+      이 앱은 상태 조회와 함께 메인 화면의 **수동 업데이트 옵션** 버튼을 제공하며, 기존 **업데이트 시작** 버튼도 같은 옵션 창을 엽니다.
+       로컬 제어 파이프(`UpdateAgent.LocalControl.v1`)로
       실행 중인 서비스에 작업을 요청합니다. 시작 전 **수동 업데이트 옵션** 창에서 프리셋과 세부 항목을 고를 수 있고,
       선택 값은 파이프 요청의 `options`로 전달됩니다. 학생 계정(UAC 필터링 토큰 포함)이 연결할 수 있도록 파이프 ACL에
       인증 사용자가 포함됩니다.
@@ -283,7 +285,7 @@ Program Files의 `appsettings.json`보다 우선하며 재시작 후에도 유�
 저장소 루트의 `build.bat`을 더블클릭하거나 실행하면 다음을 순서대로 수행합니다.
 
 1. `Directory.Build.props`에서 버전을 읽습니다.
-2. `publish.ps1 -AgentOnly`로 Service/SessionHelper/Cli만 게시합니다.
+2. `publish.ps1 -AgentOnly`로 Service/SessionHelper/Desktop/Cli만 게시합니다.
 3. `build-inno.ps1 -AgentOnly`로 학생 PC용 설치 파일만 빌드합니다.
 4. 결과를 버전별 폴더에 모으고 탐색기를 엽니다.
 

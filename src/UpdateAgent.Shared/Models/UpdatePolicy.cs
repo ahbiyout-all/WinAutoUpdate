@@ -19,6 +19,11 @@ public sealed record UpdatePolicy
     /// <summary>정의 업데이트(Defender 등) 포함 여부. 기본 제외.</summary>
     public bool IncludeDefinitionUpdates { get; init; }
 
+    /// <summary>수동 업데이트에서 의미 있는 범위가 하나 이상인지. 기능 업데이트는 제외한다.</summary>
+    public bool HasAnyUpdateCategory =>
+        IncludeSecurity || IncludeCritical || IncludeImportant ||
+        IncludeOptional || IncludeDrivers || IncludeDefinitionUpdates;
+
     /// <summary>기능 업데이트 포함 여부. MVP 기본 제외, 2차 승인 워크플로에서 사용.</summary>
     public bool IncludeFeatureUpdates { get; init; }
 

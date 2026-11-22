@@ -39,8 +39,8 @@ public sealed class Worker : BackgroundService
     private readonly ILogger<Worker> _logger;
 
     private DateTimeOffset? _firstSeen;
-    private volatile bool _checkInRequested;
-    private CancellationTokenSource? _pollDelayCts;
+    private int _checkInRequested;
+    private volatile CancellationTokenSource? _pollDelayCts;
 
     public Worker(
         UpdateJobRunner runner,
@@ -106,8 +106,8 @@ public sealed class Worker : BackgroundService
 
         void OnLocalControlRequestSucceeded()
         {
-            // 학생용 앱이 작업을 시작하면 대시보드 반영을 위해 체크인을 앞당긴다.
-            _checkInRequested = true;
+            // 학생용 앱의 로컬 제어가 성공하면 대시보드 반영을 위해 체크인을 앞당긴다.
+            Interlocked.Exchange(ref _checkInRequested, 1);
             _pollDelayCts?.Cancel();
         }
 
@@ -147,14 +147,14 @@ public sealed class Worker : BackgroundService
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                _checkInRequested = false;
+                Interlocked.Exchange(ref _checkInRequested, 0);
                 await CheckInAsync(stoppingToken);
 
-                if (_checkInRequested) continue;
+                if (Volatile.Read(ref _checkInRequested) == 1) continue;
 
                 using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 _pollDelayCts = delayCts;
-                if (_checkInRequested) delayCts.Cancel();
+                if (Volatile.Read(ref _checkInRequested) == 1) delayCts.Cancel();
 
                 try
                 {

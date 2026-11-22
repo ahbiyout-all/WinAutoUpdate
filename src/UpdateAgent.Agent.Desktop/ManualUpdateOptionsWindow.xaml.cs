@@ -64,6 +64,8 @@ public partial class ManualUpdateOptionsWindow : Window
     private void PresetCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_applyingPreset) return;
+        // 프리셋을 다시 고르면 이전에 띄운 범위 오류 문구를 지운다.
+        ValidationText.Text = "";
         if (PresetCombo.SelectedItem is ComboBoxItem { Tag: string presetId })
         {
             // 체크박스 변경 이벤트가 "사용자 설정"으로 되돌리지 않도록 값 적용 동안 잠근다.

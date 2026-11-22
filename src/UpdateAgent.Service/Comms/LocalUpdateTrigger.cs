@@ -28,7 +28,7 @@ public sealed class LocalUpdateTrigger
 
     private readonly StartJobDelegate _startJob;
     private readonly CancelJobDelegate? _cancelJob;
-    private readonly Func<string, CancellationToken, Task>? _hideOverlay;
+    private readonly Func<string, string, CancellationToken, Task>? _hideOverlay;
     private readonly ServerPolicyProvider _policies;
     private readonly Func<OsInfo> _getOs;
     private readonly ILogger<LocalUpdateTrigger> _logger;
@@ -38,7 +38,7 @@ public sealed class LocalUpdateTrigger
         ServerPolicyProvider policies,
         ILogger<LocalUpdateTrigger> logger,
         CancelJobDelegate? cancelJob = null,
-        Func<string, CancellationToken, Task>? hideOverlay = null,
+        Func<string, string, CancellationToken, Task>? hideOverlay = null,
         Func<OsInfo>? osProvider = null)
     {
         _startJob = startJob;
@@ -78,8 +78,9 @@ public sealed class LocalUpdateTrigger
             return Fail("수동 업데이트 옵션을 적용하지 못했습니다: " + ex.Message);
         }
 
-        // UI 검증은 우회될 수 있으므로 서비스에서도 빈 범위 요청을 거부한다.
-        if (request.Options is not null && !request.Options.HasAnyUpdateCategory)
+        // UI 검증은 우회될 수 있으므로 서비스에서도 최종 정책 기준으로 빈 범위 요청을 거부한다.
+        // 학생이 고른 항목이 모두 제외된 경우와 옵션 없이 요청했지만 교사 정책에 범위가 없는 경우를 모두 막는다.
+        if (!policy.HasAnyUpdateCategory)
         {
             return Fail("업데이트 범위를 하나 이상 선택해야 합니다.");
         }
@@ -114,6 +115,11 @@ public sealed class LocalUpdateTrigger
                 JobId = result.Job?.JobId,
             };
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // 파이프 핸들러 시간 초과는 응답을 보내지 않고 상위에서 시간 초과 메시지를 전달한다.
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "학생 요청 작업 시작 실패");
@@ -140,6 +146,7 @@ public sealed class LocalUpdateTrigger
                 {
                     await _hideOverlay(
                         "긴급 중단 요청으로 업데이트를 중지했습니다.",
+                        summary.JobId ?? string.Empty,
                         cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex)
@@ -156,6 +163,10 @@ public sealed class LocalUpdateTrigger
                     : "업데이트를 긴급 중단했습니다.",
                 JobId = summary?.JobId,
             };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

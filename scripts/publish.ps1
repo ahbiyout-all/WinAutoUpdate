@@ -11,8 +11,8 @@ Produces five self-contained (or framework-dependent) folders from six projects:
   publish\agent\desktop       Student PC status desktop app (WPF)
   publish\cli                 Optional local CLI for scan/preflight/status/maestro
 
-With -AgentOnly only the three student-PC folders are produced
-(agent\service, agent\sessionhelper, cli). Use it for a student-only build.
+With -AgentOnly only the four student-PC folders are produced
+(agent\service, agent\sessionhelper, agent\desktop, cli). Use it for a student-only build.
 
 Run from a PowerShell prompt. No administrator rights are required for publishing.
 

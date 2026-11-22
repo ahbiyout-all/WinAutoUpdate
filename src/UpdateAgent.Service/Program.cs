@@ -110,7 +110,7 @@ try
             sp.GetRequiredService<ServerPolicyProvider>(),
             sp.GetRequiredService<ILogger<LocalUpdateTrigger>>(),
             (force, ct) => runner.CancelAsync(force, ct),
-            (notice, ct) => overlay.HideAsync(notice, ct));
+            (notice, jobId, ct) => overlay.HideAsync(notice, jobId, ct));
         return new LocalControlPipeServer(trigger.HandleAsync);
     });
 

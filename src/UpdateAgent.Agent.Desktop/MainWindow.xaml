@@ -98,7 +98,7 @@
                     Click="StartButton_Click" />
             <Button x:Name="RefreshButton" Content="새로고침" Width="90" Height="32" Margin="0,0,8,0"
                     Click="RefreshButton_Click" />
-            <Button Content="닫기" Width="90" Height="32" IsCancel="True" Click="CloseButton_Click" />
+            <Button x:Name="CloseButton" Content="닫기" Width="90" Height="32" IsCancel="True" Click="CloseButton_Click" />
         </StackPanel>
     </Grid>
 </Window>

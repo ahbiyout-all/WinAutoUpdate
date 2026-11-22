@@ -15,7 +15,13 @@ namespace UpdateAgent.Core.Comms;
 public sealed class LocalControlPipeServer : IAsyncDisposable
 {
     internal const int MaxRequestBytes = 8192;
-    internal static readonly TimeSpan HandlerTimeout = TimeSpan.FromSeconds(60);
+    internal const string ResponseTimeoutMessage =
+        "서비스 응답 시간이 초과되었습니다. 상태를 새로고침해 작업 시작 여부를 확인하세요.";
+
+    // 사전 점검/WUA가 느린 PC에서도 응답을 기다릴 수 있도록 클라이언트보다 서버를 먼저 끝낸다.
+    // 테스트에서 짧게 조정할 수 있도록 readonly 대신 속성을 사용한다.
+    internal static TimeSpan HandlerTimeout { get; set; } = TimeSpan.FromSeconds(90);
+    internal static TimeSpan ResponseTimeout { get; set; } = TimeSpan.FromSeconds(95);
 
     private readonly Func<LocalControlRequest, CancellationToken, Task<LocalControlResponse>> _handler;
     private readonly string _pipeName;
@@ -76,7 +82,9 @@ public sealed class LocalControlPipeServer : IAsyncDisposable
 
                 var connected = pipe;
                 pipe = null; // 연결 소유권은 처리 태스크로 넘어간다.
-                _ = Task.Run(() => HandleClientAsync(connected, cancellationToken), cancellationToken);
+                // 이미 취소된 토큰을 Task.Run에 넘기면 대리자가 실행되지 않아 연결 핸들이 새므로
+                // 취소 여부는 핸들러가 linked token으로 판단하게 한다.
+                _ = Task.Run(() => HandleClientAsync(connected, cancellationToken));
             }
             catch (OperationCanceledException)
             {
@@ -122,20 +130,39 @@ public sealed class LocalControlPipeServer : IAsyncDisposable
                     }
                     : await _handler(request, timeout.Token).ConfigureAwait(false);
 
-                await PipeLines.WriteLineAsync(
-                    pipe,
-                    UpdateAgentJson.Serialize(response),
-                    timeout.Token).ConfigureAwait(false);
-
+                // 작업이 저장된 뒤 응답 쓰기가 취소되더라도 즉시 체크인 알림은 보낸다.
                 if (response.Success)
                 {
                     try { RequestSucceeded?.Invoke(); }
                     catch { /* 구독자 오류는 파이프 응답에 영향을 주지 않는다. */ }
                 }
+
+                await PipeLines.WriteLineAsync(
+                    pipe,
+                    UpdateAgentJson.Serialize(response),
+                    timeout.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!serverToken.IsCancellationRequested)
+            {
+                // 서비스 종료가 아닌 핸들러 시간 초과. 연결만 끊으면 클라이언트가
+                // 단순 연결 실패로 오해하므로 원인을 알리는 응답을 먼저 보낸다.
+                try
+                {
+                    using var replyTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    await PipeLines.WriteLineAsync(
+                        pipe,
+                        UpdateAgentJson.Serialize(new LocalControlResponse
+                        {
+                            Success = false,
+                            Message = ResponseTimeoutMessage,
+                        }),
+                        replyTimeout.Token).ConfigureAwait(false);
+                }
+                catch { /* 이미 닫힌 연결이면 무시한다. */ }
             }
             catch (OperationCanceledException)
             {
-                // 서비스 종료 또는 응답 시간 초과.
+                // 서비스 종료.
             }
             catch
             {
@@ -159,7 +186,6 @@ public sealed class LocalControlPipeServer : IAsyncDisposable
 /// <summary>학생용 상태 앱이 로컬 제어 파이프에 요청을 보내는 클라이언트.</summary>
 public sealed class LocalControlPipeClient
 {
-    private static readonly TimeSpan ResponseTimeout = TimeSpan.FromSeconds(30);
     private readonly string _pipeName;
 
     public LocalControlPipeClient(string? pipeName = null)
@@ -183,7 +209,12 @@ public sealed class LocalControlPipeClient
             await pipe.ConnectAsync(3000, cancellationToken).ConfigureAwait(false);
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(ResponseTimeout);
+            // 시작은 느린 WUA 점검을 끝까지 기다리고, 긴급 중단은 오버레이가 즉시 사라지도록 짧게 기다린다.
+            var responseTimeout = string.Equals(
+                request.Action, LocalControlActions.CancelUpdate, StringComparison.OrdinalIgnoreCase)
+                ? TimeSpan.FromSeconds(10)
+                : LocalControlPipeServer.ResponseTimeout;
+            timeout.CancelAfter(responseTimeout);
 
             await PipeLines.WriteLineAsync(
                 pipe,
@@ -203,6 +234,16 @@ public sealed class LocalControlPipeClient
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException)
+        {
+            // 호출자 취소가 아닌 내부 응답 시간 초과. 서비스가 작업을 시작했을 수 있으므로
+            // 단순 연결 실패와 구분해 상태 확인을 안내한다.
+            return new LocalControlResponse
+            {
+                Success = false,
+                Message = LocalControlPipeServer.ResponseTimeoutMessage,
+            };
         }
         catch (Exception ex)
         {

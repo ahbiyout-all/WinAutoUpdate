@@ -35,10 +35,12 @@ public sealed class OverlayJobProgressSink : IJobProgressSink, IDisposable
     {
         // 명시적으로 숨긴 작업의 잔여 진행률(취소 완료 포함)은 오버레이를 다시 띄우지 않는다.
         // 새 작업이 시작되면 suppression이 해제된다.
-        if (_suppressedJobId is not null)
+        string? suppressed;
+        lock (_gate) suppressed = _suppressedJobId;
+        if (suppressed is not null)
         {
-            if (_suppressedJobId == detail.Summary.JobId) return;
-            _suppressedJobId = null;
+            if (suppressed == detail.Summary.JobId) return;
+            lock (_gate) _suppressedJobId = null;
         }
 
         var options = _options.CurrentValue;
@@ -50,7 +52,7 @@ public sealed class OverlayJobProgressSink : IJobProgressSink, IDisposable
         }
 
         var summary = detail.Summary;
-        _lastSummary = summary;
+        lock (_gate) _lastSummary = summary;
 
         if (summary.IsTerminal)
         {
@@ -66,9 +68,13 @@ public sealed class OverlayJobProgressSink : IJobProgressSink, IDisposable
     }
 
     /// <summary>교사가 원격으로 입력 잠금을 해제하거나 작업을 중단할 때 사용한다.</summary>
-    public async Task HideAsync(string? notice = null, CancellationToken cancellationToken = default)
+    public async Task HideAsync(
+        string? notice = null,
+        string? jobId = null,
+        CancellationToken cancellationToken = default)
     {
-        _suppressedJobId = _lastSummary?.JobId;
+        // 중단 응답에 담긴 작업 ID를 직접 받아 진행률이 늦게 도착해도 오버레이가 다시 뜨지 않게 한다.
+        lock (_gate) _suppressedJobId = jobId ?? _lastSummary?.JobId;
         CancelHide();
         try
         {
@@ -83,7 +89,8 @@ public sealed class OverlayJobProgressSink : IJobProgressSink, IDisposable
     /// <summary>서비스 시작 시 연결된 헬퍼를 현재 상태로 맞춘다.</summary>
     public async Task ResyncAsync(CancellationToken cancellationToken = default)
     {
-        var summary = _lastSummary;
+        JobSummary? summary;
+        lock (_gate) summary = _lastSummary;
         if (summary is null)
         {
             return;

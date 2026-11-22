@@ -184,7 +184,7 @@ public sealed class CommandExecutor
                 var notice = payload.Force
                     ? "긴급 중단으로 업데이트가 중지되었습니다."
                     : "작업이 취소되었습니다.";
-                await _overlay.HideAsync(notice, cancellationToken);
+                await _overlay.HideAsync(notice, summary?.JobId, cancellationToken);
                 return Ok(command,
                     summary is null
                         ? "중단할 작업이 없습니다."
@@ -217,7 +217,7 @@ public sealed class CommandExecutor
 
             case CommandType.UnlockInput:
             {
-                await _overlay.HideAsync("교사가 입력 잠금을 해제했습니다.", cancellationToken);
+                await _overlay.HideAsync("교사가 입력 잠금을 해제했습니다.", null, cancellationToken);
                 return Ok(command, "오버레이를 숨겼습니다.");
             }
 

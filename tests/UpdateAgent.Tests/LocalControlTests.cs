@@ -36,6 +36,7 @@ public sealed class LocalControlTests
             Options = new ManualUpdateOptions
             {
                 PresetId = UpdatePolicyPresets.SecurityOnly,
+                IncludeImportant = false,
                 IncludeOptional = true,
                 PreventAutomaticReboot = true,
                 MaxRebootCount = 4,
@@ -48,7 +49,12 @@ public sealed class LocalControlTests
         Assert.NotNull(parsed);
         Assert.NotNull(parsed!.Options);
         Assert.Equal(UpdatePolicyPresets.SecurityOnly, parsed.Options!.PresetId);
+        Assert.True(parsed.Options.IncludeSecurity);
+        Assert.True(parsed.Options.IncludeCritical);
+        Assert.False(parsed.Options.IncludeImportant);
         Assert.True(parsed.Options.IncludeOptional);
+        Assert.False(parsed.Options.IncludeDrivers);
+        Assert.False(parsed.Options.IncludeDefinitionUpdates);
         Assert.True(parsed.Options.PreventAutomaticReboot);
         Assert.Equal(4, parsed.Options.MaxRebootCount);
         Assert.False(parsed.Options.OverlayEnabled);
@@ -80,6 +86,20 @@ public sealed class LocalControlTests
             IncludeCritical = false,
             IncludeImportant = false,
             IncludeDefinitionUpdates = true,
+        }.HasAnyUpdateCategory);
+    }
+
+    [Fact]
+    public void UpdatePolicy_HasAnyUpdateCategory_IgnoresFeatureUpdates()
+    {
+        Assert.True(UpdatePolicy.Default.HasAnyUpdateCategory);
+        Assert.False(new UpdatePolicy
+        {
+            IncludeSecurity = false,
+            IncludeCritical = false,
+            IncludeImportant = false,
+            IncludeFeatureUpdates = true,
+            ApprovedFeatureRelease = "26H2",
         }.HasAnyUpdateCategory);
     }
 
@@ -156,6 +176,17 @@ public sealed class LocalControlTests
         Assert.Equal(RebootPolicy.Never, applied.RebootPolicy);
         Assert.False(applied.OverlayEnabled);
         Assert.Equal(5, applied.MaxRebootCount);
+    }
+
+    [Fact]
+    public void ManualUpdateOptions_LimitTo_AllowsTeacherZeroRebootCeiling()
+    {
+        var teacherPolicy = new UpdatePolicy { MaxRebootCount = 0 };
+        var options = new ManualUpdateOptions { MaxRebootCount = 10 };
+
+        var applied = options.LimitTo(teacherPolicy, Windows11);
+
+        Assert.Equal(0, applied.MaxRebootCount);
     }
 
     [Fact]
@@ -326,6 +357,64 @@ public sealed class LocalControlTests
     }
 
     [Fact]
+    public async Task LocalUpdateTrigger_RejectsOptionsWhenTeacherPolicyLeavesNoCategory()
+    {
+        var called = false;
+        var teacherPolicy = new UpdatePolicy
+        {
+            IncludeSecurity = false,
+            IncludeCritical = false,
+            IncludeImportant = false,
+            IncludeOptional = false,
+            IncludeDrivers = false,
+            IncludeDefinitionUpdates = false,
+        };
+        var trigger = CreateTrigger((_, _, _, _) =>
+        {
+            called = true;
+            return Task.FromResult(Started());
+        }, teacherPolicy);
+
+        var response = await trigger.HandleAsync(new LocalControlRequest
+        {
+            Action = LocalControlActions.StartUpdate,
+            MaestroConfirmed = true,
+            Options = new ManualUpdateOptions { IncludeOptional = true },
+        });
+
+        Assert.False(response.Success);
+        Assert.Contains("업데이트 범위", response.Message);
+        Assert.False(called);
+    }
+
+    [Fact]
+    public async Task LocalUpdateTrigger_RejectsNullOptionsWhenTeacherPolicyHasNoCategory()
+    {
+        var called = false;
+        var teacherPolicy = new UpdatePolicy
+        {
+            IncludeSecurity = false,
+            IncludeCritical = false,
+            IncludeImportant = false,
+        };
+        var trigger = CreateTrigger((_, _, _, _) =>
+        {
+            called = true;
+            return Task.FromResult(Started());
+        }, teacherPolicy);
+
+        var response = await trigger.HandleAsync(new LocalControlRequest
+        {
+            Action = LocalControlActions.StartUpdate,
+            MaestroConfirmed = true,
+        });
+
+        Assert.False(response.Success);
+        Assert.Contains("업데이트 범위", response.Message);
+        Assert.False(called);
+    }
+
+    [Fact]
     public async Task LocalUpdateTrigger_RequiresMaestroConfirmationEvenWithOptions()
     {
         var called = false;
@@ -459,6 +548,7 @@ public sealed class LocalControlTests
     {
         bool? usedForce = null;
         string? notice = null;
+        string? hiddenJobId = null;
         var trigger = CreateTrigger(
             (_, _, _, _) => Task.FromResult(Started()),
             cancel: (force, _) =>
@@ -466,9 +556,10 @@ public sealed class LocalControlTests
                 usedForce = force;
                 return Task.FromResult<JobSummary?>(new JobSummary { JobId = "job-cancel-1" });
             },
-            hide: (text, _) =>
+            hide: (text, jobId, _) =>
             {
                 notice = text;
+                hiddenJobId = jobId;
                 return Task.CompletedTask;
             });
 
@@ -481,6 +572,7 @@ public sealed class LocalControlTests
         Assert.Equal("job-cancel-1", response.JobId);
         Assert.True(usedForce);
         Assert.False(string.IsNullOrWhiteSpace(notice));
+        Assert.Equal("job-cancel-1", hiddenJobId);
     }
 
     [Fact]
@@ -504,7 +596,7 @@ public sealed class LocalControlTests
         var trigger = CreateTrigger(
             (_, _, _, _) => Task.FromResult(Started()),
             cancel: (_, _) => Task.FromResult<JobSummary?>(null),
-            hide: (_, _) =>
+            hide: (_, _, _) =>
             {
                 hideCalled = true;
                 return Task.CompletedTask;
@@ -537,10 +629,9 @@ public sealed class LocalControlTests
         }, pipeName);
 
         server.Start();
-        await Task.Delay(200);
 
         var client = new LocalControlPipeClient(pipeName);
-        var response = await client.SendAsync(new LocalControlRequest
+        var response = await SendWithRetryAsync(client, new LocalControlRequest
         {
             Action = LocalControlActions.StartUpdate,
             MaestroConfirmed = true,
@@ -551,6 +642,116 @@ public sealed class LocalControlTests
         Assert.NotNull(received);
         Assert.Equal(LocalControlActions.StartUpdate, received!.Action);
         Assert.True(received.MaestroConfirmed);
+    }
+
+    [Fact]
+    public void LocalControlPipe_ClientWaitsLongerThanServerHandler()
+    {
+        Assert.True(LocalControlPipeServer.HandlerTimeout >= TimeSpan.FromSeconds(60));
+        Assert.True(LocalControlPipeServer.ResponseTimeout >=
+                    LocalControlPipeServer.HandlerTimeout + TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task LocalUpdateTrigger_RethrowsCancellationForPipeTimeout()
+    {
+        using var cts = new CancellationTokenSource();
+        var trigger = CreateTrigger((_, _, _, token) =>
+        {
+            cts.Cancel();
+            token.ThrowIfCancellationRequested();
+            return Task.FromResult(Started());
+        });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            trigger.HandleAsync(new LocalControlRequest
+            {
+                Action = LocalControlActions.StartUpdate,
+                MaestroConfirmed = true,
+            }, cts.Token));
+    }
+
+    [Fact]
+    public async Task LocalControlPipe_ReportsTimeoutWhenHandlerExceedsLimit()
+    {
+        var originalHandler = LocalControlPipeServer.HandlerTimeout;
+        var originalResponse = LocalControlPipeServer.ResponseTimeout;
+        LocalControlPipeServer.HandlerTimeout = TimeSpan.FromMilliseconds(200);
+        LocalControlPipeServer.ResponseTimeout = TimeSpan.FromSeconds(2);
+        var pipeName = "UpdateAgent.Test." + Guid.NewGuid().ToString("N");
+
+        try
+        {
+            await using var server = new LocalControlPipeServer(async (_, token) =>
+            {
+                await Task.Delay(Timeout.Infinite, token).ConfigureAwait(false);
+                return new LocalControlResponse { Success = true };
+            }, pipeName);
+            server.Start();
+
+            var client = new LocalControlPipeClient(pipeName);
+            var response = await SendWithRetryAsync(client, new LocalControlRequest
+            {
+                Action = LocalControlActions.CancelUpdate,
+            });
+
+            Assert.False(response.Success);
+            Assert.Equal(LocalControlPipeServer.ResponseTimeoutMessage, response.Message);
+        }
+        finally
+        {
+            LocalControlPipeServer.HandlerTimeout = originalHandler;
+            LocalControlPipeServer.ResponseTimeout = originalResponse;
+        }
+    }
+
+    [Fact]
+    public async Task LocalControlPipe_NotifiesCheckInOnlyOnSuccess()
+    {
+        var pipeName = "UpdateAgent.Test." + Guid.NewGuid().ToString("N");
+        var notifications = 0;
+        await using var server = new LocalControlPipeServer((request, _) =>
+            Task.FromResult(new LocalControlResponse
+            {
+                Success = request.MaestroConfirmed,
+                Message = request.MaestroConfirmed ? "ok" : "no",
+            }), pipeName);
+        server.RequestSucceeded += () => notifications++;
+        server.Start();
+
+        var client = new LocalControlPipeClient(pipeName);
+        var failed = await SendWithRetryAsync(client, new LocalControlRequest
+        {
+            Action = LocalControlActions.CancelUpdate,
+            MaestroConfirmed = false,
+        });
+        var succeeded = await SendWithRetryAsync(client, new LocalControlRequest
+        {
+            Action = LocalControlActions.CancelUpdate,
+            MaestroConfirmed = true,
+        });
+
+        Assert.False(failed.Success);
+        Assert.True(succeeded.Success);
+        Assert.Equal(1, notifications);
+    }
+
+    /// <summary>서버 리스닝 시작 전 연결 시도를 짧게 재시도한다.</summary>
+    private static async Task<LocalControlResponse> SendWithRetryAsync(
+        LocalControlPipeClient client,
+        LocalControlRequest request)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        do
+        {
+            var response = await client.SendAsync(request);
+            if (!response.Message.StartsWith("서비스에 연결할 수 없습니다", StringComparison.Ordinal) ||
+                DateTime.UtcNow >= deadline)
+            {
+                return response;
+            }
+            await Task.Delay(50);
+        } while (true);
     }
 
     private static OsInfo Windows11 => new()
@@ -574,7 +775,7 @@ public sealed class LocalControlTests
         StartJobDelegate start,
         UpdatePolicy? policy = null,
         CancelJobDelegate? cancel = null,
-        Func<string, CancellationToken, Task>? hide = null,
+        Func<string, string, CancellationToken, Task>? hide = null,
         Func<OsInfo>? os = null)
     {
         var policies = new ServerPolicyProvider((_, _) => Task.FromResult<string?>(
