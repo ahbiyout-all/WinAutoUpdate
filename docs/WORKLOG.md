@@ -39,6 +39,19 @@
 - `v0.1.18`의 남은 레지스트리 항목은 새 설치가 동일 AppId로 덮어써 정리되므로 이번 패치에서 추가 삭제하지 않습니다.
 - `WORKLOG.md`의 오래된 릴리스 해시(prefix만 기록된 항목)는 과거 기록이며 기능 영향이 없어 변경하지 않습니다.
 
+### 릴리스 검증
+
+- 릴리스 커밋: `2094fa3`
+- GitHub Actions: [workflow 44998615980](https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/44998615980) 성공
+- GitHub Releases: [v0.1.20](https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.20)
+- 공개 자산을 다시 내려받아 SHA-256을 확인했습니다.
+
+| 자산 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.20-x64.exe` | `710f7d62e86a55fc7862e906557b1b020cfa713527553ac0984677930f1087ed` |
+| `UpdateAgent.LabManager-Setup-0.1.20-x64.exe` | `f178a61127de7909bb16024f1070c81181f2cdc7a7e223ea16663d735fa52923` |
+| `UpdateAgent.Agent-0.1.20-x64.msi` | `cdb388189aab91224ac704c61fe7ad86dea6f8315a3c3cb955392efe8657a002` |
+
 ---
 
 ## 2026-11-22 — 학생용 앱에서 수동 업데이트 옵션 선택 (v0.1.19)
