@@ -39,6 +39,19 @@
 - `node --check` 2개 통과, `.iss` BOM `EF BB BF` 유지, 시크릿 스캔 정상.
 - 회귀 테스트: 파이프 시간 초과 응답/순서 불변식, 성공 시에만 체크인 통지, 빈 정책 거부, 핸들러 취소 rethrow, 오버레이 숨김 시 작업 ID 전달 추가.
 
+### 릴리스 검증
+
+- 릴리스 커밋: `9fe27cd`
+- GitHub Actions: [workflow 45004629842](https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/45004629842) 성공
+- GitHub Releases: [v0.1.22](https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.22)
+- 공개 자산을 다시 내려받아 SHA-256을 확인했습니다.
+
+| 자산 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.22-x64.exe` | `c0f8d1460b4e39ebe62b1227c981d01376e2ac163f743d483f388c3ce23eddb9` |
+| `UpdateAgent.LabManager-Setup-0.1.22-x64.exe` | `f594764f13d9bc5a16b28488aefecf15d97a06097e620e5a833a5906a5d0c2cc` |
+| `UpdateAgent.Agent-0.1.22-x64.msi` | `c0dfd1efa9031e2e43b284b2836d56851f08e5cfbff2f4a69de29228fa4bac11` |
+
 ---
 
 ## 2026-11-22 — 학생용 앱 메인 화면에 수동 업데이트 옵션 항목 추가 (v0.1.21)
