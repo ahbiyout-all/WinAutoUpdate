@@ -5,6 +5,33 @@
 
 ---
 
+## 2026-11-22 — 첫 설치 전용 내장 토큰 지원 (v0.1.25)
+
+### 배경
+
+- 첫 설치 때 관리자가 별도 토큰 파일을 준비하지 않아도 되도록, 지정한 토큰을 에이전트/관리자 설치 exe에 미리 넣어 둡니다.
+- 업데이트에서는 내장 토큰을 절대 사용하지 않고 기존 설정을 유지해야 합니다.
+
+### 변경
+
+| 파일 | 변경 |
+|---|---|
+| `scripts/build-inno.ps1`, `.github/workflows/release.yml` | `UPDATEAGENT_AGENT_TOKEN`, `UPDATEAGENT_LABMANAGER_ADMIN_TOKEN`, `UPDATEAGENT_LABMANAGER_AGENT_TOKEN` secret을 스테이징 토큰 파일로 주입. 값이 없으면 빈 파일을 넣어 빌드 결과가 일정하게 유지되고 설치 시 "내장 토큰 없음"으로 처리. 플레이스홀더/한쪽만 설정된 경우 빌드 중단 |
+| `installer/InnoSetup/UpdateAgent.Agent.iss` | `agent-token.txt`를 `dontcopy`로 내장. 이전 설치가 감지되면 내장 토큰 무시, 명시적 외부 토큰 파일은 업데이트에서도 우선 사용 |
+| `installer/InnoSetup/UpdateAgent.LabManager.iss` | `labmanager-token.txt`(1행 AdminToken, 2행 AgentToken)를 `dontcopy`로 내장. 첫 설치에서만 `appsettings.json`에 반영하고, 이전 설치가 감지되면 기존 설정 유지 |
+| `scripts/deploy-agents.ps1` | `-UseEmbeddedToken` 추가. 토큰 파일 없이 주소만 있는 INI와 래퍼를 생성해 내장 토큰 방식으로 배포 가능 |
+| `README.md`, `docs/{INSTALLER,DEPLOYMENT,PILOT,RELEASE}.md`, `scripts/agent-install.sample.ini`, 릴리스 노트 | 내장 토큰 동작 표, secret 설정, 보안 주의 사항 반영 |
+| `Directory.Build.props`, `.iss`, `.wixproj`, 문서 예제 | 버전 0.1.25로 갱신 |
+
+### 검증
+
+- Release 빌드 경고 0/오류 0, 전체 테스트 165/165 통과.
+- 두 Inno 스크립트 BOM 유지, Inno Setup 6 컴파일 성공, MSI 빌드 성공.
+- 토큰 주입 빌드 로그에서 `agent-token.txt`/`labmanager-token.txt` 컴파일 확인, 플레이스홀더 토큰 주입 시 빌드 중단 확인.
+- `deploy-agents.ps1`의 외부 토큰/내장 토큰 두 모드 패키지 생성 확인.
+
+---
+
 ## 2026-11-22 — 자아성찰 심층 감사와 설치/배포 오류 수정 (v0.1.24)
 
 ### 배경

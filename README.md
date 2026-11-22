@@ -278,6 +278,9 @@ AgentTokenFile=agent-token.txt
 ```
 
 토큰은 명령줄이나 설정 파일에 직접 쓰지 않고 별도 파일로만 전달합니다.
+릴리스 빌드에 토큰 secret이 설정되어 있으면 설치 exe에 **첫 설치 전용 토큰**이 포함되어 있어
+위 파일 없이도 초기 설치가 가능합니다. 명시한 토큰 파일이 있으면 그것이 우선하고,
+업데이트에서는 내장 토큰을 절대 사용하지 않고 기존 설정을 유지합니다.
 설치 파일의 전체 옵션과 체크리스트는 [`docs/INSTALLER.md`](docs/INSTALLER.md)를 참고하세요.
 
 MSI는 대안으로 유지됩니다. MSI는 서비스(`C:\Program Files\UpdateAgent\Service`)와 오버레이 헬퍼

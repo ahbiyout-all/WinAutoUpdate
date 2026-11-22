@@ -136,6 +136,9 @@ jobs:
       - name: Build Inno Setup installers
         env:
           ISCC_PATH: ${{ steps.inno.outputs.iscc }}
+          UPDATEAGENT_AGENT_TOKEN: ${{ secrets.UPDATEAGENT_AGENT_TOKEN }}
+          UPDATEAGENT_LABMANAGER_ADMIN_TOKEN: ${{ secrets.UPDATEAGENT_LABMANAGER_ADMIN_TOKEN }}
+          UPDATEAGENT_LABMANAGER_AGENT_TOKEN: ${{ secrets.UPDATEAGENT_LABMANAGER_AGENT_TOKEN }}
         run: .\scripts\build-inno.ps1 -NoPublish -IsccPath $env:ISCC_PATH
 
       - name: Build MSI (alternative)
@@ -184,6 +187,8 @@ jobs:
           $lines.Add(('.\UpdateAgent.Agent-Setup-{0}-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -f $version))
           $lines.Add('```')
           $lines.Add('- 토큰 값은 INI에 쓰지 않고 토큰 파일 첫 줄에만 둡니다. 명령줄 `/LabManagerUrl`, `/AgentTokenFile`은 대안으로 지원합니다.')
+          $lines.Add('- 릴리스 빌드에 `UPDATEAGENT_*` 토큰 secret이 설정되어 있으면 설치 exe에 **첫 설치 전용 토큰**이 포함됩니다. 명시적 외부 토큰 파일이 있으면 그것이 우선하고, 업데이트에서는 내장 토큰을 절대 사용하지 않습니다.')
+          $lines.Add('- 내장 토큰은 설치 파일에서 추출할 수 있으므로 파일럿용으로 취급하고, 설치 직후 관리자 토큰을 교체하세요.')
           $lines.Add('- 전체 안내: https://github.com/ahbiyout-all/WinAutoUpdate/blob/master/docs/INSTALLER.md')
           $lines.Add('')
           $lines.Add('## 참고')

@@ -134,7 +134,14 @@ STUDENT-02,AA:BB:CC:DD:EE:02,192.168.0.102
   -InventoryCsv ".\inventory.csv" `
   -AgentTokenFile "$env:TEMP\updateagent-lab\agent-token.txt" `
   -LabManagerUrl "http://labmanager:5080"
+
+# 릴리스 설치 exe에 첫 설치용 토큰이 내장되어 있다면 토큰 파일 없이 생성
+.\scripts\deploy-agents.ps1 -InventoryCsv ".\inventory.csv" -UseEmbeddedToken
 ```
+
+`-UseEmbeddedToken`을 쓰면 패키지에 `agent-token.txt`가 없고 `agent-install.ini`에는 주소만 들어갑니다.
+첫 설치는 설치 exe의 내장 토큰을 사용하고, 업데이트는 내장 토큰을 무시하고 기존 설정을 유지합니다.
+두 옵션(`-AgentTokenFile`, `-UseEmbeddedToken`)은 동시에 쓸 수 없습니다.
 
 결과 (`deploy\agents\` — Git에서 제외됨):
 
@@ -161,7 +168,9 @@ AgentTokenFile=agent-token.txt
 상대 경로는 설치 exe가 있는 폴더 기준입니다. **토큰 값은 설정 파일에 쓰지 않고** 토큰 파일의 첫 줄에만 둡니다.
 INI는 BOM 없이 저장하고, 값 뒤의 `; 주석`은 사용하지 마세요.
 토큰 파일이 없는 업그레이드는 기존 설치가 감지되고 기존 `agent.json`이 유효한 경우에만 설정을 유지하고,
-새 설치에서 누락되거나 명령줄 값이 있으면 중단됩니다.
+새 설치에서 누락되거나 명령줄 값이 있으면 중단됩니다. 단, 릴리스 빌드에 `UPDATEAGENT_AGENT_TOKEN` secret이
+포함되어 있으면 첫 설치에서 내장 토큰을 사용하므로 외부 토큰 파일 없이도 설치됩니다.
+명시적 토큰 파일은 항상 우선하며, 업데이트에서는 내장 토큰을 읽지 않습니다.
 
 `install-agent.cmd`는 관리자 권한을 확인한 뒤 다음을 수행합니다.
 
@@ -419,4 +428,4 @@ Invoke-WebRequest "http://127.0.0.1:5080/api/admin/audit" -Headers @{ "X-Admin-T
   OS 안내 문구/정책 해석 정확도 개선(`v0.1.17`).
 - 2026-11-22: 설치 exe와 같은 폴더의 `agent-install.ini` 자동 읽기와 PC별 패키지 생성 추가(`v0.1.23`).
 - 2026-11-22: 자아성찰 심층 감사 반영 — 설치 전 검증, 그룹 방화벽 규칙 실제 등록, 토큰 ACL/삭제 확인,
-  업그레이드 시 기존 설정 보존, `/Upgrade` 래퍼 옵션(`v0.1.24`).
+  업그레이드 시 기존 설정 보존, `/Upgrade` 래퍼 옵션(`v0.1.25`).

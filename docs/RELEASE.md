@@ -13,7 +13,7 @@
 버전은 **`Directory.Build.props`의 `<Version>` 하나**만 사용합니다.
 
 ```xml
-<Version>0.1.24</Version>
+<Version>0.1.25</Version>
 ```
 
 이 값이 다음 위치에 그대로 반영됩니다.
@@ -32,7 +32,7 @@
 폴백 버전도 같은 값으로 수동 갱신해야 합니다. `build-inno.ps1`/`build-msi.ps1`이 불일치를 검사해
 빌드를 중단합니다.
 
-버전은 `Major.Minor.Build` 형식의 숫자 3자리만 사용합니다(예: `0.1.24`).
+버전은 `Major.Minor.Build` 형식의 숫자 3자리만 사용합니다(예: `0.1.25`).
 `0.1.0-beta` 같은 접두/접미사는 릴리스 파일 이름과 Inno `VersionInfoVersion`을 깨뜨리므로 사용하지 않습니다.
 
 ## 2. 릴리스 흐름
@@ -65,13 +65,17 @@ LabManager는 30분마다(강제 확인 시 즉시) GitHub Releases API를 조�
 - .NET SDK 10
 - Inno Setup 6 (`ISCC.exe`)
 - GitHub 인증: `gh auth login` 또는 Git Credential Manager
+- 첫 설치용 토큰을 설치 exe에 넣으려면 저장소 Settings → Secrets and variables → Actions에
+  `UPDATEAGENT_AGENT_TOKEN`, `UPDATEAGENT_LABMANAGER_ADMIN_TOKEN`,
+  `UPDATEAGENT_LABMANAGER_AGENT_TOKEN`을 등록합니다. LabManager 두 값은 반드시 함께 등록합니다.
+  등록하지 않으면 내장 토큰이 들어가지 않으므로 배포 시 외부 토큰 파일을 지정해야 합니다.
 - 저장소 원격(`origin`)은 스크립트가 없으면 자동 추가합니다.
   `https://github.com/ahbiyout-all/WinAutoUpdate.git`
 
 ### 사용법
 
 ```powershell
-# 패치 버전 올림: 0.1.23 -> 0.1.24
+# 패치 버전 올림: 0.1.24 -> 0.1.25
 .\scripts\github-push.ps1 -Bump patch -Message "Fix firewall rule cleanup"
 
 # 마이너/메이저
@@ -167,7 +171,7 @@ UpdateAgent.Agent-<버전>-x64.msi        (대안)
 
 ## 6. 태그와 릴리스 규칙
 
-- 태그 형식: `v<Major.Minor.Build>` (예: `v0.1.24`)
+- 태그 형식: `v<Major.Minor.Build>` (예: `v0.1.25`)
 - 태그와 `Directory.Build.props` 버전은 **반드시 같아야** 합니다.
 - 같은 버전으로 다시 릴리스하지 않습니다. 수정은 Build 번호를 올립니다.
 - 릴리스 노트에는 최소한 아래를 포함합니다.

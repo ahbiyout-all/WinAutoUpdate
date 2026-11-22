@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.24"
+  #define AppVersion "0.1.25"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -87,8 +87,10 @@ Name: "desktopicon"; Description: "바탕화면에 UpdateAgent LabManager 바로
 ; 헤드리스 API 서버와 브라우저 앱 모드 런처를 같은 폴더에 설치한다.
 ; wwwroot(대시보드)도 서버가 제공하므로 함께 설치된다.
 ; 문서/심볼/압축 파일은 스테이징에서 제거된다.
-Source: "{#StageRoot}\*"; DestDir: "{app}"; Excludes: "appsettings.json"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#StageRoot}\*"; DestDir: "{app}"; Excludes: "appsettings.json,labmanager-token.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#StageRoot}\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
+; 첫 설치에서만 읽는 내장 토큰. 설치 폴더에는 복사하지 않는다.
+Source: "{#StageRoot}\labmanager-token.txt"; Flags: dontcopy
 
 [InstallDelete]
 ; Remove all stale files and directories from earlier upgrades, not just wwwroot.
@@ -108,6 +110,9 @@ Filename: "{app}\UpdateAgent.LabManager.Desktop.exe"; WorkingDir: "{app}"; Descr
 [Code]
 var
   OldInnoUninstall: String;
+  FirstInstall: Boolean;
+  BundledAdminToken: String;
+  BundledAgentToken: String;
   LabManagerConfigFile: String;
   LabManagerConfigBackup: String;
   LabManagerConfigRestoreNeeded: Boolean;
@@ -120,6 +125,7 @@ const
   FirewallGroup = 'UpdateAgent LabManager';
   SampleAdminToken = 'sample-admin-token-replace-before-pilot';
   SampleAgentToken = 'sample-agent-token-replace-before-pilot';
+  BundledTokenFileName = 'labmanager-token.txt';
   NoticeSeconds = {#NoticeDelaySeconds};
 
 function ReplaceAllText(const S, OldPat, NewPat: String): String; forward;
@@ -277,7 +283,110 @@ function InitializeSetup: Boolean;
 begin
   { 종료 → 언인스톨 → 설치 순서는 PrepareToInstall에서 안내와 함께 수행한다. }
   OldInnoUninstall := FindInnoUninstallString;
+  FirstInstall := OldInnoUninstall = '';
   Result := True;
+end;
+
+function IsPlaceholderToken(const Value: String): Boolean;
+var
+  UpperToken: String;
+begin
+  UpperToken := Uppercase(Trim(Value));
+  Result := Copy(UpperToken, 1, 10) = 'CHANGE-ME-';
+  if (not Result) and (Length(UpperToken) >= 21) then
+    Result := (Copy(UpperToken, 1, 7) = 'SAMPLE-') and
+      (Copy(UpperToken, Length(UpperToken) - 20, 21) = '-REPLACE-BEFORE-PILOT');
+end;
+
+function NormalizeTokenLine(const Value: String): String;
+var
+  S: String;
+begin
+  S := Trim(Value);
+  if (Length(S) > 0) and (S[1] = #65279) then
+    Delete(S, 1, 1);
+  Result := Trim(S);
+end;
+
+{ 업데이트에서는 내장 토큰을 읽지 않는다. 첫 설치에서만 임시 파일을 추출해 검증한다. }
+function ValidateBundledLabManagerTokens: String;
+var
+  Path: String;
+  Lines: TArrayOfString;
+  AdminToken, AgentToken: String;
+begin
+  Result := '';
+  BundledAdminToken := '';
+  BundledAgentToken := '';
+  if not FirstInstall then Exit;
+
+  Path := ExpandConstant('{tmp}\' + BundledTokenFileName);
+  if not FileExists(Path) then
+    ExtractTemporaryFile(BundledTokenFileName);
+  if not FileExists(Path) then
+  begin
+    Result := '첫 설치용 내장 LabManager 토큰 파일을 찾을 수 없습니다.';
+    Exit;
+  end;
+
+  if (not LoadStringsFromFile(Path, Lines)) or (GetArrayLength(Lines) < 2) then
+  begin
+    Result := '첫 설치용 내장 LabManager 토큰 파일에 AdminToken과 AgentToken 두 줄이 없습니다.';
+    Exit;
+  end;
+
+  AdminToken := NormalizeTokenLine(Lines[0]);
+  AgentToken := NormalizeTokenLine(Lines[1]);
+  if (AdminToken = '') or (AgentToken = '') then
+  begin
+    Result := '첫 설치용 내장 LabManager 토큰 파일에 빈 값이 있습니다.';
+    Exit;
+  end;
+  if IsPlaceholderToken(AdminToken) or IsPlaceholderToken(AgentToken) then
+  begin
+    Result := '첫 설치용 내장 LabManager 토큰에 기본/샘플 값이 있습니다. 실제 토큰으로 다시 빌드하세요.';
+    Exit;
+  end;
+
+  BundledAdminToken := AdminToken;
+  BundledAgentToken := AgentToken;
+  Log('Using embedded first-install LabManager tokens (values hidden).');
+end;
+
+{ 첫 설치에서만 appsettings.json의 토큰을 내장 값으로 교체한다. }
+function ApplyBundledLabManagerTokens: Boolean;
+var
+  Path, RuntimeTokenPath, Text: String;
+  Lines: TArrayOfString;
+  I: Integer;
+begin
+  Result := False;
+  if (not FirstInstall) or (BundledAdminToken = '') or (BundledAgentToken = '') then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  { 이전 설치 흔적이 남은 런타임 관리자 토큰이 있으면 내장 토큰이 우선되도록 제거한다. }
+  RuntimeTokenPath := ExpandConstant('{localappdata}\UpdateAgent\LabManager\runtime-admin-token.json');
+  if FileExists(RuntimeTokenPath) then
+    DeleteFile(RuntimeTokenPath);
+
+  Path := ExpandConstant('{app}\appsettings.json');
+  if not LoadStringsFromFile(Path, Lines) then Exit;
+
+  Text := '';
+  for I := 0 to GetArrayLength(Lines) - 1 do
+    Text := Text + Lines[I] + #13#10;
+
+  Text := ReplaceAllText(Text, 'change-me-admin-token', BundledAdminToken);
+  Text := ReplaceAllText(Text, SampleAdminToken, BundledAdminToken);
+  Text := ReplaceAllText(Text, 'change-me-agent-token', BundledAgentToken);
+  Text := ReplaceAllText(Text, SampleAgentToken, BundledAgentToken);
+
+  SetArrayLength(Lines, 1);
+  Lines[0] := Text;
+  Result := SaveStringsToUTF8File(Path, Lines, False);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -286,6 +395,10 @@ var
   UninstallExe: String;
 begin
   Result := '';
+
+  { 어떤 것도 지우기 전에 내장 토큰을 검증한다. 업데이트에서는 이 함수가 아무 것도 하지 않는다. }
+  Result := ValidateBundledLabManagerTokens;
+  if Result <> '' then Exit;
 
   { 언인스톨보다 먼저 모든 실행 중인 앱을 종료한다. 종료 실패 시 설치를 중단한다. }
   ShowStepNotice('기존 앱 종료',
@@ -604,6 +717,11 @@ begin
       DeleteFile(LabManagerConfigBackup);
       LabManagerConfigRestoreNeeded := False;
     end;
+
+    { 첫 설치에서만 내장 토큰을 appsettings.json에 반영한다.
+      기존 설치를 업데이트하는 경우 이 함수는 아무 것도 바꾸지 않는다. }
+    if not ApplyBundledLabManagerTokens then
+      RaiseException('첫 설치용 내장 LabManager 토큰을 설정에 반영하지 못해 설치를 중단합니다.');
 
     if not ApplyFirewallRules then
       RaiseException('LabManager 방화벽 규칙을 등록하지 못해 설치를 중단합니다. ' +

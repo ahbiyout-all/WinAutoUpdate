@@ -13,7 +13,11 @@ compiles the installers with Inno Setup 6:
 With -AgentOnly only the student-PC installer is staged and compiled.
 
 Each installer installs individual (unpacked, multi-file) application folders.
-The setup files never contain LabManager URL, agent token or any other secret.
+LabManager URL is never embedded. When the UPDATEAGENT_* token environment
+variables are set, the setup files include a first-install-only token file:
+  agent-token.txt      single line, used by the Agent installer on first install
+  labmanager-token.txt two lines (AdminToken, AgentToken), first install only
+Updates ignore these embedded files and keep the existing configuration.
 
 Run from a normal PowerShell prompt. Inno Setup 6 must be installed.
 
@@ -60,6 +64,10 @@ $labManagerIss = Join-Path $innoDir "UpdateAgent.LabManager.iss"
 $noticeRtf = Join-Path $repoRoot "installer\UpdateAgent.Agent.Installer\payload\notice.ko.rtf"
 $payloadAppSettings = Join-Path $repoRoot "installer\UpdateAgent.Agent.Installer\payload\appsettings.json"
 
+$bundledAgentTokenName = 'agent-token.txt'
+$bundledLabManagerTokenName = 'labmanager-token.txt'
+$allowedBundledTokenNames = @($bundledAgentTokenName, $bundledLabManagerTokenName)
+
 function Get-VersionFromBuildProps {
     param([string]$Path)
 
@@ -85,6 +93,40 @@ function ConvertTo-ThreePartVersion {
     $parts = @($Value.Split('.'))
     while ($parts.Count -lt 3) { $parts += '0' }
     return ($parts[0..2] -join '.')
+}
+
+function Get-FirstLine {
+    param([string]$Value)
+
+    if ($null -eq $Value) { return '' }
+    $lines = @($Value -split '[\r\n]+')
+    if ($lines.Count -eq 0) { return '' }
+    return $lines[0].Trim()
+}
+
+function Assert-BundledTokenValue {
+    param([string]$Value, [string]$Name)
+
+    $token = Get-FirstLine $Value
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        throw "$Name is empty. Set a real token before building a release installer."
+    }
+    $lower = $token.ToLowerInvariant()
+    if ($lower.StartsWith('change-me-') -or
+        ($lower.StartsWith('sample-') -and $lower.EndsWith('-replace-before-pilot'))) {
+        throw "$Name is still a placeholder. Set a real token before building a release installer."
+    }
+    return $token
+}
+
+function Write-BundledTokenFile {
+    param([string]$Path, [string[]]$Lines)
+
+    $content = ''
+    if ($Lines.Count -gt 0) {
+        $content = ($Lines -join "`r`n") + "`r`n"
+    }
+    [IO.File]::WriteAllText($Path, $content, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 function Assert-PublishFolder {
@@ -180,9 +222,11 @@ function Get-BlockedEntries {
                 Where-Object { $blockedFolders -contains $_.ToLowerInvariant() })
         }
 
-        if ($inBlockedFolder -or
-            $blockedNames -contains $_.Name.ToLowerInvariant() -or
-            $blockedExtensions -contains $_.Extension.ToLowerInvariant()) {
+        $isBundledToken = $allowedBundledTokenNames -contains $_.Name.ToLowerInvariant()
+        if (-not $isBundledToken -and
+            ($inBlockedFolder -or
+             $blockedNames -contains $_.Name.ToLowerInvariant() -or
+             $blockedExtensions -contains $_.Extension.ToLowerInvariant())) {
             $blocked.Add($relative)
         }
     }
@@ -327,6 +371,35 @@ if ($removed.Count -gt 0) {
     foreach ($item in $removed) { Write-Verbose "  removed: $item" }
 }
 
+# 첫 설치 전용 토큰 파일은 정리 이후에 스테이징한다(.txt는 기본 제외 대상).
+# 값이 없으면 빈 파일을 넣어 ISCC가 항상 같은 파일 목록을 컴파일하게 하고,
+# 인스톨러가 빈 파일을 "내장 토큰 없음"으로 처리한다.
+$agentTokenFromEnv = $env:UPDATEAGENT_AGENT_TOKEN
+$agentTokenLines = @()
+if (-not [string]::IsNullOrWhiteSpace($agentTokenFromEnv)) {
+    $agentTokenLines = @(Assert-BundledTokenValue -Value $agentTokenFromEnv -Name 'UPDATEAGENT_AGENT_TOKEN')
+    Write-Host 'Embedded first-install agent token file (value hidden).'
+}
+Write-BundledTokenFile -Path (Join-Path $agentStage $bundledAgentTokenName) -Lines $agentTokenLines
+
+if (-not $AgentOnly) {
+    $adminTokenFromEnv = $env:UPDATEAGENT_LABMANAGER_ADMIN_TOKEN
+    $labAgentTokenFromEnv = $env:UPDATEAGENT_LABMANAGER_AGENT_TOKEN
+    $hasAdminToken = -not [string]::IsNullOrWhiteSpace($adminTokenFromEnv)
+    $hasLabAgentToken = -not [string]::IsNullOrWhiteSpace($labAgentTokenFromEnv)
+    if ($hasAdminToken -ne $hasLabAgentToken) {
+        throw 'Set both UPDATEAGENT_LABMANAGER_ADMIN_TOKEN and UPDATEAGENT_LABMANAGER_AGENT_TOKEN, or neither.'
+    }
+    $labManagerTokenLines = @()
+    if ($hasAdminToken) {
+        $adminToken = Assert-BundledTokenValue -Value $adminTokenFromEnv -Name 'UPDATEAGENT_LABMANAGER_ADMIN_TOKEN'
+        $labAgentToken = Assert-BundledTokenValue -Value $labAgentTokenFromEnv -Name 'UPDATEAGENT_LABMANAGER_AGENT_TOKEN'
+        $labManagerTokenLines = @($adminToken, $labAgentToken)
+        Write-Host 'Embedded first-install LabManager token file (values hidden).'
+    }
+    Write-BundledTokenFile -Path (Join-Path $labManagerStage $bundledLabManagerTokenName) -Lines $labManagerTokenLines
+}
+
 Write-Host ""
 Write-Host "Checking the included file set..." -ForegroundColor Cyan
 if (-not $SkipValidation) {
@@ -335,14 +408,16 @@ if (-not $SkipValidation) {
         "Service\appsettings.json",
         "SessionHelper\UpdateAgent.SessionHelper.exe",
         "Desktop\UpdateAgent.Agent.Desktop.exe",
-        "Cli\UpdateAgent.Cli.exe"
+        "Cli\UpdateAgent.Cli.exe",
+        $bundledAgentTokenName
     )
     if (-not $AgentOnly) {
         Assert-IncludedFileSet -Root $labManagerStage -Label "LabManager" -RequiredFiles @(
             "UpdateAgent.LabManager.exe",
             "UpdateAgent.LabManager.Desktop.exe",
             "wwwroot\index.html",
-            "appsettings.json"
+            "appsettings.json",
+            $bundledLabManagerTokenName
         )
     }
 }

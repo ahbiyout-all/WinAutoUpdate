@@ -209,6 +209,27 @@ AgentTokenFile=agent-token.txt
 
 `scripts\deploy-agents.ps1`이 PC별 패키지에 이 설정 파일을 자동으로 생성합니다.
 
+#### 첫 설치 전용 내장 토큰 (v0.1.25 이상)
+
+릴리스 빌드에서 `UPDATEAGENT_AGENT_TOKEN`(학생 PC)과
+`UPDATEAGENT_LABMANAGER_ADMIN_TOKEN`/`UPDATEAGENT_LABMANAGER_AGENT_TOKEN`(교사 PC) secret이
+설정되면 설치 exe 안에 **첫 설치에서만 읽는 토큰 파일**이 들어갑니다. 설치 폴더에는 남기지 않습니다.
+
+| 제품 | 상황 | 외부 토큰 지정 | 결과 |
+|---|---|---|---|
+| Agent | 첫 설치 | 없음 | 내장 `agent-token.txt` 첫 줄을 사용 |
+| Agent | 첫 설치 | 있음(`/AgentTokenFile` 또는 INI) | 외부 토큰 우선 |
+| Agent | 업데이트 | 없음 | 내장 토큰 무시, 기존 `agent.json` 유지 |
+| Agent | 업데이트 | 있음 | 외부 토큰으로 교체 |
+| LabManager | 첫 설치 | 해당 없음 | 내장 두 줄(1행 AdminToken, 2행 AgentToken)을 `appsettings.json`에 반영 |
+| LabManager | 업데이트 | 해당 없음 | 내장 토큰 무시, 기존 `appsettings.json` 유지 |
+
+- 내장 토큰이 비어 있거나 `change-me-*`, `sample-*-replace-before-pilot`이면 첫 설치가 중단됩니다.
+- 이전 설치가 감지되면 내장 파일을 꺼내지도 않으므로 업데이트 결과에 영향을 주지 않습니다.
+- 내장 토큰은 설치 파일에서 추출할 수 있습니다. 파일럿 전용으로 취급하고 설치 직후
+  대시보드의 **서버 토큰 변경**으로 관리자 토큰을 교체하세요.
+- secret이 없는 로컬/사설 빌드에서는 내장 파일이 비어 있으므로 외부 토큰 파일을 지정해야 합니다.
+
 #### 실패 모드
 
 모든 입력 검증은 기존 설치를 제거하거나 파일을 교체하기 **전에** 수행됩니다. 아래 경우에는
@@ -217,7 +238,7 @@ PC를 변경하지 않고 설치가 중단됩니다(`/VERYSILENT`에서는 오�
 
 - INI 또는 명령줄 값이 없거나 한쪽만 있음, INI가 BOM 포함/잘못된 형식
 - `LabManagerUrl`이 절대 `http`/`https` URL이 아님
-- 토큰 파일이 없거나 비었거나 샘플/기본 토큰임
+- 토큰 파일이 없거나 비었거나 샘플/기본 토큰임(첫 설치에서 내장 토큰도 동일하게 검사)
 - `agent.json` 생성/ACL 제한 실패, 방화벽 규칙 등록 실패
 
 방화벽 규칙은 `netsh`가 지원하지 않는 그룹 등록을 PowerShell `New-NetFirewallRule`로 처리합니다.
@@ -231,8 +252,10 @@ PC를 변경하지 않고 설치가 중단됩니다(`/VERYSILENT`에서는 오�
 .\UpdateAgent.LabManager-Setup-<버전>-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
-설치 후에는 샘플 토큰(`sample-*-token-replace-before-pilot`)으로 서버가 바로 시작되지만,
-이 값은 공개된 예시이므로 **파일럿 전에 반드시 실제 토큰으로 교체**해야 합니다.
+릴리스 빌드에 토큰 secret이 설정되어 있으면 첫 설치에서 내장 토큰이 `appsettings.json`에 반영되어
+서버가 바로 시작됩니다. secret이 없으면 설치 파일에 들어 있는 샘플 토큰
+(`sample-*-token-replace-before-pilot`)으로 시작하므로 **파일럿 전에 반드시 실제 토큰으로 교체**해야 합니다.
+업데이트에서는 내장 토큰을 무시하고 기존 설정을 유지합니다.
 `C:\Program Files\UpdateAgent\LabManager\appsettings.json`의 `AdminToken`과 `AgentToken`을 모두 변경하세요.
 `change-me-*`가 남아 있으면 서버가 시작되지 않습니다.
 `AgentToken`은 에이전트와 동일한 값으로 설정합니다. 관리자 토큰(`AdminToken`)은 서버 설정이면서

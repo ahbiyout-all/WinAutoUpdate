@@ -27,7 +27,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.24"
+  #define AppVersion "0.1.25"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -98,6 +98,8 @@ Source: "{#StageRoot}\Service\appsettings.json"; DestDir: "{app}\Service"; Flags
 Source: "{#StageRoot}\SessionHelper\*"; DestDir: "{app}\SessionHelper"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#StageRoot}\Desktop\*"; DestDir: "{app}\Desktop"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#StageRoot}\Cli\*"; DestDir: "{app}\Cli"; Flags: ignoreversion recursesubdirs createallsubdirs
+; 첫 설치에서만 읽는 내장 토큰. 설치 폴더에는 복사하지 않는다.
+Source: "{#StageRoot}\agent-token.txt"; Flags: dontcopy
 
 [InstallDelete]
 ; 덮어쓰기 설치에서 이전 버전의 잔여 파일을 남기지 않는다.
@@ -117,6 +119,7 @@ Filename: "{app}\Desktop\UpdateAgent.Agent.Desktop.exe"; WorkingDir: "{app}\Desk
 var
   OldInnoUninstall: String;
   OldMsiProduct: String;
+  FirstInstall: Boolean;
   AgentConfigFile: String;
   AgentConfigBackup: String;
   AgentConfigRestoreNeeded: Boolean;
@@ -136,6 +139,7 @@ const
   NoticeSeconds = {#NoticeDelaySeconds};
   InstallConfigFileName = 'agent-install.ini';
   InstallConfigSection = 'Agent';
+  BundledTokenFileName = 'agent-token.txt';
 
 procedure ValidateAgentConfigRequest; forward;
 
@@ -573,6 +577,7 @@ begin
   { 종료 → 언인스톨 → 설치 순서는 PrepareToInstall에서 안내와 함께 수행한다. }
   OldInnoUninstall := FindInnoUninstallString;
   OldMsiProduct := FindMsiProductCode;
+  FirstInstall := (OldInnoUninstall = '') and (OldMsiProduct = '');
   Result := True;
 end;
 
@@ -794,13 +799,14 @@ begin
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ScriptPath + '"');
 end;
 
-{ 기존 설치를 제거하기 전에 모든 입력을 검증한다. 여기서 실패하면 PC를 변경하지 않는다. }
+{ 기존 설치를 제거하기 전에 모든 입력을 검증한다. 여기서 실패하면 PC를 변경하지 않는다.
+  내장 토큰은 첫 설치 전용이며, 업데이트에서는 명시적 외부 토큰 파일만 사용한다. }
 procedure ValidateAgentConfigRequest;
 var
-  IniPath, ExistingConfigPath, Url, TokenFile, Token: String;
+  IniPath, ExistingConfigPath, Url, TokenFile, Token, BundledTokenPath: String;
   TokenLines: TArrayOfString;
   IniLines: TArrayOfString;
-  SettingsFromCmd: Boolean;
+  SettingsFromCmd, HasExternalToken, CanKeepExisting: Boolean;
 begin
   AgentConfigWriteFailed := False;
   AgentConfigRequested := False;
@@ -817,8 +823,12 @@ begin
   SettingsFromCmd := CmdParamExists('/LabManagerUrl=') or CmdParamExists('/AgentTokenFile=');
   Url := InstallSetting(IniPath, 'LabManagerUrl', '/LabManagerUrl=');
   TokenFile := InstallSetting(IniPath, 'AgentTokenFile', '/AgentTokenFile=');
+  HasExternalToken := TokenFile <> '';
 
-  if (Url = '') and (TokenFile = '') then
+  ExistingConfigPath := ExpandConstant('{commonappdata}\UpdateAgent\agent.json');
+  CanKeepExisting := (not FirstInstall) and IsValidExistingAgentConfig(ExistingConfigPath);
+
+  if (Url = '') and (not HasExternalToken) then
   begin
     { BOM이 있는 INI는 Windows API가 섹션을 찾지 못해 조용히 빈 값이 된다. }
     if FileExists(IniPath) and (not SettingsFromCmd) and
@@ -827,15 +837,31 @@ begin
       AgentConfigWriteFailed := True;
       AgentConfigError := InstallConfigFileName + '에 설정 값을 읽을 수 없습니다. ' +
         'UTF-8 BOM 없이 저장하고 [Agent] 섹션을 확인하세요.';
+      Exit;
     end;
+
+    if CanKeepExisting then
+    begin
+      Log('No install settings after a previous install; keeping the existing agent.json.');
+      AgentConfigSkipWrite := True;
+      Exit;
+    end;
+
+    AgentConfigWriteFailed := True;
+    if FirstInstall then
+      AgentConfigError := 'LabManagerUrl이 없습니다. ' + InstallConfigFileName + ' 또는 ' +
+        '/LabManagerUrl=http://labmanager:5080 을 지정하세요.'
+    else
+      AgentConfigError := '기존 설치가 감지되었지만 유효한 agent.json과 설치 설정이 없습니다. ' +
+        InstallConfigFileName + ' 또는 명령줄 인자를 확인하세요.';
     Exit;
   end;
 
-  if (Url = '') or (TokenFile = '') then
+  if Url = '' then
   begin
     AgentConfigWriteFailed := True;
-    AgentConfigError := 'LabManagerUrl과 AgentTokenFile은 함께 지정해야 합니다. ' +
-      '명령줄 인자 또는 설치 프로그램과 같은 폴더의 ' + InstallConfigFileName + '을 확인하세요.';
+    AgentConfigError := 'LabManagerUrl이 없습니다. ' + InstallConfigFileName + ' 또는 ' +
+      '/LabManagerUrl=http://labmanager:5080 을 지정하세요.';
     Exit;
   end;
 
@@ -847,19 +873,50 @@ begin
     Exit;
   end;
 
-  TokenFile := ResolveInstallTokenFile(TokenFile);
+  { 업데이트에서는 외부 토큰 파일이 명시된 경우에만 설정을 갱신한다.
+    내장 토큰은 첫 설치에서만 사용하고, 업데이트에서는 절대 읽지 않는다. }
+  if (not HasExternalToken) and CanKeepExisting then
+  begin
+    Log('Upgrade detected without an explicit token file; keeping the existing agent.json.');
+    AgentConfigSkipWrite := True;
+    Exit;
+  end;
+
+  if not HasExternalToken then
+  begin
+    if not FirstInstall then
+    begin
+      AgentConfigWriteFailed := True;
+      AgentConfigError := '기존 설치가 감지되었지만 agent.json이 유효하지 않습니다. ' +
+        '명령줄 /AgentTokenFile 또는 ' + InstallConfigFileName + '에 토큰 파일을 지정하세요.';
+      Exit;
+    end;
+
+    BundledTokenPath := ExpandConstant('{tmp}\' + BundledTokenFileName);
+    if not FileExists(BundledTokenPath) then
+      ExtractTemporaryFile(BundledTokenFileName);
+    if not FileExists(BundledTokenPath) then
+    begin
+      AgentConfigWriteFailed := True;
+      AgentConfigError := '첫 설치용 내장 에이전트 토큰 파일을 찾을 수 없습니다. ' +
+        InstallConfigFileName + '에 AgentTokenFile을 지정하세요.';
+      Exit;
+    end;
+    TokenFile := BundledTokenPath;
+    Log('Using embedded first-install agent token (value hidden).');
+  end
+  else
+    TokenFile := ResolveInstallTokenFile(TokenFile);
+
   Log('Agent token file: ' + TokenFile);
 
-  { 배포 스크립트는 설치 성공 후 토큰 파일을 삭제한다. 같은 폴더의 INI가 남아 있어도
-    실제로 이전 설치가 감지되고 기존 agent.json이 유효하면 업그레이드로 보고 설정을 유지한다.
-    명령줄 값이 하나라도 있으면 엄격히 검사한다. }
-  ExistingConfigPath := ExpandConstant('{commonappdata}\UpdateAgent\agent.json');
-  if (not SettingsFromCmd) and (not FileExists(TokenFile)) and
-     IsValidExistingAgentConfig(ExistingConfigPath) and
-     ((OldInnoUninstall <> '') or (OldMsiProduct <> '')) then
+  if not FileExists(TokenFile) then
   begin
-    Log('Token file was removed after a previous install; keeping the existing agent.json.');
-    AgentConfigSkipWrite := True;
+    AgentConfigWriteFailed := True;
+    if HasExternalToken then
+      AgentConfigError := '에이전트 토큰 파일을 읽을 수 없습니다: ' + TokenFile
+    else
+      AgentConfigError := '첫 설치용 내장 에이전트 토큰 파일을 읽을 수 없습니다.';
     Exit;
   end;
 
@@ -867,7 +924,11 @@ begin
   if (not LoadStringsFromFile(TokenFile, TokenLines)) or (GetArrayLength(TokenLines) = 0) then
   begin
     AgentConfigWriteFailed := True;
-    AgentConfigError := '에이전트 토큰 파일을 읽을 수 없습니다: ' + TokenFile;
+    if HasExternalToken then
+      AgentConfigError := '에이전트 토큰 파일이 비어 있습니다: ' + TokenFile
+    else
+      AgentConfigError := '첫 설치용 내장 에이전트 토큰이 비어 있습니다. ' +
+        '설치 프로그램을 실제 토큰으로 다시 빌드하세요.';
     Exit;
   end;
 
@@ -878,7 +939,11 @@ begin
   if Token = '' then
   begin
     AgentConfigWriteFailed := True;
-    AgentConfigError := '에이전트 토큰 파일이 비어 있습니다: ' + TokenFile;
+    if HasExternalToken then
+      AgentConfigError := '에이전트 토큰 파일이 비어 있습니다: ' + TokenFile
+    else
+      AgentConfigError := '첫 설치용 내장 에이전트 토큰이 비어 있습니다. ' +
+        '설치 프로그램을 실제 토큰으로 다시 빌드하세요.';
     Exit;
   end;
 

@@ -11,6 +11,8 @@ For each ComputerName in the CSV, creates <OutputDir>\<ComputerName>\ containing
 
 The installer reads agent-install.ini from its own folder, so no settings are
 passed on the command line. No token is ever placed on a command line.
+With -UseEmbeddedToken the token file is not copied and the INI contains only
+the LabManager URL; the installer uses its embedded first-install token.
 Generation is the default and performs
 no remote action. Packages can be copied to each PC (USB/RDP) or wrapped by
 PsExec/WinRM. Use -ExecuteLocal to run one package on the current PC.
@@ -20,14 +22,18 @@ PsExec/WinRM. Use -ExecuteLocal to run one package on the current PC.
 
 .EXAMPLE
 .\scripts\deploy-agents.ps1 -InventoryCsv .\inventory.csv -AgentTokenFile .\secure\agent-token.txt -LabManagerUrl http://192.168.0.10:5080 -ExecuteLocal -ComputerName STUDENT-01
+
+# 사용할 설치 exe에 첫 설치용 토큰이 내장되어 있다면 별도 토큰 파일 없이 배포
+.\scripts\deploy-agents.ps1 -InventoryCsv .\inventory.csv -UseEmbeddedToken
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$InventoryCsv,
 
-    [Parameter(Mandatory = $true)]
     [string]$AgentTokenFile,
+
+    [switch]$UseEmbeddedToken,
 
     [string]$InstallerPath,
     [string]$LabManagerUrl = 'http://labmanager:5080',
@@ -109,6 +115,13 @@ function Resolve-AgentTokenFile {
     return $full
 }
 
+if ($UseEmbeddedToken -and -not [string]::IsNullOrWhiteSpace($AgentTokenFile)) {
+    throw 'Use either -AgentTokenFile or -UseEmbeddedToken, not both.'
+}
+if ((-not $UseEmbeddedToken) -and [string]::IsNullOrWhiteSpace($AgentTokenFile)) {
+    throw 'Specify -AgentTokenFile, or -UseEmbeddedToken when the installer has a first-install token.'
+}
+
 if ($ExecuteLocal) { Assert-Administrator }
 
 $LabManagerUrl = $LabManagerUrl.Trim().TrimEnd('/')
@@ -162,7 +175,10 @@ if ($safeCollisions.Count -gt 0) {
 }
 
 $installer = Resolve-Installer -Explicit $InstallerPath
-$tokenPath = Resolve-AgentTokenFile -Path $AgentTokenFile
+$tokenPath = $null
+if (-not $UseEmbeddedToken) {
+    $tokenPath = Resolve-AgentTokenFile -Path $AgentTokenFile
+}
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
@@ -190,19 +206,7 @@ if not exist "%CONFIG%" (
   echo [UpdateAgent] Install config not found: %CONFIG%
   exit /b 2
 )
-if "!UPGRADE!"=="0" (
-  if not exist "%TOKEN%" (
-    echo [UpdateAgent] Token file not found: %TOKEN%
-    echo [UpdateAgent] For an upgrade without a token file, run with /Upgrade.
-    exit /b 2
-  )
-  icacls "%TOKEN%" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)" >nul 2>&1
-  if errorlevel 1 (
-    echo [UpdateAgent] Failed to restrict token file ACL: %TOKEN%
-    exit /b 4
-  )
-)
-
+__TOKEN_BLOCK__
 echo [UpdateAgent] Installing Agent for __PC__
 echo [UpdateAgent] Settings: %CONFIG%
 "%SETUP%" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
@@ -229,8 +233,30 @@ endlocal
 $iniTemplate = @'
 [Agent]
 LabManagerUrl=__URL__
-AgentTokenFile=agent-token.txt
+__TOKEN_LINE__
 '@
+
+if ($UseEmbeddedToken) {
+    $tokenBlock = 'rem First-install token is embedded in the setup executable.'
+    $tokenLine = ''
+}
+else {
+    $tokenBlock = @'
+if "!UPGRADE!"=="0" (
+  if not exist "%TOKEN%" (
+    echo [UpdateAgent] Token file not found: %TOKEN%
+    echo [UpdateAgent] For an upgrade without a token file, run with /Upgrade.
+    exit /b 2
+  )
+  icacls "%TOKEN%" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)" >nul 2>&1
+  if errorlevel 1 (
+    echo [UpdateAgent] Failed to restrict token file ACL: %TOKEN%
+    exit /b 4
+  )
+)
+'@
+    $tokenLine = 'AgentTokenFile=agent-token.txt'
+}
 
 $packages = @()
 foreach ($target in $targets) {
@@ -239,22 +265,26 @@ foreach ($target in $targets) {
     New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
 
     Copy-Item -LiteralPath $installer.FullName -Destination (Join-Path $packageDir $installer.Name) -Force
-    $tokenCopy = Join-Path $packageDir 'agent-token.txt'
-    Copy-Item -LiteralPath $tokenPath -Destination $tokenCopy -Force
-    # install-agent.cmd applies the ACL again at install time; restrict the copy now too.
-    & icacls.exe $tokenCopy '/inheritance:r' '/grant:r' '*S-1-5-32-544:(F)' '*S-1-5-18:(R)' 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not restrict ACL on generated token file: $tokenCopy"
+    if (-not $UseEmbeddedToken) {
+        $tokenCopy = Join-Path $packageDir 'agent-token.txt'
+        Copy-Item -LiteralPath $tokenPath -Destination $tokenCopy -Force
+        # install-agent.cmd applies the ACL again at install time; restrict the copy now too.
+        & icacls.exe $tokenCopy '/inheritance:r' '/grant:r' '*S-1-5-32-544:(F)' '*S-1-5-18:(R)' 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not restrict ACL on generated token file: $tokenCopy"
+        }
     }
 
     $cmd = $cmdTemplate.
         Replace('__SETUP__', $installer.Name).
-        Replace('__PC__', $safeName)
+        Replace('__PC__', $safeName).
+        Replace('__TOKEN_BLOCK__', $tokenBlock)
     $cmd = [regex]::Replace($cmd, "\r?\n", "`r`n")
     [IO.File]::WriteAllText((Join-Path $packageDir 'install-agent.cmd'), $cmd, (New-Object System.Text.UTF8Encoding($false)))
 
     $ini = [regex]::Replace(
-        $iniTemplate.Replace('__URL__', $LabManagerUrl), "\r?\n", "`r`n")
+        $iniTemplate.Replace('__URL__', $LabManagerUrl).Replace('__TOKEN_LINE__', $tokenLine),
+        "\r?\n", "`r`n")
     [IO.File]::WriteAllText((Join-Path $packageDir 'agent-install.ini'), $ini, (New-Object System.Text.UTF8Encoding($false)))
 
     $packages += [pscustomobject]@{
@@ -274,24 +304,32 @@ UpdateAgent student agent deployment packages
 
 Each <ComputerName> folder is self-contained:
   UpdateAgent.Agent-Setup-<version>-x64.exe  silent installer
-  agent-install.ini                          LabManager URL + token file name
-  agent-token.txt                            shared agent token (do not distribute widely)
-  install-agent.cmd                          elevated silent install + token cleanup
+  agent-install.ini                          LabManager URL __CONFIG_TOKEN__
+__PACKAGE_TOKEN__  install-agent.cmd                          elevated silent install + token cleanup
 
 Run install-agent.cmd on the matching student PC from an elevated prompt.
 The installer reads agent-install.ini from its own folder, so no settings are
-passed on the command line. Generated token copies are restricted to
-Administrators/SYSTEM and the script restricts them again before installing.
-The token file is deleted after a successful install; if the install fails,
-the token file is kept for retry.
+passed on the command line. __TOKEN_NOTE__
 
-For an upgrade after the token file has been deleted, run:
+For an upgrade that needs no token file, run:
   install-agent.cmd /Upgrade
 This keeps the existing agent.json when a previous installation is detected.
 
 Protect this output folder and delete it after the rollout is verified.
 See docs/DEPLOYMENT.md for the full lab runbook.
 '@
+if ($UseEmbeddedToken) {
+    $readme = $readme.
+        Replace('__CONFIG_TOKEN__', '(no token file path)').
+        Replace('__PACKAGE_TOKEN__', '').
+        Replace('__TOKEN_NOTE__', 'The setup executable contains the first-install token; updates ignore it.')
+}
+else {
+    $readme = $readme.
+        Replace('__CONFIG_TOKEN__', '+ token file name').
+        Replace('__PACKAGE_TOKEN__', "  agent-token.txt                            shared agent token (do not distribute widely)`n").
+        Replace('__TOKEN_NOTE__', 'Generated token copies are restricted to Administrators/SYSTEM and the script restricts them again before installing. The token file is deleted after a successful install; if the install fails, the token file is kept for retry.')
+}
 [IO.File]::WriteAllText((Join-Path $OutputDir 'README.txt'), $readme, (New-Object System.Text.UTF8Encoding($false)))
 
 Write-Host ''
@@ -302,7 +340,12 @@ foreach ($package in $packages) {
     Write-Host "  $($package.ComputerName) -> $($package.PackageDir)"
 }
 Write-Host ''
-Write-Host 'Token files are copies of the agent token. Protect the output folder and remove it after rollout.' -ForegroundColor Yellow
+if ($UseEmbeddedToken) {
+    Write-Host 'The token is embedded in the setup executable. Protect the output folder and remove it after rollout.' -ForegroundColor Yellow
+}
+else {
+    Write-Host 'Token files are copies of the agent token. Protect the output folder and remove it after rollout.' -ForegroundColor Yellow
+}
 
 if ($ExecuteLocal) {
     if ($packages.Count -ne 1) {
