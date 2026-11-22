@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-11-22 — 기존 설치를 찾을 수 없어도 설치 계속 (v0.1.18)
+
+### 배경
+
+- 교사 PC에서 LabManager Setup을 실행하면 레지스트리에 이전 설치 정보만 남고 실제 제거 프로그램 파일이 없는 경우,
+  `기존 UpdateAgent LabManager 제거 프로그램을 찾을 수 없어 설치를 중단합니다.` 오류로 설치가 멈췄습니다.
+- 이미 제거된 설치와 실제 제거 실패를 같은 오류로 처리한 것이 원인입니다.
+
+### 변경
+
+| 파일 | 변경 |
+|---|---|
+| `installer/InnoSetup/UpdateAgent.LabManager.iss` | 제거 프로그램 경로가 없거나 파일이 없으면 로그를 남기고 설치 계속. 실제 언인스톨 실행/완료 실패만 중단 |
+| `installer/InnoSetup/UpdateAgent.Agent.iss` | 동일하게 처리하고, MSI `1605`(이미 설치되지 않은 제품)도 경고 후 계속 |
+| `scripts/install-agent-msi.ps1` | Inno 제거 프로그램이 없으면 경고 후 건너뛰고 설치 계속 |
+| `scripts/build-inno.ps1` | 로컬 Windows PowerShell 5.1에서 `ISCC /?`의 stderr 출력 때문에 빌드가 중단되던 문제 수정 |
+| `docs/INSTALLER.md`, `docs/MSI.md` | 새 동작 반영 |
+
+### 검증
+
+- Inno Setup 6로 Agent/LabManager 설치 프로그램 컴파일 성공, `.iss` BOM `EF BB BF` 유지.
+- `node --check` 2개 통과, Release 빌드 경고 0/오류 0, 테스트 **146개 통과**, 시크릿 스캔 162개 파일 정상.
+
+### 릴리스 검증
+
+- 워크플로: https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/44995229665 (성공)
+- 릴리스: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.18
+- 자산 3개 확인, 릴리스 노트 해시와 API `digest` 일치:
+  - `UpdateAgent.Agent-Setup-0.1.18-x64.exe`: `ea8e866d33412f176f1324c3edb694ae11ff33368fbeeede9b37032eb494e07f`
+  - `UpdateAgent.LabManager-Setup-0.1.18-x64.exe`: `37f201216f5053dbcc1c849ad45665757c24a4c6fab59dd6291c594ec9f07def`
+  - `UpdateAgent.Agent-0.1.18-x64.msi`: `64e2c1e844000cc88d6363679c0342d08cd3031a972b752a829164221c112288`
+
+---
+
 ## 2026-11-21 — 5회 연속 자아성찰과 오류 수정 (v0.1.17)
 
 ### 배경
