@@ -32,8 +32,16 @@
 
 ### 검증
 
-- Release 빌드 경고 0/오류 0, 테스트 **151개 통과**.
-- 릴리스 검증은 배포 후 기록합니다.
+- `node --check` 2개 통과, Release 빌드 경고 0/오류 0, 테스트 **151개 통과**, 시크릿 스캔 165개 파일 정상.
+
+### 릴리스 검증
+
+- 워크플로: https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/44996535976 (성공)
+- 릴리스: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.19
+- 자산 3개 확인, 릴리스 노트 해시와 API `digest` 일치:
+  - `UpdateAgent.Agent-Setup-0.1.19-x64.exe`: `6f072d2140f65f73a4f318f20423ee840061a2f1374e6bb91533df22ea70814e`
+  - `UpdateAgent.LabManager-Setup-0.1.19-x64.exe`: `4672e5782ec350a3ecd2b7762fcf79f4ae598eb8dd0b58807168a36b928ada9d`
+  - `UpdateAgent.Agent-0.1.19-x64.msi`: `8c85fb6bae50c10312ca9b2ee2f22228fe1269e8543b1d39b0ef4090fefebf0e`
 
 ---
 
