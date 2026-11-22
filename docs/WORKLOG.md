@@ -26,6 +26,14 @@
 - Release 빌드 경고 0/오류 0, 전체 테스트 165/165 통과, Inno/MSI 빌드 성공.
 - 토큰 secret이 없는 상태(내장 파일 빈 값)에서 LabManager 첫 설치가 중단되지 않는 경로를 코드로 보장.
 
+### 릴리스 검증
+
+- 릴리스 워크플로 [`45018448721`](https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/45018448721) 성공.
+- release [`v0.1.26`](https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.26) 생성 및 자산 3개 다운로드·해시 검증 완료:
+  - `UpdateAgent.Agent-Setup-0.1.26-x64.exe` — `66b3cad0ef8e2effedd15c304c17c8d66346f8f56f73c5bfb6b33aba90f78324`
+  - `UpdateAgent.LabManager-Setup-0.1.26-x64.exe` — `399b8357290a4f27432860bc025f7f897ed5551cffd61e354bd0c7bf8a63683d`
+  - `UpdateAgent.Agent-0.1.26-x64.msi` — `27db0ee0dc687daae9f7560016ead6bcb54c660074fa5c90eaa5bd213ac14637`
+
 ---
 
 ## 2026-11-22 — 첫 설치 전용 내장 토큰 지원 (v0.1.25)
