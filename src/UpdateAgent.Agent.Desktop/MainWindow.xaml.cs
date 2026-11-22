@@ -48,7 +48,9 @@ public partial class MainWindow : Window
                 ActiveCard.Visibility = Visibility.Collapsed;
             }
 
-            StartButton.IsEnabled = status.ActiveJob is null || status.ActiveJob.IsTerminal;
+            var canStart = status.ActiveJob is null || status.ActiveJob.IsTerminal;
+            StartButton.IsEnabled = canStart;
+            OptionsButton.IsEnabled = canStart;
 
             RecentList.ItemsSource = status.RecentJobs;
             EmptyText.Visibility = status.RecentJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -70,6 +72,7 @@ public partial class MainWindow : Window
         var maestroConfirmed = optionsWindow.MaestroConfirmed;
 
         StartButton.IsEnabled = false;
+        OptionsButton.IsEnabled = false;
         RefreshButton.IsEnabled = false;
         try
         {
@@ -114,6 +117,8 @@ public partial class MainWindow : Window
     }
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e) => _ = RefreshAsync();
+
+    private void OptionsButton_Click(object sender, RoutedEventArgs e) => _ = StartUpdateAsync();
 
     private void StartButton_Click(object sender, RoutedEventArgs e) => _ = StartUpdateAsync();
 

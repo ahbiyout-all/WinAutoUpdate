@@ -91,6 +91,9 @@
         <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <TextBlock x:Name="UpdatedText" Text="마지막 새로고침: -" VerticalAlignment="Center"
                        Foreground="#666666" Margin="0,0,16,0" />
+            <Button x:Name="OptionsButton" Content="수동 업데이트 옵션" Width="140" Height="32" Margin="0,0,8,0"
+                    ToolTip="업데이트 범위와 재부팅/오버레이 옵션을 선택합니다."
+                    Click="OptionsButton_Click" />
             <Button x:Name="StartButton" Content="업데이트 시작" Width="110" Height="32" Margin="0,0,8,0"
                     Click="StartButton_Click" />
             <Button x:Name="RefreshButton" Content="새로고침" Width="90" Height="32" Margin="0,0,8,0"
