@@ -22,7 +22,17 @@
 
 ### 검증
 
-- (릴리스 검증 후 기록)
+- Release 빌드 경고 0/오류 0, 테스트 **157개 통과**, 시크릿 스캔 정상.
+- 릴리스 커밋: `352b939`
+- GitHub Actions: [workflow 45000721362](https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/45000721362) 성공
+- GitHub Releases: [v0.1.21](https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.21)
+- 공개 자산을 다시 내려받아 SHA-256을 확인했습니다.
+
+| 자산 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.21-x64.exe` | `87d10b76d9fa4d2ad7220b8ca856ec7ed24576271689074216c36f12d2e99ac5` |
+| `UpdateAgent.LabManager-Setup-0.1.21-x64.exe` | `25c4d711ebd0cdef0272ae97ea7770806d52617b3e7008b5e4b33833b0757062` |
+| `UpdateAgent.Agent-0.1.21-x64.msi` | `7db988c4e20e1147b4df01ff6a8fca57242df3574703cb337c29625fbccc061d` |
 
 ---
 
