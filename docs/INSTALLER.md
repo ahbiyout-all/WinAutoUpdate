@@ -171,8 +171,9 @@ C:\Program Files\UpdateAgent\LabManager\
 
 - 토큰은 **명령줄에 직접 쓰지 않습니다.** `/AgentTokenFile`은 첫 줄을 읽어
   `agent.json`에 기록하고 ACL을 제한합니다.
-- 토큰 파일은 UTF-8(BOM 없음) 또는 ASCII로 저장하세요.
-- `/LabManagerUrl`과 `/AgentTokenFile`은 함께 지정해야 합니다.
+- 토큰 파일은 UTF-8(BOM 허용) 또는 ASCII로 저장하세요. 첫 줄만 읽습니다.
+- `/LabManagerUrl`과 `/AgentTokenFile`은 **키별로** 명령줄 값이 우선하고, 없으면 같은 폴더의
+  `agent-install.ini`에서 읽습니다. 두 값이 모두 없으면 기존 `agent.json`을 유지합니다.
 
 #### 설치 파일과 같은 폴더의 설정 파일 사용 (학생 PC 배포 권장)
 
@@ -186,14 +187,42 @@ AgentTokenFile=agent-token.txt
 ```
 
 - `agent-token.txt`도 같은 폴더에 두면 됩니다. 상대 경로는 설치 exe가 있는 폴더 기준으로 해석되며,
-  `C:\...` 또는 `\\서버\공유\...` 같은 절대 경로도 그대로 사용할 수 있습니다.
+  `C:\...`, `\\서버\공유\...`, `//서버/공유/...` 같은 절대 경로도 그대로 사용할 수 있습니다.
+- INI는 **UTF-8 BOM 없이** 저장하세요. BOM이 있으면 Windows API가 `[Agent]` 섹션을 읽지 못해
+  설치가 중단됩니다. 값 뒤의 `; 주석`은 무시됩니다.
 - 설정 파일이 없으면 명령줄 인자만 사용합니다. 설정 파일도 명령줄 인자도 없으면 기존 설치의
   `agent.json`을 그대로 유지합니다.
-- 명령줄에 `/LabManagerUrl`, `/AgentTokenFile`을 함께 지정하면 **명령줄 값이 우선**합니다.
-- 두 값 중 하나만 있으면 설치가 중단됩니다. 토큰 파일의 첫 줄만 읽어 `agent.json`에 기록한 뒤
-  ACL을 제한합니다.
+- **키별로 명령줄 값이 우선**합니다. 예를 들어 `/LabManagerUrl`만 명령줄로 주고 토큰 파일은 INI에서
+  읽을 수도 있습니다. 두 값 중 하나라도 명령줄에 있으면 토큰 파일이 없을 때 업그레이드 예외를
+  적용하지 않고 설치가 중단됩니다.
+- 업그레이드 시 토큰 파일을 삭제한 뒤 같은 INI로 다시 설치하면, **기존 설치가 감지되고** 기존
+  `agent.json`이 유효할 때만 설정을 유지합니다. 설치 이력이 없거나 `agent.json`이 손상되었으면
+  토큰 파일 누락으로 설치가 중단됩니다.
+- 두 값 중 하나만 해석되면 설치가 중단됩니다. 토큰 파일의 첫 줄만 읽어 `agent.json`에 기록합니다.
+- `LabManagerUrl`은 `http://` 또는 `https://`여야 합니다. `change-me-*`,
+  `sample-*-replace-before-pilot` 형식의 토큰은 설치가 중단됩니다.
+- 기존 `agent.json`이 있으면 `LabManagerUrl`, `AgentToken`, `SessionHelperPath`만 갱신하고
+  `DryRun`, `PollIntervalSeconds` 등 나머지 설정은 유지합니다.
+- `agent.json`은 빈 파일을 먼저 만들고 ACL을 제한한 뒤 토큰을 기록하므로 일반 사용자가 토큰을
+  읽는 창이 없습니다. ACL 제한 실패도 설치 실패로 처리합니다.
 
 `scripts\deploy-agents.ps1`이 PC별 패키지에 이 설정 파일을 자동으로 생성합니다.
+
+#### 실패 모드
+
+모든 입력 검증은 기존 설치를 제거하거나 파일을 교체하기 **전에** 수행됩니다. 아래 경우에는
+PC를 변경하지 않고 설치가 중단됩니다(`/VERYSILENT`에서는 오류 창이 표시되지 않으므로
+`%TEMP%\Setup Log <날짜>.txt`를 확인하세요).
+
+- INI 또는 명령줄 값이 없거나 한쪽만 있음, INI가 BOM 포함/잘못된 형식
+- `LabManagerUrl`이 절대 `http`/`https` URL이 아님
+- 토큰 파일이 없거나 비었거나 샘플/기본 토큰임
+- `agent.json` 생성/ACL 제한 실패, 방화벽 규칙 등록 실패
+
+방화벽 규칙은 `netsh`가 지원하지 않는 그룹 등록을 PowerShell `New-NetFirewallRule`로 처리합니다.
+에이전트는 `UpdateAgent` 그룹에 `UpdateAgent Agent`, `UpdateAgent Agent <버전>` 규칙을 등록하고,
+교사 PC는 `UpdateAgent LabManager` 그룹에 TCP 5080 Domain/Private 규칙을 등록합니다.
+규칙 등록이 실패하면 설치를 중단합니다.
 
 ### 교사 PC
 

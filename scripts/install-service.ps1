@@ -22,7 +22,6 @@ $env:UPDATEAGENT_AGENT_TOKEN = "<agent-token>"
 [CmdletBinding()]
 param(
     [string]$LabManagerUrl,
-    [string]$AgentToken,
     [string]$AgentTokenFile,
     [string]$ServiceSource,
     [string]$HelperSource,
@@ -116,7 +115,7 @@ if (-not [Uri]::TryCreate($LabManagerUrl, [UriKind]::Absolute, [ref]$uri) -or
 }
 
 $AgentToken = Resolve-Secret `
-    -Value $AgentToken `
+    -Value '' `
     -File $AgentTokenFile `
     -EnvName "UPDATEAGENT_AGENT_TOKEN" `
     -Prompt "Agent token (must match LabManager AgentToken)"
@@ -124,8 +123,10 @@ $AgentToken = Resolve-Secret `
 if ([string]::IsNullOrWhiteSpace($AgentToken)) {
     throw "Agent token is required."
 }
-if ($AgentToken -eq "change-me-agent-token") {
-    Write-Warning "The default agent token is still in use. Change it before a real lab rollout."
+$lowerAgentToken = $AgentToken.ToLowerInvariant()
+if ($lowerAgentToken.StartsWith('change-me-') -or
+    ($lowerAgentToken.StartsWith('sample-') -and $lowerAgentToken.EndsWith('-replace-before-pilot'))) {
+    throw "The agent token is a default/sample placeholder. Generate a real token before rollout."
 }
 
 if ([string]::IsNullOrWhiteSpace($ServiceSource)) {

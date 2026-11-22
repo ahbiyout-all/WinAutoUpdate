@@ -134,7 +134,7 @@ if ($AgentOnly) {
     Write-Host "Next steps:"
     Write-Host "  1) Build the versioned agent output: build.bat"
     Write-Host "  2) Installer (agent only): scripts\build-inno.ps1 -AgentOnly -NoPublish"
-    Write-Host "  3) Student PC: UpdateAgent.Agent-Setup-<version>-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LabManagerUrl=http://<teacher-ip>:5080 /AgentTokenFile=<token-file>"
+    Write-Host "  3) Student PC: put agent-install.ini + token file next to UpdateAgent.Agent-Setup-<version>-x64.exe, then run it with /VERYSILENT /SUPPRESSMSGBOXES /NORESTART (or use scripts\deploy-agents.ps1)"
     Write-Host "  4) Optional on a student PC: publish\cli\UpdateAgent.Cli.exe preflight --confirm-maestro"
     Write-Host "  5) Full runbook: docs\PILOT.md (installers: docs\INSTALLER.md, release: docs\RELEASE.md)"
 } else {
@@ -142,7 +142,7 @@ if ($AgentOnly) {
     Write-Host "  1) Teacher PC: scripts\configure-labmanager.ps1, then start publish\labmanager\UpdateAgent.LabManager.Desktop.exe"
     Write-Host "  2) Installer (recommended): scripts\build-inno.ps1 -> artifacts\inno\*Setup*.exe"
     Write-Host "     Alternative MSI: scripts\build-msi.ps1 -> artifacts\msi\UpdateAgent.Agent-<version>-x64.msi"
-    Write-Host "  3) Student PC (Inno): UpdateAgent.Agent-Setup-<version>-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LabManagerUrl=http://<teacher-ip>:5080 /AgentTokenFile=<token-file>"
+    Write-Host "  3) Student PC (Inno): put agent-install.ini + token file next to UpdateAgent.Agent-Setup-<version>-x64.exe, then run it with /VERYSILENT /SUPPRESSMSGBOXES /NORESTART (or use scripts\deploy-agents.ps1)"
     Write-Host "     Student PC (MSI): scripts\install-agent-msi.ps1 -LabManagerUrl http://<teacher-ip>:5080 -ConfirmMaestro"
     Write-Host "     Student PC (legacy): scripts\install-service.ps1 -LabManagerUrl http://<teacher-ip>:5080"
     Write-Host "  4) Optional on a student PC: publish\cli\UpdateAgent.Cli.exe preflight --confirm-maestro"

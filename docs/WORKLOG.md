@@ -5,6 +5,37 @@
 
 ---
 
+## 2026-11-22 — 자아성찰 심층 감사와 설치/배포 오류 수정 (v0.1.24)
+
+### 배경
+
+- v0.1.23의 `agent-install.ini` 자동 읽기를 독립 감사 2회(인스톨러 로직, 배포 스크립트·문서 정합성)로 재검토했습니다.
+- 설정 경로·업그레이드 판정·토큰 ACL·방화벽 규칙·문서 버전 등 실제 배포를 막을 수 있는 결함을 한 번의 패치로 수정했습니다.
+
+### 변경
+
+| 파일 | 변경 |
+|---|---|
+| `installer/InnoSetup/UpdateAgent.Agent.iss` | INI 경로를 `{src}` 기준으로 수정, 키별 우선순위/ 인라인 주석/BOM 오류 처리, URL·샘플 토큰 검증, 기존 agent.json 병합, 토큰 기록 전 ACL 제한, 검증을 제거 전으로 이동, PowerShell 기반 그룹 방화벽 규칙 등록 |
+| `installer/InnoSetup/UpdateAgent.LabManager.iss` | `netsh`가 지원하지 않는 `group=` 제거 후 PowerShell `New-NetFirewallRule`로 TCP 5080 Domain/Private 규칙 등록, 실패 시 중단 |
+| `scripts/deploy-agents.ps1` | 토큰 첫 줄 검증·플레이스홀더 패턴 확대, 생성 토큰 ACL 실패 시 중단, 설치 래퍼의 ACL/삭제 실패 확인과 `/Upgrade` 옵션, 패키지 폴더 이름 충돌 검사, 버전순 인스톨러 선택 |
+| `scripts/build-inno.ps1`, `scripts/build-msi.ps1` | `.iss`/`.wixproj` 폴백 버전이 props와 다르면 빌드 중단 |
+| `scripts/{configure-agent,configure-labmanager,install-service,install-agent-msi}.ps1` | 토큰 값 명령줄 매개변수 제거, 파일/환경 변수 경로만 허용 |
+| `README.md`, `docs/{INSTALLER,DEPLOYMENT,PILOT,MSI,RELEASE}.md`, `scripts/publish.ps1`, `.github/workflows/release.yml` | 같은 폴더 INI 권장 안내, 실패 모드·업그레이드 방법, 최신 버전 예제(0.1.24) 반영 |
+
+### 검증
+
+- Release 빌드 경고 0/오류 0, 전체 테스트 165/165 통과.
+- 두 Inno 스크립트 모두 UTF-8 BOM(`EF BB BF`) 유지, Inno Setup 6 컴파일 성공.
+- PowerShell 스크립트 구문 검사, `deploy-agents.ps1` 패키지 생성/토큰 ACL/충돌·플레이스홀더 거부 확인.
+- 비밀값·개인정보 검사와 `-Bump patch -DryRun` 통과.
+
+### 릴리스 검증
+
+- (CI 완료 후 자산 해시와 워크플로 번호를 추가합니다.)
+
+---
+
 ## 2026-11-22 — 설치 파일과 같은 폴더의 설정 파일로 학생 에이전트 설치 (v0.1.23)
 
 ### 배경

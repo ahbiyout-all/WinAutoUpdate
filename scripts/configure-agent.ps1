@@ -12,8 +12,7 @@ Only the values you pass are changed. Optionally restarts the service.
 Run from an elevated PowerShell prompt.
 
 .EXAMPLE
-$env:UPDATEAGENT_AGENT_TOKEN = "<agent-token>"
-.\scripts\configure-agent.ps1 -LabManagerUrl "http://192.168.0.10:5080"
+.\scripts\configure-agent.ps1 -LabManagerUrl "http://192.168.0.10:5080" -AgentTokenFile ".\agent-token.txt"
 
 .EXAMPLE
 .\scripts\configure-agent.ps1 -DisableOverlay -RestartService
@@ -29,7 +28,6 @@ param(
     [string]$DataRoot = "C:\ProgramData\UpdateAgent",
     [string]$ServiceName = "UpdateAgentService",
     [string]$LabManagerUrl,
-    [string]$AgentToken,
     [string]$AgentTokenFile,
     [string]$SessionHelperPath,
     [switch]$EnableOverlay,
@@ -163,13 +161,12 @@ if ($PSBoundParameters.ContainsKey('LabManagerUrl')) {
 }
 
 $tokenWasRequested =
-    $PSBoundParameters.ContainsKey('AgentToken') -or
     $PSBoundParameters.ContainsKey('AgentTokenFile') -or
     -not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_AGENT_TOKEN)
 
 if ($tokenWasRequested) {
-    $resolvedToken = $AgentToken
-    if ([string]::IsNullOrWhiteSpace($resolvedToken)) {
+    $resolvedToken = ''
+    if (-not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_AGENT_TOKEN)) {
         $resolvedToken = $env:UPDATEAGENT_AGENT_TOKEN
     }
     if ([string]::IsNullOrWhiteSpace($resolvedToken) -and -not [string]::IsNullOrWhiteSpace($AgentTokenFile)) {
@@ -178,13 +175,16 @@ if ($tokenWasRequested) {
     if ([string]::IsNullOrWhiteSpace($resolvedToken)) {
         $resolvedToken = Resolve-Secret -Value "" -File ""
     }
+    $resolvedToken = $resolvedToken.Trim().TrimStart([char]0xFEFF)
     if ([string]::IsNullOrWhiteSpace($resolvedToken)) {
         throw "Agent token is empty."
     }
-    if ($resolvedToken -eq "change-me-agent-token") {
-        Write-Warning "The default agent token is still in use."
+    $lowerToken = $resolvedToken.ToLowerInvariant()
+    if ($lowerToken.StartsWith('change-me-') -or
+        ($lowerToken.StartsWith('sample-') -and $lowerToken.EndsWith('-replace-before-pilot'))) {
+        throw "The agent token is a default/sample placeholder. Generate a real token first."
     }
-    Set-JsonProperty $agent "AgentToken" $resolvedToken.Trim()
+    Set-JsonProperty $agent "AgentToken" $resolvedToken
     $changes.Add("AgentToken=***")
 }
 
@@ -215,7 +215,7 @@ if ($DisableDryRun) {
 }
 
 if ($changes.Count -eq 0) {
-    throw "No changes specified. Pass at least one of: -LabManagerUrl, -AgentToken, -AgentTokenFile, -SessionHelperPath, -EnableOverlay, -DisableOverlay, -EnableDryRun, -DisableDryRun."
+    throw "No changes specified. Pass at least one of: -LabManagerUrl, -AgentTokenFile, -SessionHelperPath, -EnableOverlay, -DisableOverlay, -EnableDryRun, -DisableDryRun."
 }
 
 Write-JsonAtomic -Path $ConfigPath -Object $config

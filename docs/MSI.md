@@ -351,7 +351,7 @@ builder.Configuration
 ### 6-4. 토큰 취급 원칙
 
 - 토큰을 `msiexec` 명령줄, MSI 속성, MSI 로그에 **절대 넣지 않습니다.**
-- 래퍼는 토큰 파일(UTF-8 BOM 허용) 또는 `-AgentToken`/환경 변수에서 읽습니다.
+- 래퍼는 토큰 파일(UTF-8 BOM 허용) 또는 `UPDATEAGENT_AGENT_TOKEN` 환경 변수에서 읽습니다. 토큰 값을 명령줄 매개변수로 받지 않습니다.
 - `agent.json`은 같은 폴더의 임시 파일에 쓴 뒤 원자적으로 교체합니다.
 - ACL은 `icacls`에 SID를 사용해 한국어/영어 OS 모두에서 동작하게 합니다.
 
@@ -449,8 +449,8 @@ installer\
 artifacts\
   staging\                    ← build-msi.ps1이 만드는 임시 게시물
   msi\
-    UpdateAgent.Agent-0.1.22-x64.msi
-    UpdateAgent.Agent-0.1.22-x64.msi.sha256
+    UpdateAgent.Agent-0.1.24-x64.msi
+    UpdateAgent.Agent-0.1.24-x64.msi.sha256
     build-info.json
 ```
 
@@ -461,7 +461,7 @@ artifacts\
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
-    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.22</ProductVersion>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.24</ProductVersion>
     <PublishRoot Condition="'$(PublishRoot)' == ''">$(MSBuildThisFileDirectory)..\..\publish</PublishRoot>
     <DefineConstants>ProductVersion=$(ProductVersion);PublishRoot=$(PublishRoot)</DefineConstants>
   </PropertyGroup>
@@ -490,7 +490,7 @@ artifacts\
 
 ```powershell
 .\scripts\publish.ps1
-.\scripts\build-msi.ps1 -ProductVersion 0.1.22
+.\scripts\build-msi.ps1 -ProductVersion 0.1.24
 ```
 
 ```powershell
@@ -499,12 +499,12 @@ dotnet build .\installer\UpdateAgent.Agent.Installer\UpdateAgent.Agent.Installer
   -c Release `
   -t:Rebuild `
   -p:Platform=x64 `
-  -p:ProductVersion=0.1.22 `
+  -p:ProductVersion=0.1.24 `
   -p:PublishRoot="$PWD\artifacts\staging"
 
 # 검증 (저장소 루트에서)
 dotnet tool restore
-dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.22-x64.msi
+dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.24-x64.msi
 ```
 
 ### 8-4. 버전 규칙
@@ -549,7 +549,7 @@ self-contained 게시물이 약 413MB이므로, CAB 압축 후 MSI는 대략 150
 | 매개변수 | 필수 | 설명 |
 |---|---|---|
 | `-LabManagerUrl` | 최초 설치 시 | `http://<교사-PC-IP>:5080`. 기존 `agent.json`이 있으면 생략 가능 |
-| `-AgentTokenFile` | 최초 설치 시 | BOM 허용 토큰 파일. `-AgentToken`/환경 변수 대체 가능. 기존 `agent.json`이 있으면 생략 가능 |
+| `-AgentTokenFile` | 최초 설치 시 | BOM 허용 토큰 파일. `UPDATEAGENT_AGENT_TOKEN` 환경 변수로 대체 가능. 기존 `agent.json`이 있으면 생략 가능 |
 | `-MsiPath` | 아니오 | 기본: `artifacts\msi\`에서 최신 MSI |
 | `-DryRun` | 아니오 | 에이전트 DRY RUN 모드 |
 | `-DisableOverlay` | 아니오 | 오버레이 비활성화 |
@@ -558,7 +558,7 @@ self-contained 게시물이 약 413MB이므로, CAB 압축 후 MSI는 대략 150
 | `-Quiet` | 아니오 | `/qn` 무인 설치. 기본은 최소 UI 표시 |
 | `-LogPath` | 아니오 | msiexec 로그 경로 |
 
-\* 최초 설치에서는 토큰을 `-AgentTokenFile`, `-AgentToken`, `UPDATEAGENT_AGENT_TOKEN` 중 하나로 제공해야 합니다. 업그레이드에서 생략하면 기존 `agent.json` 값을 유지합니다.
+\* 최초 설치에서는 토큰을 `-AgentTokenFile` 또는 `UPDATEAGENT_AGENT_TOKEN` 중 하나로 제공해야 합니다. 업그레이드에서 생략하면 기존 `agent.json` 값을 유지합니다.
 
 동작 순서:
 
@@ -587,13 +587,13 @@ $env:UPDATEAGENT_AGENT_TOKEN = Get-Content ".\pilot-agent-token.txt" -Raw
 
 ```powershell
 # 최소 UI (수동 설치)
-msiexec /i ".\UpdateAgent.Agent-0.1.22-x64.msi" /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.24-x64.msi" /norestart /l*v ".\install.log"
 
 # 무인 설치
-msiexec /i ".\UpdateAgent.Agent-0.1.22-x64.msi" /qn /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.24-x64.msi" /qn /norestart /l*v ".\install.log"
 
 # 무인 + CLI
-msiexec /i ".\UpdateAgent.Agent-0.1.22-x64.msi" /qn /norestart ADDLOCAL=CliFeature
+msiexec /i ".\UpdateAgent.Agent-0.1.24-x64.msi" /qn /norestart ADDLOCAL=CliFeature
 ```
 
 - 토큰/URL은 이 명령으로 설정되지 않습니다. 설치 후 래퍼 또는 `configure-agent.ps1`을 실행해야 원격 관리가 활성화됩니다.
@@ -612,7 +612,7 @@ msiexec /i ".\UpdateAgent.Agent-0.1.22-x64.msi" /qn /norestart ADDLOCAL=CliFeatu
 ### 10-4. 제거
 
 ```powershell
-msiexec /x ".\UpdateAgent.Agent-0.1.22-x64.msi" /qn /norestart /l*v ".\uninstall.log"
+msiexec /x ".\UpdateAgent.Agent-0.1.24-x64.msi" /qn /norestart /l*v ".\uninstall.log"
 ```
 
 또는:

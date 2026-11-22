@@ -19,7 +19,6 @@ param(
     [string]$PublishDir,
     [string]$AdminToken,
     [string]$AdminTokenFile,
-    [string]$AgentToken,
     [string]$AgentTokenFile,
     [string]$ListenUrl = "http://0.0.0.0:5080",
     [switch]$AllowDefaultTokens
@@ -76,19 +75,22 @@ $AdminToken = Resolve-Secret `
     -Prompt "Admin token (dashboard/API login)"
 
 $AgentToken = Resolve-Secret `
-    -Value $AgentToken `
+    -Value '' `
     -File $AgentTokenFile `
     -EnvName "UPDATEAGENT_AGENT_TOKEN" `
     -Prompt "Agent token (must match every student PC)"
 
 if ([string]::IsNullOrWhiteSpace($AdminToken)) { throw "Admin token is required." }
 if ([string]::IsNullOrWhiteSpace($AgentToken)) { throw "Agent token is required." }
-$placeholderTokens = @(
-    "change-me-admin-token", "change-me-agent-token",
-    "sample-admin-token-replace-before-pilot", "sample-agent-token-replace-before-pilot"
-)
+function Test-PlaceholderToken {
+    param([string]$Value)
+    $lower = $Value.ToLowerInvariant()
+    return ($lower.StartsWith('change-me-') -or
+        ($lower.StartsWith('sample-') -and $lower.EndsWith('-replace-before-pilot')))
+}
+
 if (-not $AllowDefaultTokens -and
-    ($placeholderTokens -contains $AdminToken -or $placeholderTokens -contains $AgentToken)) {
+    (Test-PlaceholderToken $AdminToken -or Test-PlaceholderToken $AgentToken)) {
     throw "A default or sample token is still in use. Generate new tokens for the pilot, or pass -AllowDefaultTokens for local development only."
 }
 

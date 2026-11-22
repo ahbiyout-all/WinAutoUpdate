@@ -107,6 +107,19 @@ function Assert-InnoScriptBom {
     }
 }
 
+function Assert-InnoFallbackVersion {
+    param([string]$Path, [string]$Expected)
+
+    $text = Get-Content -LiteralPath $Path -Raw
+    if ($text -notmatch '#define\s+AppVersion\s+"([^"]+)"') {
+        throw "No fallback AppVersion define found in $Path."
+    }
+    $fallback = $Matches[1].Trim()
+    if ($fallback -ne $Expected) {
+        throw ("Stale fallback AppVersion in {0}: {1} (expected {2})." -f $Path, $fallback, $Expected)
+    }
+}
+
 function Find-Iscc {
     param([string]$Explicit)
 
@@ -222,6 +235,8 @@ if (-not (Test-Path -LiteralPath $agentIss)) { throw "Inno script not found: $ag
 if (-not $AgentOnly -and -not (Test-Path -LiteralPath $labManagerIss)) { throw "Inno script not found: $labManagerIss" }
 Assert-InnoScriptBom -Path $agentIss
 if (-not $AgentOnly) { Assert-InnoScriptBom -Path $labManagerIss }
+Assert-InnoFallbackVersion -Path $agentIss -Expected $ProductVersion
+if (-not $AgentOnly) { Assert-InnoFallbackVersion -Path $labManagerIss -Expected $ProductVersion }
 if (-not (Test-Path -LiteralPath $noticeRtf)) { throw "License notice not found: $noticeRtf" }
 
 $serviceSource       = Join-Path $PublishRoot "agent\service"

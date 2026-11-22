@@ -174,22 +174,30 @@ Phase 0 파일럿에서는 Inno Setup을 먼저 검증하고, 문제가 있으�
 #   artifacts\inno\UpdateAgent.LabManager-Setup-<버전>-x64.exe
 ```
 
-학생 PC에서 **관리자 PowerShell**을 열고 토큰 파일과 함께 무인 설치합니다.
+학생 PC에서 **관리자 PowerShell**을 열고 같은 폴더의 설정 파일로 무인 설치합니다.
+
+```ini
+; agent-install.ini (설치 exe와 같은 폴더)
+[Agent]
+LabManagerUrl=http://<교사-PC-IP>:5080
+AgentTokenFile=agent-token.txt
+```
 
 ```powershell
 Set-Location "<복사한 폴더>"
 
-.\UpdateAgent.Agent-Setup-<버전>-x64.exe `
-  /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
-  /LabManagerUrl=http://<교사-PC-IP>:5080 `
-  /AgentTokenFile="<agent-token.txt 경로>"
+.\UpdateAgent.Agent-Setup-<버전>-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
-- 토큰은 명령줄/로그에 남지 않도록 `/AgentTokenFile`로만 전달합니다.
+- 토큰 값은 설정 파일에 쓰지 않고 `AgentTokenFile`이 가리키는 파일의 첫 줄에만 둡니다.
+- 명령줄 `/LabManagerUrl`, `/AgentTokenFile`도 계속 지원하지만 배포에는 INI를 권장합니다.
 - 기존 Inno 설치가 있으면 무인 설치에서는 자동으로 제거 후 설치합니다.
 - `%ProgramData%\UpdateAgent\agent.json`과 로그/데이터는 업그레이드 후에도 유지됩니다.
-- 방화벽 규칙은 `UpdateAgent Agent`, `UpdateAgent Agent <버전>` 두 개가 등록됩니다.
+- 방화벽 규칙은 `UpdateAgent` 그룹의 `UpdateAgent Agent`, `UpdateAgent Agent <버전>` 두 개가 등록됩니다.
 - 설치 후 서비스(`UpdateAgentService`)가 자동 시작됩니다.
+- INI/BOM, URL, 토큰 검증은 기존 설치 제거 전에 수행되며 실패 시 설치가 중단됩니다.
+  원인은 `%TEMP%\Setup Log <날짜>.txt`에서 확인하세요.
+- 토큰 파일이 삭제된 뒤 재설치할 때는 `install-agent.cmd /Upgrade`를 사용하거나 새 패키지를 생성하세요.
 
 ### 4-B. MSI 설치 (대안)
 

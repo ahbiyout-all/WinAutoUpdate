@@ -27,7 +27,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.22"
+  #define AppVersion "0.1.24"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -121,6 +121,11 @@ var
   AgentConfigBackup: String;
   AgentConfigRestoreNeeded: Boolean;
   AgentConfigWriteFailed: Boolean;
+  AgentConfigError: String;
+  AgentConfigRequested: Boolean;
+  AgentConfigSkipWrite: Boolean;
+  AgentConfigUrl: String;
+  AgentConfigToken: String;
   ServiceRecoveryDisabled: Boolean;
   StepNoticePage: TOutputProgressWizardPage;
 
@@ -131,6 +136,8 @@ const
   NoticeSeconds = {#NoticeDelaySeconds};
   InstallConfigFileName = 'agent-install.ini';
   InstallConfigSection = 'Agent';
+
+procedure ValidateAgentConfigRequest; forward;
 
 procedure InitializeWizard;
 begin
@@ -435,6 +442,18 @@ begin
   end;
 end;
 
+{ INI 값의 뒤에 붙은 ; 주석은 값에서 제거한다. 명령줄 값은 그대로 사용한다. }
+function StripIniComment(const Value: String): String;
+var
+  P: Integer;
+begin
+  P := Pos(';', Value);
+  if P > 0 then
+    Result := Trim(Copy(Value, 1, P - 1))
+  else
+    Result := Trim(Value);
+end;
+
 { 명령줄 값이 우선하고, 없으면 설치 exe와 같은 폴더의 INI에서 읽는다. }
 function InstallSetting(const IniPath, Key, CmdPrefix: String): String;
 begin
@@ -446,7 +465,7 @@ begin
 
   Result := '';
   if FileExists(IniPath) then
-    Result := Trim(GetIniString(InstallConfigSection, Key, '', IniPath));
+    Result := StripIniComment(GetIniString(InstallConfigSection, Key, '', IniPath));
 end;
 
 { 상대 경로는 설치 exe가 있는 폴더 기준으로 해석한다. }
@@ -458,10 +477,71 @@ begin
   if Copy(TokenFile, 1, 2) = '.\' then
     TokenFile := Copy(TokenFile, 3, Length(TokenFile) - 2);
 
-  if (Pos(':', TokenFile) = 2) or (Pos('\\', TokenFile) = 1) then
+  { //server/share 도 UNC로 취급한다. }
+  if Copy(TokenFile, 1, 2) = '//' then
+    TokenFile := '\\' + Copy(TokenFile, 3, Length(TokenFile) - 2);
+
+  if (Pos(':', TokenFile) = 2) or (Copy(TokenFile, 1, 2) = '\\') then
     Result := TokenFile
   else
     Result := ExpandConstant('{src}\' + TokenFile);
+end;
+
+// 설정 파일 경로도 소스 폴더 상수를 사용해야 한다. ParamStr(0)은 상대 경로/경로 없는 실행에서
+// 빈 문자열이 될 수 있어 현재 작업 폴더를 잘못 읽는다.
+function ResolveInstallConfigFile: String;
+begin
+  Result := ExpandConstant('{src}\' + InstallConfigFileName);
+end;
+
+function NormalizeInstallUrl(const Value: String): String;
+begin
+  Result := Trim(Value);
+  while (Length(Result) > 0) and (Result[Length(Result)] = '/') do
+    Delete(Result, Length(Result), 1);
+end;
+
+function IsValidInstallUrl(const Value: String): Boolean;
+var
+  UpperValue: String;
+begin
+  UpperValue := Uppercase(Value);
+  Result := (Copy(UpperValue, 1, 7) = 'HTTP://') or
+    (Copy(UpperValue, 1, 8) = 'HTTPS://');
+end;
+
+function IsPlaceholderToken(const Value: String): Boolean;
+var
+  UpperToken: String;
+begin
+  UpperToken := Uppercase(Trim(Value));
+  Result := Copy(UpperToken, 1, 10) = 'CHANGE-ME-';
+  if (not Result) and (Length(UpperToken) >= 21) then
+    Result := (Copy(UpperToken, 1, 7) = 'SAMPLE-') and
+      (Copy(UpperToken, Length(UpperToken) - 20, 21) = '-REPLACE-BEFORE-PILOT');
+end;
+
+{ 업그레이드에서 기존 agent.json을 유지하기 전에 최소한의 형태를 확인한다. }
+function IsValidExistingAgentConfig(const Path: String): Boolean;
+var
+  Lines: TArrayOfString;
+  Text: String;
+  I: Integer;
+begin
+  Result := False;
+  if not FileExists(Path) then Exit;
+  if not LoadStringsFromFile(Path, Lines) then Exit;
+
+  Text := '';
+  for I := 0 to GetArrayLength(Lines) - 1 do
+    Text := Text + Lines[I];
+  Text := Trim(Text);
+  if Length(Text) < 2 then Exit;
+
+  Result := (Text[1] = '{') and (Text[Length(Text)] = '}') and
+    (Pos('"Agent"', Text) > 0) and
+    (Pos('"LabManagerUrl"', Text) > 0) and
+    (Pos('"AgentToken"', Text) > 0);
 end;
 
 function JsonEscape(const Value: String): String;
@@ -502,6 +582,14 @@ var
   UninstallExe: String;
 begin
   Result := '';
+
+  { 어떤 것도 지우기 전에 설정/토큰을 검증한다. 실패하면 PC를 변경하지 않는다. }
+  ValidateAgentConfigRequest;
+  if AgentConfigWriteFailed then
+  begin
+    Result := AgentConfigError;
+    Exit;
+  end;
 
   { 언인스톨보다 먼저 모든 실행 중인 앱을 종료한다. 종료 실패 시 설치를 중단한다. }
   ShowStepNotice('기존 앱 종료',
@@ -630,56 +718,132 @@ begin
   Result := True;
 end;
 
-procedure AddFirewallRule(const RuleName, ProgramPath, Description: String);
+function ReplaceAllText(const S, OldPat, NewPat: String): String;
 var
-  Netsh: String;
+  P, StartPos: Integer;
 begin
-  Netsh := ExpandConstant('{sys}\netsh.exe');
-  RunHidden(Netsh, 'advfirewall firewall add rule name="' + RuleName +
-    '" dir=in action=allow program="' + ProgramPath +
-    '" enable=yes profile=any group="' + FirewallGroup +
-    '" description="' + Description + '"');
+  Result := S;
+  StartPos := 1;
+  while StartPos <= Length(Result) do
+  begin
+    P := Pos(OldPat, Copy(Result, StartPos, Length(Result) - StartPos + 1));
+    if P = 0 then Break;
+    P := P + StartPos - 1;
+    Result := Copy(Result, 1, P - 1) + NewPat +
+      Copy(Result, P + Length(OldPat), Length(Result) - P - Length(OldPat) + 1);
+    StartPos := P + Length(NewPat);
+  end;
 end;
 
-procedure ApplyFirewallRules;
+function PsLiteral(const Value: String): String;
+begin
+  Result := '''' + ReplaceAllText(Value, '''', '''''') + '''';
+end;
+
+{ netsh advfirewall firewall add/delete rule은 group= 인자를 지원하지 않는다.
+  그룹 규칙을 실제로 만들고 정리하려면 PowerShell NetSecurity cmdlet을 사용해야 한다. }
+function ApplyFirewallRules: Boolean;
 var
-  ServiceExe: String;
-  Netsh: String;
+  ServiceExe, ScriptPath, PowerShellExe: String;
+  Lines: TArrayOfString;
+  Code: Integer;
 begin
   ServiceExe := ExpandConstant('{app}\Service\UpdateAgent.Service.exe');
-  Netsh := ExpandConstant('{sys}\netsh.exe');
+  ScriptPath := ExpandConstant('{tmp}\UpdateAgentFirewall.ps1');
+  SetArrayLength(Lines, 4);
+  Lines[0] := '$ErrorActionPreference = ''Stop''';
+  Lines[1] := 'Get-NetFirewallRule -Group ' + PsLiteral(FirewallGroup) +
+    ' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction Stop';
+  Lines[2] := 'New-NetFirewallRule -DisplayName ''UpdateAgent Agent'' -Direction Inbound' +
+    ' -Action Allow -Program ' + PsLiteral(ServiceExe) +
+    ' -Enabled True -Profile Any -Group ' + PsLiteral(FirewallGroup) +
+    ' -Description ''UpdateAgent Service (all networks)'' -ErrorAction Stop | Out-Null';
+  Lines[3] := 'New-NetFirewallRule -DisplayName ' + PsLiteral('UpdateAgent Agent {#AppVersion}') +
+    ' -Direction Inbound -Action Allow -Program ' + PsLiteral(ServiceExe) +
+    ' -Enabled True -Profile Any -Group ' + PsLiteral(FirewallGroup) +
+    ' -Description ''UpdateAgent Service (versioned rule)'' -ErrorAction Stop | Out-Null';
 
-  { 이전 버전이 만든 버전별 규칙까지 그룹 단위로 정리한 뒤 다시 등록한다. }
-  RunHidden(Netsh, 'advfirewall firewall delete rule name=all group="' + FirewallGroup + '"');
-  AddFirewallRule('UpdateAgent Agent', ServiceExe, 'UpdateAgent Service (all networks)');
-  AddFirewallRule('UpdateAgent Agent {#AppVersion}', ServiceExe, 'UpdateAgent Service (versioned rule)');
+  if not SaveStringsToUTF8File(ScriptPath, Lines, False) then
+  begin
+    Log('Could not create the firewall setup script: ' + ScriptPath);
+    Result := False;
+    Exit;
+  end;
+
+  PowerShellExe := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  Code := RunHidden(PowerShellExe,
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ScriptPath + '"');
+  Result := Code = 0;
+  if not Result then
+    Log('Failed to configure UpdateAgent firewall rules (code ' + IntToStr(Code) + ')');
 end;
 
-procedure WriteAgentConfigIfRequested;
+procedure RemoveFirewallRules;
 var
-  IniPath, ExistingConfigPath: String;
-  Url, TokenFile, Token, ConfigPath, SessionHelper: String;
-  TokenLines: TArrayOfString;
+  ScriptPath, PowerShellExe: String;
   Lines: TArrayOfString;
-  TokenFileFromCmd: Boolean;
+begin
+  ScriptPath := ExpandConstant('{tmp}\UpdateAgentFirewallRemove.ps1');
+  SetArrayLength(Lines, 2);
+  Lines[0] := '$ErrorActionPreference = ''SilentlyContinue''';
+  Lines[1] := 'Get-NetFirewallRule -Group ' + PsLiteral(FirewallGroup) +
+    ' | Remove-NetFirewallRule -ErrorAction SilentlyContinue';
+  if not SaveStringsToUTF8File(ScriptPath, Lines, False) then Exit;
+  PowerShellExe := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  RunHidden(PowerShellExe,
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ScriptPath + '"');
+end;
+
+{ 기존 설치를 제거하기 전에 모든 입력을 검증한다. 여기서 실패하면 PC를 변경하지 않는다. }
+procedure ValidateAgentConfigRequest;
+var
+  IniPath, ExistingConfigPath, Url, TokenFile, Token: String;
+  TokenLines: TArrayOfString;
+  IniLines: TArrayOfString;
+  SettingsFromCmd: Boolean;
 begin
   AgentConfigWriteFailed := False;
-  IniPath := AddBackslash(ExtractFileDir(ParamStr(0))) + InstallConfigFileName;
+  AgentConfigRequested := False;
+  AgentConfigSkipWrite := False;
+  AgentConfigError := '';
+  AgentConfigUrl := '';
+  AgentConfigToken := '';
+
+  IniPath := ResolveInstallConfigFile;
   if FileExists(IniPath) then
     Log('Loading agent install settings from: ' + IniPath);
 
-  TokenFileFromCmd := CmdParamExists('/AgentTokenFile=');
+  { 두 키 중 하나라도 명령줄로 왔으면 재설정 의사로 본다. 부분 overriding도 같다. }
+  SettingsFromCmd := CmdParamExists('/LabManagerUrl=') or CmdParamExists('/AgentTokenFile=');
   Url := InstallSetting(IniPath, 'LabManagerUrl', '/LabManagerUrl=');
   TokenFile := InstallSetting(IniPath, 'AgentTokenFile', '/AgentTokenFile=');
-  if (Url = '') and (TokenFile = '') then Exit;
+
+  if (Url = '') and (TokenFile = '') then
+  begin
+    { BOM이 있는 INI는 Windows API가 섹션을 찾지 못해 조용히 빈 값이 된다. }
+    if FileExists(IniPath) and (not SettingsFromCmd) and
+       LoadStringsFromFile(IniPath, IniLines) and (GetArrayLength(IniLines) > 0) then
+    begin
+      AgentConfigWriteFailed := True;
+      AgentConfigError := InstallConfigFileName + '에 설정 값을 읽을 수 없습니다. ' +
+        'UTF-8 BOM 없이 저장하고 [Agent] 섹션을 확인하세요.';
+    end;
+    Exit;
+  end;
 
   if (Url = '') or (TokenFile = '') then
   begin
     AgentConfigWriteFailed := True;
-    if not WizardSilent then
-      MsgBox('LabManagerUrl과 AgentTokenFile은 함께 지정해야 합니다. ' +
-        '명령줄 인자 또는 설치 프로그램과 같은 폴더의 ' + InstallConfigFileName + '을 확인하세요.',
-        mbError, MB_OK);
+    AgentConfigError := 'LabManagerUrl과 AgentTokenFile은 함께 지정해야 합니다. ' +
+      '명령줄 인자 또는 설치 프로그램과 같은 폴더의 ' + InstallConfigFileName + '을 확인하세요.';
+    Exit;
+  end;
+
+  Url := NormalizeInstallUrl(Url);
+  if not IsValidInstallUrl(Url) then
+  begin
+    AgentConfigWriteFailed := True;
+    AgentConfigError := 'LabManagerUrl은 http:// 또는 https:// 로 시작해야 합니다: ' + Url;
     Exit;
   end;
 
@@ -687,11 +851,15 @@ begin
   Log('Agent token file: ' + TokenFile);
 
   { 배포 스크립트는 설치 성공 후 토큰 파일을 삭제한다. 같은 폴더의 INI가 남아 있어도
-    기존 agent.json이 있으면 업그레이드로 보고 설정을 유지한다. 명령줄 지정은 엄격히 검사한다. }
+    실제로 이전 설치가 감지되고 기존 agent.json이 유효하면 업그레이드로 보고 설정을 유지한다.
+    명령줄 값이 하나라도 있으면 엄격히 검사한다. }
   ExistingConfigPath := ExpandConstant('{commonappdata}\UpdateAgent\agent.json');
-  if (not TokenFileFromCmd) and (not FileExists(TokenFile)) and FileExists(ExistingConfigPath) then
+  if (not SettingsFromCmd) and (not FileExists(TokenFile)) and
+     IsValidExistingAgentConfig(ExistingConfigPath) and
+     ((OldInnoUninstall <> '') or (OldMsiProduct <> '')) then
   begin
     Log('Token file was removed after a previous install; keeping the existing agent.json.');
+    AgentConfigSkipWrite := True;
     Exit;
   end;
 
@@ -699,8 +867,7 @@ begin
   if (not LoadStringsFromFile(TokenFile, TokenLines)) or (GetArrayLength(TokenLines) = 0) then
   begin
     AgentConfigWriteFailed := True;
-    if not WizardSilent then
-      MsgBox('에이전트 토큰 파일을 읽을 수 없습니다: ' + TokenFile, mbError, MB_OK);
+    AgentConfigError := '에이전트 토큰 파일을 읽을 수 없습니다: ' + TokenFile;
     Exit;
   end;
 
@@ -711,35 +878,191 @@ begin
   if Token = '' then
   begin
     AgentConfigWriteFailed := True;
-    if not WizardSilent then
-      MsgBox('에이전트 토큰 파일이 비어 있습니다: ' + TokenFile, mbError, MB_OK);
+    AgentConfigError := '에이전트 토큰 파일이 비어 있습니다: ' + TokenFile;
     Exit;
   end;
+
+  if IsPlaceholderToken(Token) then
+  begin
+    AgentConfigWriteFailed := True;
+    AgentConfigError := '에이전트 토큰 파일에 기본/샘플 토큰이 있습니다. 실제 토큰으로 교체하세요: ' +
+      TokenFile;
+    Exit;
+  end;
+
+  AgentConfigUrl := Url;
+  AgentConfigToken := Token;
+  AgentConfigRequested := True;
+end;
+
+{ "Agent" 개체의 시작/끝 위치를 찾는다. 문자열 리터럴 안의 중괄호는 무시한다. }
+procedure FindAgentObject(const Text: String; var StartPos, EndPos: Integer; var Found: Boolean);
+var
+  AgentPos, I, Depth: Integer;
+  Ch: Char;
+  InString, Escaped: Boolean;
+begin
+  Found := False;
+  AgentPos := Pos('"Agent"', Text);
+  if AgentPos = 0 then Exit;
+
+  I := AgentPos + Length('"Agent"');
+  while (I <= Length(Text)) and (Text[I] <> '{') do Inc(I);
+  if I > Length(Text) then Exit;
+
+  StartPos := I;
+  Depth := 0;
+  InString := False;
+  Escaped := False;
+  for I := StartPos to Length(Text) do
+  begin
+    Ch := Text[I];
+    if InString then
+    begin
+      if Escaped then Escaped := False
+      else if Ch = '\' then Escaped := True
+      else if Ch = '"' then InString := False;
+    end
+    else if Ch = '"' then InString := True
+    else if Ch = '{' then Inc(Depth)
+    else if Ch = '}' then
+    begin
+      Dec(Depth);
+      if Depth = 0 then
+      begin
+        EndPos := I;
+        Found := True;
+        Exit;
+      end;
+    end;
+  end;
+end;
+
+{ 기존 agent.json의 다른 설정은 유지하면서 문자열 속성 하나만 교체/추가한다. }
+function SetJsonStringValue(var Text: String; const Key, Value: String): Boolean;
+var
+  StartPos, EndPos, P, ColonPos, ValueEnd, I: Integer;
+  Obj, KeyPattern, NewValue: String;
+  Found, Escaped: Boolean;
+begin
+  Result := False;
+  FindAgentObject(Text, StartPos, EndPos, Found);
+  if not Found then Exit;
+
+  Obj := Copy(Text, StartPos, EndPos - StartPos + 1);
+  KeyPattern := '"' + Key + '"';
+  NewValue := '"' + JsonEscape(Value) + '"';
+  P := Pos(KeyPattern, Obj);
+
+  if P > 0 then
+  begin
+    ColonPos := P + Length(KeyPattern);
+    while (ColonPos <= Length(Obj)) and (Obj[ColonPos] <> ':') do Inc(ColonPos);
+    if ColonPos > Length(Obj) then Exit;
+    Inc(ColonPos);
+    while (ColonPos <= Length(Obj)) and
+          (Obj[ColonPos] in [' ', #9, #13, #10]) do Inc(ColonPos);
+    if (ColonPos > Length(Obj)) or (Obj[ColonPos] <> '"') then Exit;
+
+    ValueEnd := ColonPos + 1;
+    Escaped := False;
+    while ValueEnd <= Length(Obj) do
+    begin
+      if Escaped then Escaped := False
+      else if Obj[ValueEnd] = '\' then Escaped := True
+      else if Obj[ValueEnd] = '"' then Break;
+      Inc(ValueEnd);
+    end;
+    if ValueEnd > Length(Obj) then Exit;
+
+    Obj := Copy(Obj, 1, ColonPos - 1) + NewValue +
+      Copy(Obj, ValueEnd + 1, Length(Obj) - ValueEnd);
+  end
+  else
+  begin
+    I := Length(Obj);
+    while (I > 0) and (Obj[I] <> '}') do Dec(I);
+    if I = 0 then Exit;
+    if I = 2 then
+      Obj := '{' + KeyPattern + ':' + NewValue + '}'
+    else
+      Obj := Copy(Obj, 1, I - 1) + ',' + KeyPattern + ':' + NewValue +
+        Copy(Obj, I, Length(Obj) - I + 1);
+  end;
+
+  Text := Copy(Text, 1, StartPos - 1) + Obj + Copy(Text, EndPos + 1, Length(Text) - EndPos);
+  Result := True;
+end;
+
+procedure WriteAgentConfigIfRequested;
+var
+  ConfigPath, SessionHelper, ConfigText: String;
+  Lines, EmptyLines, ExistingLines: TArrayOfString;
+  I: Integer;
+begin
+  AgentConfigWriteFailed := False;
+  if (not AgentConfigRequested) or AgentConfigSkipWrite then Exit;
 
   ConfigPath := ExpandConstant('{commonappdata}\UpdateAgent\agent.json');
   SessionHelper := ExpandConstant('{app}\SessionHelper\UpdateAgent.SessionHelper.exe');
   ForceDirectories(ExtractFileDir(ConfigPath));
 
-  SetArrayLength(Lines, 6);
-  Lines[0] := '{';
-  Lines[1] := '  "Agent": {';
-  Lines[2] := '    "LabManagerUrl": "' + JsonEscape(Url) + '",';
-  Lines[3] := '    "AgentToken": "' + JsonEscape(Token) + '",';
-  Lines[4] := '    "SessionHelperPath": "' + JsonEscape(SessionHelper) + '"';
-  Lines[5] := '  }' + #13#10 + '}';
+  ConfigText := '';
+  if IsValidExistingAgentConfig(ConfigPath) and LoadStringsFromFile(ConfigPath, ExistingLines) then
+  begin
+    for I := 0 to GetArrayLength(ExistingLines) - 1 do
+    begin
+      if (I = 0) and (Length(ExistingLines[0]) > 0) and
+         (ExistingLines[0][1] = #65279) then
+        ConfigText := ConfigText + Copy(ExistingLines[0], 2, Length(ExistingLines[0]) - 1) + #13#10
+      else
+        ConfigText := ConfigText + ExistingLines[I] + #13#10;
+    end;
+    if (not SetJsonStringValue(ConfigText, 'LabManagerUrl', AgentConfigUrl)) or
+       (not SetJsonStringValue(ConfigText, 'AgentToken', AgentConfigToken)) or
+       (not SetJsonStringValue(ConfigText, 'SessionHelperPath', SessionHelper)) then
+    begin
+      AgentConfigWriteFailed := True;
+      AgentConfigError := '기존 에이전트 설정을 갱신할 수 없습니다: ' + ConfigPath;
+      Exit;
+    end;
+    SetArrayLength(Lines, 1);
+    Lines[0] := ConfigText;
+  end
+  else
+  begin
+    SetArrayLength(Lines, 6);
+    Lines[0] := '{';
+    Lines[1] := '  "Agent": {';
+    Lines[2] := '    "LabManagerUrl": "' + JsonEscape(AgentConfigUrl) + '",';
+    Lines[3] := '    "AgentToken": "' + JsonEscape(AgentConfigToken) + '",';
+    Lines[4] := '    "SessionHelperPath": "' + JsonEscape(SessionHelper) + '"';
+    Lines[5] := '  }' + #13#10 + '}';
+  end;
 
-  { Inno Pascal cannot pre-create a file with a restricted DACL before writing it,
-    so agent.json is briefly created with inherited (world-readable) permissions.
-    The ACL is tightened immediately after the write; this small window is accepted. }
-  if not SaveStringsToUTF8File(ConfigPath, Lines, False) then
+  { 비밀을 쓰기 전에 빈 파일을 만들고 ACL을 먼저 제한해 일반 사용자의 읽기 창을 없앤다. }
+  SetArrayLength(EmptyLines, 0);
+  if not SaveStringsToUTF8File(ConfigPath, EmptyLines, False) then
   begin
     AgentConfigWriteFailed := True;
-    if not WizardSilent then
-      MsgBox('에이전트 설정 파일을 쓸 수 없습니다: ' + ConfigPath, mbError, MB_OK);
+    AgentConfigError := '에이전트 설정 파일을 만들 수 없습니다: ' + ConfigPath;
     Exit;
   end;
-  RunHidden(ExpandConstant('{sys}\icacls.exe'),
-    '"' + ConfigPath + '" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)"');
+  if RunHidden(ExpandConstant('{sys}\icacls.exe'),
+      '"' + ConfigPath + '" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)"') <> 0 then
+  begin
+    DeleteFile(ConfigPath);
+    AgentConfigWriteFailed := True;
+    AgentConfigError := '에이전트 설정 파일 권한을 제한하지 못했습니다: ' + ConfigPath;
+    Exit;
+  end;
+  if not SaveStringsToUTF8File(ConfigPath, Lines, False) then
+  begin
+    DeleteFile(ConfigPath);
+    AgentConfigWriteFailed := True;
+    AgentConfigError := '에이전트 설정 파일을 쓸 수 없습니다: ' + ConfigPath;
+    Exit;
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -769,15 +1092,17 @@ begin
       AgentConfigRestoreNeeded := False;
     end;
 
+    { 설정 오류는 서비스/방화벽을 만들기 전에 중단해 반쪽 상태를 남기지 않는다. }
+    WriteAgentConfigIfRequested;
+    if AgentConfigWriteFailed then
+      RaiseException('에이전트 설정 파일을 기록하지 못해 설치를 중단합니다. ' + AgentConfigError);
+
     if not EnsureService then
       RaiseException('UpdateAgentService 등록/설정에 실패해 설치를 중단합니다.');
 
-    ApplyFirewallRules;
-    WriteAgentConfigIfRequested;
-    if AgentConfigWriteFailed then
-      RaiseException('에이전트 설정 파일을 기록하지 못해 설치를 중단합니다. ' +
-        '명령줄 인자(/LabManagerUrl, /AgentTokenFile), 같은 폴더의 ' + InstallConfigFileName +
-        ' 및 토큰 파일을 확인하세요.');
+    if not ApplyFirewallRules then
+      RaiseException('UpdateAgent 방화벽 규칙을 등록하지 못해 설치를 중단합니다. ' +
+        'Setup 로그와 Windows Defender 방화벽 상태를 확인하세요.');
 
     Code := RunHidden(ExpandConstant('{sys}\sc.exe'), 'start ' + ServiceName);
     if (Code <> 0) and (Code <> 1056) then
@@ -791,8 +1116,7 @@ begin
   begin
     { 제거 시작 전에도 같은 종료 절차를 사용한다. }
     TerminateAgentApps;
-    RunHidden(ExpandConstant('{sys}\netsh.exe'),
-      'advfirewall firewall delete rule name=all group="' + FirewallGroup + '"');
+    RemoveFirewallRules;
   end;
 
   if CurUninstallStep = usPostUninstall then

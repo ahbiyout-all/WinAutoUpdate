@@ -16,7 +16,7 @@ Run from a normal PowerShell prompt. WiX 5.0.2 is restored from NuGet.
 .\scripts\build-msi.ps1
 
 .EXAMPLE
-.\scripts\build-msi.ps1 -ProductVersion 0.1.22 -SkipValidate
+.\scripts\build-msi.ps1 -ProductVersion 0.1.24 -SkipValidate
 
 .EXAMPLE
 .\scripts\build-msi.ps1 -Sign -CertificateThumbprint "ABC123..." -TimestampUrl "http://timestamp.digicert.com"
@@ -64,6 +64,20 @@ function Get-VersionFromBuildProps {
 
     # MSI ProductVersion accepts digits only: drop '-' prerelease and '+commit' metadata.
     return ($Matches[1] -split '[+-]')[0]
+}
+
+function Assert-WixFallbackVersion {
+    param([string]$Path, [string]$Expected)
+
+    $text = Get-Content -LiteralPath $Path -Raw
+    $match = [regex]::Match($text, '<ProductVersion[^>]*>([^<]+)</ProductVersion>')
+    if (-not $match.Success) {
+        throw "No fallback ProductVersion found in $Path."
+    }
+    $fallback = $match.Groups[1].Value.Trim()
+    if ($fallback -ne $Expected) {
+        throw ("Stale fallback ProductVersion in {0}: {1} (expected {2})." -f $Path, $fallback, $Expected)
+    }
 }
 
 function ConvertTo-MsiProductVersion {
@@ -174,6 +188,7 @@ if (-not (Test-Path -LiteralPath $payloadAppSettings)) {
 if (-not (Test-Path -LiteralPath $wixProject)) {
     throw "WiX project not found: $wixProject"
 }
+Assert-WixFallbackVersion -Path $wixProject -Expected $ProductVersion
 
 Write-Host "Product version : $ProductVersion"
 Write-Host "Publish root    : $PublishRoot"

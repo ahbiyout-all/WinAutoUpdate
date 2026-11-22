@@ -253,15 +253,30 @@ dotnet run --project src/UpdateAgent.Service
 설치 파일은 개별 파일(Unpacked Multi-File) 구조로 `C:\Program Files\UpdateAgent`에 배치하고,
 서비스 등록과 방화벽 규칙(기본 이름/버전 이름)을 설치 단계에서 조용히 처리합니다.
 
+학생 PC 배포는 설치 파일과 **같은 폴더**에 `agent-install.ini`를 두는 방식을 권장합니다.
+토큰 값은 쓰지 않고 토큰 파일 경로만 기록합니다.
+
+```ini
+[Agent]
+LabManagerUrl=http://labmanager:5080
+AgentTokenFile=agent-token.txt
+```
+
 ```powershell
 # 학생 PC (관리자 PowerShell, 무인 설치)
+.\UpdateAgent.Agent-Setup-<버전>-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+```
+
+명령줄 방식도 계속 지원합니다.
+
+```powershell
 .\UpdateAgent.Agent-Setup-<버전>-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LabManagerUrl=http://<교사-PC-IP>:5080 `
   /AgentTokenFile=<에이전트-토큰-파일>
 ```
 
-토큰은 명령줄에 직접 쓰지 않고 `/AgentTokenFile`로 전달합니다.
+토큰은 명령줄이나 설정 파일에 직접 쓰지 않고 별도 파일로만 전달합니다.
 설치 파일의 전체 옵션과 체크리스트는 [`docs/INSTALLER.md`](docs/INSTALLER.md)를 참고하세요.
 
 MSI는 대안으로 유지됩니다. MSI는 서비스(`C:\Program Files\UpdateAgent\Service`)와 오버레이 헬퍼

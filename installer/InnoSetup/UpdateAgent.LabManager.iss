@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.22"
+  #define AppVersion "0.1.24"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -121,6 +121,8 @@ const
   SampleAdminToken = 'sample-admin-token-replace-before-pilot';
   SampleAgentToken = 'sample-agent-token-replace-before-pilot';
   NoticeSeconds = {#NoticeDelaySeconds};
+
+function ReplaceAllText(const S, OldPat, NewPat: String): String; forward;
 
 procedure InitializeWizard;
 begin
@@ -422,24 +424,64 @@ begin
   end;
 end;
 
-procedure AddFirewallRule(const RuleName, Description: String);
+function PsLiteral(const Value: String): String;
 begin
-  { Port-based rule aligned with scripts\allow-labmanager.ps1; Public stays blocked. }
-  RunHidden(ExpandConstant('{sys}\netsh.exe'),
-    'advfirewall firewall add rule name="' + RuleName +
-    '" dir=in action=allow protocol=TCP localport=' + FirewallPort +
-    ' enable=yes profile=domain,private group="' + FirewallGroup +
-    '" description="' + Description + '"');
+  Result := '''' + ReplaceAllText(Value, '''', '''''') + '''';
 end;
 
-procedure ApplyFirewallRules;
+{ netsh는 group= 인자를 지원하지 않아 그룹 규칙을 만들지 못한다.
+  PowerShell NetSecurity cmdlet으로 Domain/Private TCP 규칙을 등록한다. }
+function ApplyFirewallRules: Boolean;
+var
+  ScriptPath, PowerShellExe: String;
+  Lines: TArrayOfString;
+  Code: Integer;
 begin
   { 복원된 appsettings.json의 포트를 사용한다. 설정이 없으면 5080. }
   FirewallPort := GetConfiguredFirewallPort;
-  RunHidden(ExpandConstant('{sys}\netsh.exe'),
-    'advfirewall firewall delete rule name=all group="' + FirewallGroup + '"');
-  AddFirewallRule('UpdateAgent LabManager', 'UpdateAgent LabManager dashboard/API');
-  AddFirewallRule('UpdateAgent LabManager {#AppVersion}', 'UpdateAgent LabManager (versioned rule)');
+  ScriptPath := ExpandConstant('{tmp}\UpdateAgentLabManagerFirewall.ps1');
+  SetArrayLength(Lines, 4);
+  Lines[0] := '$ErrorActionPreference = ''Stop''';
+  Lines[1] := 'Get-NetFirewallRule -Group ' + PsLiteral(FirewallGroup) +
+    ' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction Stop';
+  Lines[2] := 'New-NetFirewallRule -DisplayName ''UpdateAgent LabManager'' -Direction Inbound' +
+    ' -Action Allow -Protocol TCP -LocalPort ' + FirewallPort +
+    ' -Enabled True -Profile Domain,Private -Group ' + PsLiteral(FirewallGroup) +
+    ' -Description ''UpdateAgent LabManager dashboard/API'' -ErrorAction Stop | Out-Null';
+  Lines[3] := 'New-NetFirewallRule -DisplayName ' + PsLiteral('UpdateAgent LabManager {#AppVersion}') +
+    ' -Direction Inbound -Action Allow -Protocol TCP -LocalPort ' + FirewallPort +
+    ' -Enabled True -Profile Domain,Private -Group ' + PsLiteral(FirewallGroup) +
+    ' -Description ''UpdateAgent LabManager (versioned rule)'' -ErrorAction Stop | Out-Null';
+
+  if not SaveStringsToUTF8File(ScriptPath, Lines, False) then
+  begin
+    Log('Could not create the firewall setup script: ' + ScriptPath);
+    Result := False;
+    Exit;
+  end;
+
+  PowerShellExe := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  Code := RunHidden(PowerShellExe,
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ScriptPath + '"');
+  Result := Code = 0;
+  if not Result then
+    Log('Failed to configure LabManager firewall rules (code ' + IntToStr(Code) + ')');
+end;
+
+procedure RemoveFirewallRules;
+var
+  ScriptPath, PowerShellExe: String;
+  Lines: TArrayOfString;
+begin
+  ScriptPath := ExpandConstant('{tmp}\UpdateAgentLabManagerFirewallRemove.ps1');
+  SetArrayLength(Lines, 2);
+  Lines[0] := '$ErrorActionPreference = ''SilentlyContinue''';
+  Lines[1] := 'Get-NetFirewallRule -Group ' + PsLiteral(FirewallGroup) +
+    ' | Remove-NetFirewallRule -ErrorAction SilentlyContinue';
+  if not SaveStringsToUTF8File(ScriptPath, Lines, False) then Exit;
+  PowerShellExe := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  RunHidden(PowerShellExe,
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ScriptPath + '"');
 end;
 
 { Replace all occurrences of OldPat with NewPat without relying on StringReplace. }
@@ -563,7 +605,9 @@ begin
       LabManagerConfigRestoreNeeded := False;
     end;
 
-    ApplyFirewallRules;
+    if not ApplyFirewallRules then
+      RaiseException('LabManager 방화벽 규칙을 등록하지 못해 설치를 중단합니다. ' +
+        'Setup 로그와 Windows Defender 방화벽 상태를 확인하세요.');
   end
   else if CurStep = ssDone then
   begin
@@ -580,7 +624,6 @@ begin
   if CurUninstallStep = usUninstall then
   begin
     TerminateLabManagerApps;
-    RunHidden(ExpandConstant('{sys}\netsh.exe'),
-      'advfirewall firewall delete rule name=all group="' + FirewallGroup + '"');
+    RemoveFirewallRules;
   end;
 end;

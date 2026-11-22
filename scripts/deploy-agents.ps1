@@ -67,13 +67,24 @@ function Resolve-Installer {
     $artifactDir = Join-Path $repoRoot 'artifacts\inno'
     $candidates = @()
     if (Test-Path -LiteralPath $artifactDir -PathType Container) {
-        $candidates = @(Get-ChildItem -LiteralPath $artifactDir -Filter 'UpdateAgent.Agent-Setup-*-x64.exe' -File |
-            Sort-Object LastWriteTime -Descending)
+        $candidates = @(Get-ChildItem -LiteralPath $artifactDir -Filter 'UpdateAgent.Agent-Setup-*-x64.exe' -File)
     }
     if ($candidates.Count -eq 0) {
         throw 'No Agent installer found. Run scripts\build-inno.ps1 -AgentOnly or pass -InstallerPath.'
     }
-    return $candidates[0]
+
+    # Select by parsed version first; a stale file copied later must not win.
+    $parsed = @($candidates | ForEach-Object {
+        $version = [version]'0.0.0'
+        if ($_.Name -match 'Setup-(\d+)\.(\d+)\.(\d+)-x64\.exe$') {
+            $version = [version]("$($Matches[1]).$($Matches[2]).$($Matches[3])")
+        }
+        [pscustomobject]@{ File = $_; Version = $version }
+    })
+    $sorted = @($parsed | Sort-Object -Property `
+        @{Expression = { $_.Version }; Descending = $true}, `
+        @{Expression = { $_.File.LastWriteTime }; Descending = $true})
+    return $sorted[0].File
 }
 
 function Resolve-AgentTokenFile {
@@ -83,16 +94,22 @@ function Resolve-AgentTokenFile {
     if (-not (Test-Path -LiteralPath $full -PathType Leaf)) {
         throw "Agent token file not found: $full"
     }
-    $value = (Get-Content -LiteralPath $full -Raw).Trim().TrimStart([char]0xFEFF)
+    # The installer reads only the first line. Validate the same line here.
+    $firstLine = (Get-Content -LiteralPath $full -TotalCount 1)
+    if ($null -eq $firstLine) { $firstLine = '' }
+    $value = ([string]$firstLine).Trim().TrimStart([char]0xFEFF)
     if ([string]::IsNullOrWhiteSpace($value)) {
         throw "Agent token file is empty: $full"
     }
-    $placeholders = @('change-me-agent-token', 'sample-agent-token-replace-before-pilot')
-    if ($placeholders -contains $value) {
+    $lower = $value.ToLowerInvariant()
+    if ($lower.StartsWith('change-me-') -or
+        ($lower.StartsWith('sample-') -and $lower.EndsWith('-replace-before-pilot'))) {
         throw 'The agent token is a default/sample placeholder. Generate a real token before deployment.'
     }
     return $full
 }
+
+if ($ExecuteLocal) { Assert-Administrator }
 
 $LabManagerUrl = $LabManagerUrl.Trim().TrimEnd('/')
 $uri = $null
@@ -122,7 +139,8 @@ foreach ($row in $rows) {
     $properties = $row.PSObject.Properties.Name
     $mac = if ($properties -contains 'MAC') { ([string]$row.MAC).Trim() } else { '' }
     $ip = if ($properties -contains 'IP') { ([string]$row.IP).Trim() } else { '' }
-    $targets += [pscustomobject]@{ ComputerName = $name; MAC = $mac; IP = $ip }
+    $safeName = [regex]::Replace($name, '[^A-Za-z0-9._-]', '_')
+    $targets += [pscustomobject]@{ ComputerName = $name; SafeName = $safeName; MAC = $mac; IP = $ip }
 }
 
 if ($PSBoundParameters.ContainsKey('ComputerName')) {
@@ -135,6 +153,12 @@ if ($PSBoundParameters.ContainsKey('ComputerName')) {
 $uniqueNames = @($targets | ForEach-Object { $_.ComputerName } | Sort-Object -Unique)
 if ($uniqueNames.Count -ne $targets.Count) {
     throw 'Inventory CSV contains duplicate ComputerName values.'
+}
+$safeCollisions = @($targets | Group-Object -Property SafeName -CaseSensitive:$false |
+    Where-Object { $_.Count -gt 1 })
+if ($safeCollisions.Count -gt 0) {
+    throw ("Inventory names map to duplicate package folders: {0}" -f
+        (($safeCollisions | ForEach-Object { $_.Name }) -join ', '))
 }
 
 $installer = Resolve-Installer -Explicit $InstallerPath
@@ -155,6 +179,8 @@ set "PKG=%~dp0"
 set "SETUP=%PKG%__SETUP__"
 set "TOKEN=%PKG%agent-token.txt"
 set "CONFIG=%PKG%agent-install.ini"
+set "UPGRADE=0"
+if /i "%~1"=="/Upgrade" set "UPGRADE=1"
 
 if not exist "%SETUP%" (
   echo [UpdateAgent] Installer not found: %SETUP%
@@ -164,23 +190,38 @@ if not exist "%CONFIG%" (
   echo [UpdateAgent] Install config not found: %CONFIG%
   exit /b 2
 )
-if not exist "%TOKEN%" (
-  echo [UpdateAgent] Token file not found: %TOKEN%
-  exit /b 2
+if "!UPGRADE!"=="0" (
+  if not exist "%TOKEN%" (
+    echo [UpdateAgent] Token file not found: %TOKEN%
+    echo [UpdateAgent] For an upgrade without a token file, run with /Upgrade.
+    exit /b 2
+  )
+  icacls "%TOKEN%" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)" >nul 2>&1
+  if errorlevel 1 (
+    echo [UpdateAgent] Failed to restrict token file ACL: %TOKEN%
+    exit /b 4
+  )
 )
-
-icacls "%TOKEN%" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)" >nul 2>&1
 
 echo [UpdateAgent] Installing Agent for __PC__
 echo [UpdateAgent] Settings: %CONFIG%
 "%SETUP%" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 if errorlevel 1 (
   echo [UpdateAgent] Install failed with code !ERRORLEVEL!. Token file kept for retry.
+  echo [UpdateAgent] Setup log: %TEMP%\Setup Log ^<date^>.txt
   exit /b 3
 )
 
-del /f /q "%TOKEN%" >nul 2>&1
-echo [UpdateAgent] Install complete. Token file removed.
+if exist "%TOKEN%" (
+  del /f /q "%TOKEN%" >nul 2>&1
+  if exist "%TOKEN%" (
+    echo [UpdateAgent] Install complete but could not remove token file: %TOKEN%
+    exit /b 5
+  )
+  echo [UpdateAgent] Token file removed.
+) else (
+  echo [UpdateAgent] No token file to remove (upgrade).
+)
 echo [UpdateAgent] Confirm this PC appears online in the LabManager within 90 seconds.
 endlocal
 '@
@@ -193,16 +234,22 @@ AgentTokenFile=agent-token.txt
 
 $packages = @()
 foreach ($target in $targets) {
-    $safeName = [regex]::Replace($target.ComputerName, '[^A-Za-z0-9._-]', '_')
+    $safeName = $target.SafeName
     $packageDir = Join-Path $OutputDir $safeName
     New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
 
     Copy-Item -LiteralPath $installer.FullName -Destination (Join-Path $packageDir $installer.Name) -Force
-    Copy-Item -LiteralPath $tokenPath -Destination (Join-Path $packageDir 'agent-token.txt') -Force
+    $tokenCopy = Join-Path $packageDir 'agent-token.txt'
+    Copy-Item -LiteralPath $tokenPath -Destination $tokenCopy -Force
+    # install-agent.cmd applies the ACL again at install time; restrict the copy now too.
+    & icacls.exe $tokenCopy '/inheritance:r' '/grant:r' '*S-1-5-32-544:(F)' '*S-1-5-18:(R)' 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not restrict ACL on generated token file: $tokenCopy"
+    }
 
     $cmd = $cmdTemplate.
         Replace('__SETUP__', $installer.Name).
-        Replace('__PC__', $target.ComputerName)
+        Replace('__PC__', $safeName)
     $cmd = [regex]::Replace($cmd, "\r?\n", "`r`n")
     [IO.File]::WriteAllText((Join-Path $packageDir 'install-agent.cmd'), $cmd, (New-Object System.Text.UTF8Encoding($false)))
 
@@ -233,8 +280,14 @@ Each <ComputerName> folder is self-contained:
 
 Run install-agent.cmd on the matching student PC from an elevated prompt.
 The installer reads agent-install.ini from its own folder, so no settings are
-passed on the command line. The token file is deleted after a successful install;
-if the install fails, the token file is kept for retry.
+passed on the command line. Generated token copies are restricted to
+Administrators/SYSTEM and the script restricts them again before installing.
+The token file is deleted after a successful install; if the install fails,
+the token file is kept for retry.
+
+For an upgrade after the token file has been deleted, run:
+  install-agent.cmd /Upgrade
+This keeps the existing agent.json when a previous installation is detected.
 
 Protect this output folder and delete it after the rollout is verified.
 See docs/DEPLOYMENT.md for the full lab runbook.
@@ -252,7 +305,6 @@ Write-Host ''
 Write-Host 'Token files are copies of the agent token. Protect the output folder and remove it after rollout.' -ForegroundColor Yellow
 
 if ($ExecuteLocal) {
-    Assert-Administrator
     if ($packages.Count -ne 1) {
         throw 'Use -ComputerName to select exactly one PC when -ExecuteLocal is set.'
     }
