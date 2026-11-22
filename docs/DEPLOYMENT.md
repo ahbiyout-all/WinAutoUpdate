@@ -47,8 +47,8 @@
 
 ## 2. 토큰 준비 (개발 PC 또는 교사 PC)
 
-기본값(`change-me-*`)과 설치 파일에 들어 있는 샘플 값(`sample-*-token-replace-before-pilot`)은
-절대 그대로 사용하지 마세요. 두 토큰은 서로 달라야 합니다.
+기본값(`change-me-*`)과 샘플 값(`sample-*-replace-before-pilot`)은 서버가 거부하므로
+절대 사용할 수 없습니다. 실제 토큰 두 개를 준비하고 서로 다르게 설정하세요.
 
 ```powershell
 function New-Token {
@@ -355,6 +355,7 @@ Invoke-WebRequest "http://127.0.0.1:5080/api/admin/audit" -Headers @{ "X-Admin-T
 | LTSC / IoT LTSC | EditionID `EnterpriseS`/`IoTEnterpriseS` 등 | 보라 칩 |
 | Windows Server | InstallationType/ProductName | 초록 칩 + 빌드 기준 릴리스(2016/2019/2022/2025) |
 | Server Core | InstallationType `Server Core` | 회색 칩 + 헤드리스 안내 |
+| 미확인 OS (`unknown`) | 위 조건에 모두 해당하지 않음 | 회색 칩 + 정보 수집 안내 |
 
 **목록/필터 사용**
 
@@ -380,7 +381,7 @@ Invoke-WebRequest "http://127.0.0.1:5080/api/admin/audit" -Headers @{ "X-Admin-T
 - **선택한 PC에 이 옵션을 기본값으로 저장**을 체크하면 해당 PC들의 개별 정책으로 저장됩니다.
 - **선택한 PC에 저장된 개별 옵션 사용**을 체크하면 위 폼 대신 서버에 저장된 정책을 적용합니다.
   저장된 값이 없는 PC는 서버 기본 정책이 적용되며, 이 옵션을 켜면 옵션 저장 체크박스는 비활성화됩니다.
-  선택한 PC 중 개별 옵션 보유 대수는 체크box 아래 안내에 표시됩니다.
+  선택한 PC 중 개별 옵션 보유 대수는 체크박스 아래 안내에 표시됩니다.
 - 기능 업데이트(OS 업그레이드)는 2차 승인 워크플로 전용이므로 모든 프리셋에서 비활성화됩니다.
 
 **PC별 옵션 저장/초기화 API**
@@ -415,7 +416,7 @@ Invoke-WebRequest "http://127.0.0.1:5080/api/admin/audit" -Headers @{ "X-Admin-T
   첫 줄에만 두세요. 명령줄을 쓰더라도 `/AgentTokenFile`만 사용하고 토큰 값을 명령줄/로그에 남기지 마세요.
 - 학생이 로컬 관리자이므로 `agent.json`과 서비스 설정을 직접 볼 수 있습니다.
   ACL은 관리자/SYSTEM으로 제한되어 있지만, 관리자 권한 자체는 막을 수 없습니다.
-- 학생 계정 암호는 저장하지 않고, 자동 로그온 설정이나 대시보드 암호 필드를 추가하지 마세요.
+- 학생 계정 암호는 저장하지 않고, 자동 로그온 설정이나 대시보드 암호 필드를 두지 않습니다.
 - 샘플 토큰/기본 토큰으로 실 배포하지 마세요.
 
 ## 10. 변경 이력
@@ -429,3 +430,5 @@ Invoke-WebRequest "http://127.0.0.1:5080/api/admin/audit" -Headers @{ "X-Admin-T
 - 2026-11-22: 설치 exe와 같은 폴더의 `agent-install.ini` 자동 읽기와 PC별 패키지 생성 추가(`v0.1.23`).
 - 2026-11-22: 자아성찰 심층 감사 반영 — 설치 전 검증, 그룹 방화벽 규칙 실제 등록, 토큰 ACL/삭제 확인,
   업그레이드 시 기존 설정 보존, `/Upgrade` 래퍼 옵션(`v0.1.26`).
+- 2026-11-22: 자아성찰 6~10회 결함 수정 — LabManager 첫 설치 fail-closed, 기능 업데이트 2차 승인 강제,
+  명령 결과 소유자 검증, 서버 정책 영속화/페일클루즈, 체크인 직렬화, 수동 일시정지 유지(`v0.1.27`).

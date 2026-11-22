@@ -118,9 +118,10 @@ C:\Program Files\UpdateAgent\LabManager\
       실행 중인 서비스에 작업을 요청합니다. 시작 전 **수동 업데이트 옵션** 창에서 프리셋과 세부 항목을 고를 수 있고,
       선택 값은 파이프 요청의 `options`로 전달됩니다. 학생 계정(UAC 필터링 토큰 포함)이 연결할 수 있도록 파이프 ACL에
       인증 사용자가 포함됩니다.
-   - LabManager: 설치 파일에는 샘플 토큰(`sample-*-token-replace-before-pilot`)이 들어 있어 서버와 대시보드가 바로 시작됩니다.
-     다만 샘플 값은 공개된 예시이므로 **파일럿 전에 반드시 실제 토큰으로 교체**해야 합니다.
-     `change-me-*`가 남아 있으면 서버가 시작되지 않고 토큰 변경 안내가 표시됩니다.
+   - LabManager: 첫 설치에는 **실제 AdminToken/AgentToken 두 개가 내장되어 있어야 합니다**.
+     값이 비어 있거나 `change-me-*`, `sample-*-replace-before-pilot`이면 설치가 중단됩니다(fail-closed).
+     공개된 샘플 값으로 서버가 뜨는 일은 없으므로, 토큰 secret을 설정해 빌드한 설치 파일을 사용하세요.
+     업데이트에서는 내장 토큰을 읽지 않고 기존 `appsettings.json`을 그대로 유지합니다.
      바로가기는 **런처**(`UpdateAgent.LabManager.Desktop.exe`)를 가리키며, 런처가 Edge/Chrome 앱 모드 창으로 대시보드를 엽니다.
 
 ## 5. 기존 설치 처리
@@ -149,7 +150,9 @@ C:\Program Files\UpdateAgent\LabManager\
   - Agent: `C:\Program Files\UpdateAgent\Service\appsettings.json`
   - LabManager: `C:\Program Files\UpdateAgent\LabManager\appsettings.json`
   - 설치 과정에서 생성된 기본 `appsettings.json`은 백업본으로 덮어씁니다.
-  - LabManager(v0.1.9 이상): 복원된 설정에 `change-me-*`가 남아 있으면 샘플 토큰(`sample-*-token-replace-before-pilot`)으로 자동 교체합니다. 이미 설정한 토큰은 그대로 유지됩니다.
+  - LabManager(v0.1.27 이상): 복원된 설정의 토큰은 절대 바꾸지 않습니다. `change-me-*` 또는
+    샘플 토큰(`sample-*-replace-before-pilot`)이 남아 있으면 서버가 시작을 거부하므로
+    대시보드에서 실제 토큰으로 교체해야 합니다(자동 치환 없음).
 - `C:\ProgramData\UpdateAgent\agent.json`은 제거 대상이 아니므로 그대로 유지됩니다.
 - 이전 버전 제거가 **실제로 실패하면** 오류를 표시하고 **새 설치를 중단합니다.** 덮어쓰기로 이어가지 않습니다.
   다만 제거 대상이 이미 없으면(등록 정보만 남음, 제거 프로그램 없음, MSI `1605`) 실패가 아니므로 설치를 계속합니다.
@@ -229,7 +232,8 @@ AgentTokenFile=agent-token.txt
 - 내장 토큰은 설치 파일에서 추출할 수 있습니다. 파일럿 전용으로 취급하고 설치 직후
   대시보드의 **서버 토큰 변경**으로 관리자 토큰을 교체하세요.
 - secret이 없는 로컬/사설 빌드에서는 내장 파일이 비어 있습니다. 에이전트 첫 설치는 외부 토큰 파일을
-  지정해야 하고, LabManager는 기존처럼 `appsettings.json`의 샘플 토큰으로 설치됩니다(v0.1.26 수정).
+  지정해야 하고, LabManager 첫 설치도 실제 토큰 secret을 설정해 다시 빌드해야 합니다(v0.1.27 fail-closed).
+  업데이트는 내장 토큰이 없어도 정상 동작합니다.
 
 #### 실패 모드
 
@@ -253,16 +257,16 @@ PC를 변경하지 않고 설치가 중단됩니다(`/VERYSILENT`에서는 오�
 .\UpdateAgent.LabManager-Setup-<버전>-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
-릴리스 빌드에 토큰 secret이 설정되어 있으면 첫 설치에서 내장 토큰이 `appsettings.json`에 반영되어
-서버가 바로 시작됩니다. secret이 없으면 설치 파일에 들어 있는 샘플 토큰
-(`sample-*-token-replace-before-pilot`)으로 시작하므로 **파일럿 전에 반드시 실제 토큰으로 교체**해야 합니다.
-업데이트에서는 내장 토큰을 무시하고 기존 설정을 유지합니다.
-`C:\Program Files\UpdateAgent\LabManager\appsettings.json`의 `AdminToken`과 `AgentToken`을 모두 변경하세요.
-`change-me-*`가 남아 있으면 서버가 시작되지 않습니다.
+릴리스 빌드에는 `UPDATEAGENT_LABMANAGER_ADMIN_TOKEN`과 `UPDATEAGENT_LABMANAGER_AGENT_TOKEN` secret이
+설정되어 있어야 합니다. 두 값이 모두 내장되어 있으면 첫 설치에서 `appsettings.json`에 반영되어 서버가
+바로 시작됩니다. 하나라도 비었거나 샘플/기본 값이면 설치가 중단됩니다. 업데이트에서는 내장 토큰을
+무시하고 기존 설정을 유지합니다.
+내장 토큰은 설치 파일에서 추출할 수 있으므로 **파일럿 직후 대시보드의 서버 토큰 변경으로
+관리자 토큰을 교체**하세요. `C:\Program Files\UpdateAgent\LabManager\appsettings.json`의
+`AdminToken`과 `AgentToken`을 모두 실제 값으로 바꿔야 서버가 시작됩니다.
 `AgentToken`은 에이전트와 동일한 값으로 설정합니다. 관리자 토큰(`AdminToken`)은 서버 설정이면서
 대시보드 첫 실행 시 입력하는 값이기도 합니다. 대시보드의 **토큰** 버튼으로 열리는 창에는
-설치 시 기본값인 샘플 관리자 토큰(`sample-admin-token-replace-before-pilot`)이 화면에 표시되고,
-**이 값 사용** 버튼으로 입력란을 채울 수 있습니다. 입력한 값은 앱 모드 브라우저 프로필의
+샘플 값이 표시되지 않으므로 실제 토큰을 직접 입력하세요. 입력한 값은 앱 모드 브라우저 프로필의
 localStorage에 저장됩니다.
 
 같은 창의 **서버 토큰 변경**에서 새 관리자 토큰을 입력하면 서버에 즉시 반영됩니다.
@@ -279,7 +283,8 @@ Program Files의 `appsettings.json`보다 우선하며 재시작 후에도 유�
 
 ## 7. 방화벽 규칙
 
-설치 단계에서 조용히(`netsh advfirewall`, 창 숨김) 등록합니다.
+설치 단계에서 PowerShell `NetSecurity` 모듈(`New-NetFirewallRule`, 창 숨김)로 등록합니다.
+`netsh`는 그룹 등록을 지원하지 않으므로 사용하지 않습니다.
 **기본 이름과 버전이 붙은 이름을 모두** 등록합니다.
 
 | 제품 | 규칙 이름 | 대상 | 프로필 |
@@ -415,7 +420,7 @@ build\agent\<버전>\
 - [ ] 제거 시 서비스/방화벽 규칙/파일이 제거되고 ProgramData는 남음
 - [ ] MSI 설치 후 Inno 설치 시 MSI가 자동 제거됨
 - [ ] LabManager 설치 후 바탕화면/시작 메뉴 바로가기가 런처를 실행함
-- [ ] 런처가 Edge/Chrome을 감지해 주소창/툴바 없는 `--app=` 창을 염
+- [ ] 런처가 Edge/Chrome을 감지해 주소창/툴바 없는 `--app=` 창을 엽니다
 - [ ] 대시보드 첫 실행 시 토큰 입력창이 표시되고 브라우저 프로필에 저장됨
 - [ ] 서버가 없을 때 런처가 헤드리스 서버를 자동 시작하고, 앱 창을 닫아도 서버가 유지됨
 - [ ] 설치 폴더에 `wwwroot\index.html`, `wwwroot\monitor.html`, `wwwroot\monitor.js`가 있음

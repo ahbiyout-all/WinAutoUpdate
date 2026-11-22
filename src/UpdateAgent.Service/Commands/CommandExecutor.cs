@@ -79,6 +79,18 @@ public sealed class CommandExecutor
         }
     }
 
+    private void RememberCommand(string commandId)
+    {
+        if (!_processedSet.Add(commandId)) return;
+        _processed.AddLast(commandId);
+        while (_processed.Count > MaxRememberedCommands)
+        {
+            var oldest = _processed.First!.Value;
+            _processed.RemoveFirst();
+            _processedSet.Remove(oldest);
+        }
+    }
+
     public async Task ExecuteAsync(
         IEnumerable<AgentCommand> commands,
         CancellationToken cancellationToken = default)
@@ -94,6 +106,7 @@ public sealed class CommandExecutor
                     Success = false,
                     Message = "명령 유효 시간이 지났습니다.",
                 });
+                RememberCommand(command.CommandId);
                 continue;
             }
 
@@ -118,14 +131,7 @@ public sealed class CommandExecutor
             }
 
             AddResult(result);
-            _processedSet.Add(command.CommandId);
-            _processed.AddLast(command.CommandId);
-            while (_processed.Count > MaxRememberedCommands)
-            {
-                var oldest = _processed.First!.Value;
-                _processed.RemoveFirst();
-                _processedSet.Remove(oldest);
-            }
+            RememberCommand(command.CommandId);
         }
 
         await PersistProcessedAsync(cancellationToken);

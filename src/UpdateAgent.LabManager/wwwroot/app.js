@@ -1,6 +1,4 @@
 const STORAGE_KEY = 'ua_admin_token';
-// 설치 파일에 들어가는 공개 샘플 값이다. 실제 배포 토큰은 절대 여기에 넣지 않는다.
-const SAMPLE_ADMIN_TOKEN = 'sample-admin-token-replace-before-pilot';
 let adminToken = localStorage.getItem(STORAGE_KEY) || '';
 let agents = [];
 let jobs = [];
@@ -1145,8 +1143,6 @@ function setupTokenDialog() {
   const confirmInput = $('#new-token-confirm');
   const status = $('#token-status');
 
-  $('#sample-token-text').textContent = SAMPLE_ADMIN_TOKEN;
-
   // 인증된 경우에만 서버 토큰 상태를 조회한다. 실제 토큰 값은 응답에 포함하지 않는다.
   const loadStatus = async () => {
     if (!adminToken || dialog.classList.contains('hidden')) return;
@@ -1215,10 +1211,6 @@ function setupTokenDialog() {
     }
   };
 
-  $('#token-use-sample').addEventListener('click', () => {
-    input.value = SAMPLE_ADMIN_TOKEN;
-    input.focus();
-  });
   $('#token-save').addEventListener('click', save);
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') save();

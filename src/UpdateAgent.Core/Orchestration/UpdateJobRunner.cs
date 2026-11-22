@@ -440,9 +440,12 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         _isRunning = true;
         _cancelRequested = false;
         _forceCancelled = false;
-        _pauseReason = PauseReason.None;
-        _pausedSince = null;
-        _manualPause = false;
+        // 서비스 재시작 후 복원된 수동 일시정지는 유지한다. 자동 재개 대상이 아니므로
+        // 교사가 명시적으로 ResumeJob를 보내기 전까지 대기한다.
+        var resumePaused = context.State == UpdateJobState.Paused;
+        _pauseReason = resumePaused ? context.PauseReason : PauseReason.None;
+        _pausedSince = resumePaused ? context.PauseUntil ?? DateTimeOffset.Now : null;
+        _manualPause = resumePaused && context.PauseReason == PauseReason.Manual;
         _runCts = new CancellationTokenSource();
         var token = _runCts.Token;
         _runTask = Task.Run(() => RunJobAsync(context, token), CancellationToken.None);
@@ -901,7 +904,8 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             }
         }
 
-        // 더 이상 WUA가 제공하지 않는 항목은 설치된 것으로 간주한다.
+        // WUA 검색 결과에서 사라진 항목을 설치 성공으로 기록하면 실제 실패가 은폐된다.
+        // 숨김/거부/메타데이터 변경 등 원인을 알 수 없으므로 건너뜀으로 표시한다.
         for (var i = 0; i < context.Items.Count; i++)
         {
             var item = context.Items[i];
@@ -910,9 +914,9 @@ public sealed class UpdateJobRunner : IAsyncDisposable
 
             context.Items[i] = item with
             {
-                State = UpdateItemState.Installed,
+                State = UpdateItemState.Skipped,
                 CompletedAt = now,
-                Error = null,
+                Error = "WUA 검색 결과에서 항목이 사라져 설치 여부를 확인할 수 없습니다.",
             };
         }
     }

@@ -56,7 +56,7 @@ function Resolve-Secret {
 
     if (-not [string]::IsNullOrWhiteSpace($File)) {
         if (-not (Test-Path -LiteralPath $File)) { throw "Secret file not found: $File" }
-        return (Get-Content -LiteralPath $File -Raw).Trim().TrimStart([char]0xFEFF)
+        return (Get-Content -LiteralPath $File -Raw).TrimStart([char]0xFEFF).Trim()
     }
 
     if (-not [string]::IsNullOrWhiteSpace($EnvName)) {
@@ -237,8 +237,11 @@ else {
 }
 
 & sc.exe description $ServiceName "Windows Update automation agent for computer labs" | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set service description for $ServiceName." }
 & sc.exe failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set service failure actions for $ServiceName." }
 & sc.exe failureflag $ServiceName 1 | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set service failure flags for $ServiceName." }
 
 if (-not $SkipStart) {
     Write-Host "Starting $ServiceName..."

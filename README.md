@@ -179,7 +179,7 @@ publish\cli
 학생 PC에서는 `publish\agent\desktop\UpdateAgent.Agent.Desktop.exe`로 서비스 상태와 작업 진행 상황을
 창으로 확인할 수 있습니다. 설치 시 시작 메뉴/바탕화면의 **`UpdateAgent 상태 확인`** 바로가기도 이 앱을 실행합니다.
 상태 앱은 토큰을 저장하지 않으며, 메인 화면의 **수동 업데이트 옵션** 버튼으로 옵션 창을 열 수 있습니다.
-기존 **업데이트 시작** 버튼을 눌러도 같은 창이 열립니다. 프리셋(표준/보안 중심/서버 안전/전체)과 세부 항목
+기존 **업데이트 시작** 버튼을 눌러도 같은 창이 열립니다. 프리셋(사용자 설정/표준/보안 중심/서버 안전/전체)과 세부 항목
 (업데이트 범위, 오버레이, 자동 재부팅, 최대 재부팅 횟수)을 선택한 뒤 시작하면 서비스에 작업이 요청됩니다.
 업데이트 범위는 하나 이상 선택해야 하고, Maestro 수동 복구 모드 확인도 체크해야 시작할 수 있습니다.
 교사 정책은 상한으로 작동해 학생은 항목을 줄이거나 자동 재부팅을 끌 수 있지만,
@@ -200,15 +200,15 @@ dotnet run --project src/UpdateAgent.LabManager
 # 기본 주소: http://0.0.0.0:5080, 대시보드: http://localhost:5080
 ```
 
-> 기본 토큰(`change-me-*`)으로는 서버가 시작되지 않습니다. 먼저
-> `configure-labmanager.ps1`을 실행하거나 `LabManager__AdminToken` /
-> `LabManager__AgentToken` 환경 변수를 설정하세요. 로컬 개발에서만
-> `LabManager__AllowDefaultTokens=true`를 사용할 수 있습니다.
+> 기본 토큰(`change-me-*`)과 샘플 토큰(`sample-*-replace-before-pilot`)으로는 서버가
+> 시작되지 않습니다. 먼저 `configure-labmanager.ps1`을 실행하거나
+> `LabManager__AdminToken` / `LabManager__AgentToken` 환경 변수를 설정하세요.
+> 로컬 개발에서만 `LabManager__AllowDefaultTokens=true`를 사용할 수 있습니다.
 
 - 데이터베이스: `%LOCALAPPDATA%\UpdateAgent\LabManager\labmanager.db`
 - 로그: 같은 폴더의 `logs\`
 - 관리자 토큰은 앱 모드 브라우저 프로필의 localStorage에 저장됩니다(첫 실행 시 입력).
-- 대시보드의 **토큰** 창에 설치 시 기본값인 샘플 관리자 토큰이 표시되며, **이 값 사용** 버튼으로 입력란을 채울 수 있습니다.
+- 대시보드의 **토큰** 창에는 샘플 값이 표시되지 않으므로 실제 관리자 토큰을 직접 입력하세요.
   같은 창의 **서버 토큰 변경**에서 새 관리자 토큰을 저장하면 재시작 없이 즉시 적용되고 브라우저 토큰도 함께 갱신됩니다.
   변경된 값은 `%LOCALAPPDATA%\UpdateAgent\LabManager\runtime-admin-token.json`에 저장되어 appsettings.json의 `AdminToken`보다 우선합니다.
   이전 토큰은 변경 직후부터 거부되므로 새 토큰을 안전한 곳에 기록하세요. 에이전트 토큰은 이 화면에서 바뀌지 않습니다.
@@ -357,8 +357,8 @@ LabManager 대시보드에 업데이트 팝업을 표시합니다. 설치 파일
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
-| `AdminToken` | `sample-admin-token-replace-before-pilot` | 관리자 API/대시보드 토큰. 설치 시 이 샘플 값이 들어가며, `change-me-*`는 시작이 거부되는 플레이스홀더. 대시보드에서 변경하면 런타임 override가 우선 |
-| `AgentToken` | `sample-agent-token-replace-before-pilot` | 에이전트 체크인 토큰. `change-me-*`는 시작이 거부되는 플레이스홀더 |
+| `AdminToken` | `sample-admin-token-replace-before-pilot` | 관리자 API/대시보드 토큰. 소스 설정의 플레이스홀더이며 시작이 거부됩니다. 설치 관리자는 첫 설치에 실제 내장 토큰을 기록합니다. 대시보드에서 변경하면 런타임 override가 우선 |
+| `AgentToken` | `sample-agent-token-replace-before-pilot` | 에이전트 체크인 토큰. 소스 설정의 플레이스홀더이며 시작이 거부됩니다. 설치 관리자는 첫 설치에 실제 내장 토큰을 기록합니다 |
 | `DatabasePath` | `%LOCALAPPDATA%\UpdateAgent\LabManager\labmanager.db` | SQLite 경로 |
 | `OnlineThresholdSeconds` | `90` | 온라인 판정 기준 |
 | `WakePorts` | `[9, 7]` | WoL 매직 패킷 포트 |
@@ -370,7 +370,7 @@ LabManager 대시보드에 업데이트 팝업을 표시합니다. 설치 파일
 | 키 | 기본값 | 설명 |
 |---|---|---|
 | `LabManagerUrl` | `http://localhost:5080` | 교사 PC 주소 |
-| `AgentToken` | `sample-agent-token-replace-before-pilot` | LabManager와 동일해야 함 (설치 시 샘플 값 기본 제공) |
+| `AgentToken` | (비어 있음) | LabManager와 동일해야 함. 첫 설치는 내장 토큰 또는 `/AgentTokenFile`로 지정하고, 업데이트는 기존 `agent.json`을 유지 |
 | `PollIntervalSeconds` | `30` | 체크인 주기 (최소 15초) |
 | `CheckInEnabled` | `true` | `false`면 로컬 전용 |
 | `OverlayEnabled` | `true` | 오버레이 사용 여부 |
@@ -435,7 +435,7 @@ Maestro UI/API 자동화는 2단계로 미뤄져 있습니다.
 - [ ] 학생 PC 2~3대에 서비스 배포, 재부팅 후 자동 시작 및 체크인 확인
 - [ ] MSI 설치 → 업그레이드 → 제거 반복, `agent.json` 유지 및 데이터 보존 확인
 - [ ] MSI 설치 로그에 평문 토큰이 없는지 확인
-- [ ] 대시보드 **토큰** 창에 샘플 관리자 토큰이 표시되는지 확인
+- [ ] 대시보드 **토큰** 창에 샘플 값이 표시되지 않고 실제 토큰 입력 후 로그인되는지 확인
 - [ ] **작업 현황 모니터** 버튼으로 별도 창이 열리고, 토큰 재입력 없이 연결 상태가 '실시간 연결'로 표시되는지 확인
 - [ ] 모니터에서 대시보드와 동시에 작업 진행/체크인 변경이 즉시 반영되는지 확인 (`--monitor` 바로가기 포함)
 - [ ] 서버 토큰 변경 후 기존 토큰은 401, 새 토큰은 200으로 응답하는지 확인 (재시작 없이 적용)
@@ -452,8 +452,11 @@ Maestro UI/API 자동화는 2단계로 미뤄져 있습니다.
 | POST | `/api/agents/checkin` | 에이전트 체크인/텔레메트리/명령 수신 |
 | GET | `/api/admin/overview` | 요약 통계 |
 | GET | `/api/admin/agents` | 에이전트 목록 |
+| DELETE | `/api/admin/agents/{id}` | 등록 해제(재이미징/폐기 PC 정리, 작업 이력 유지) |
 | GET | `/api/admin/agents/{id}` | 에이전트 상세 |
 | GET/POST | `/api/admin/agents/{id}/commands` | 명령 조회/발행 |
+| GET/PUT/DELETE | `/api/admin/agents/{id}/policy` | PC별 정책 조회/저장/초기화 |
+| GET | `/api/admin/agents/policies` | 개별 정책을 저장한 PC 목록 |
 | POST | `/api/admin/agents/{id}/wake` | Wake-on-LAN |
 | POST | `/api/admin/agents/{id}/reboot` | 재부팅 |
 | POST | `/api/admin/agents/{id}/shutdown` | 종료 |
@@ -464,10 +467,12 @@ Maestro UI/API 자동화는 2단계로 미뤄져 있습니다.
 | POST | `/api/admin/jobs/{jobId}/pause` | 일시중지 |
 | POST | `/api/admin/jobs/{jobId}/resume` | 재개 |
 | POST | `/api/admin/jobs/{jobId}/cancel` | 취소 |
+| POST | `/api/admin/jobs/{jobId}/force-stop` | 강제 중단 |
 | GET | `/api/admin/jobs/{jobId}/maestro` | Maestro 체크리스트 |
 | POST | `/api/admin/jobs/{jobId}/maestro/protection-suspended` | 보호 중지 확인 |
 | POST | `/api/admin/jobs/{jobId}/maestro/restored` | 상태 저장/보호 복원 확인 |
-| GET/PUT | `/api/admin/policy` | 업데이트 정책 조회/변경 |
+| GET/PUT | `/api/admin/policy` | 서버 기본 업데이트 정책 조회/변경 |
+| GET/POST | `/api/admin/token` | 관리자 토큰 상태/변경(토큰 값은 응답에 포함되지 않음) |
 | GET | `/api/admin/audit` | 감사 로그 |
 | GET | `/api/admin/update` | GitHub Releases 최신 버전 확인 (`force=true`로 캐시 무시) |
 | GET | `/api/admin/live` | 모니터용 SSE 스트림 (`text/event-stream`, 변경 시 즉시 + 15초 하트비트) |

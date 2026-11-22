@@ -10,6 +10,7 @@ public sealed class ServerPolicyProvider
     public const string SettingKey = UpdateAgent.Shared.UpdateAgentConstants.ServerPolicySettingKey;
 
     private readonly Func<string, CancellationToken, Task<string?>> _readSetting;
+    private UpdatePolicy? _lastKnownGood;
 
     public ServerPolicyProvider(IJobStore store)
         : this(store.GetSettingAsync)
@@ -26,13 +27,21 @@ public sealed class ServerPolicyProvider
         try
         {
             var json = await _readSetting(SettingKey, cancellationToken).ConfigureAwait(false);
-            return string.IsNullOrWhiteSpace(json)
-                ? UpdatePolicy.Default
-                : UpdateAgentJson.Deserialize<UpdatePolicy>(json) ?? UpdatePolicy.Default;
+            var policy = string.IsNullOrWhiteSpace(json)
+                ? null
+                : UpdateAgentJson.Deserialize<UpdatePolicy>(json);
+            if (policy is not null)
+            {
+                policy = policy.SanitizeFor(null).WithoutFeatureUpdates();
+                _lastKnownGood = policy;
+                return policy;
+            }
         }
         catch
         {
-            return UpdatePolicy.Default;
+            // 일시적인 DB 오류에서 정책을 관대한 기본값으로 되돌리면 교사 제한이 풀린다.
         }
+
+        return _lastKnownGood ?? UpdatePolicy.Default;
     }
 }

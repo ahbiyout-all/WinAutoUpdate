@@ -48,10 +48,10 @@ public static class UpdateAgentConstants
     public static bool IsPlaceholderToken(string? token)
     {
         if (string.IsNullOrWhiteSpace(token)) return true;
-        return string.Equals(token.Trim(), DefaultAdminToken, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(token.Trim(), DefaultAgentToken, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(token.Trim(), SampleAdminToken, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(token.Trim(), SampleAgentToken, StringComparison.OrdinalIgnoreCase);
+        var value = token.Trim();
+        if (value.StartsWith("change-me-", StringComparison.OrdinalIgnoreCase)) return true;
+        return value.StartsWith("sample-", StringComparison.OrdinalIgnoreCase)
+            && value.EndsWith("-replace-before-pilot", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>%ProgramData%\UpdateAgent</summary>

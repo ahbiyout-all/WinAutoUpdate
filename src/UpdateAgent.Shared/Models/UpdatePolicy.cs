@@ -74,6 +74,15 @@ public sealed record UpdatePolicy
     /// <summary>동일 KB가 이 횟수만큼 실패하면 격리한다.</summary>
     public int MaxItemFailureCount { get; init; } = 2;
 
+    /// <summary>
+    /// 기능 업데이트 2차 승인 워크플로가 구현되기 전까지 서버/에이전트 어느 경로에서도
+    /// 기능 업데이트가 선택되지 않도록 강제한다. API가 직접 정책을 보내도 적용된다.
+    /// </summary>
+    public UpdatePolicy WithoutFeatureUpdates() =>
+        IncludeFeatureUpdates || !string.IsNullOrWhiteSpace(ApprovedFeatureRelease)
+            ? this with { IncludeFeatureUpdates = false, ApprovedFeatureRelease = null }
+            : this;
+
     /// <summary>OS가 지원하지 않는 옵션을 자동으로 끈 정책을 반환한다.</summary>
     public UpdatePolicy SanitizeFor(OsInfo? os)
     {

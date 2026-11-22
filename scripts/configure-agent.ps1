@@ -52,7 +52,7 @@ function Resolve-Secret {
     if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value.Trim() }
     if (-not [string]::IsNullOrWhiteSpace($File)) {
         if (-not (Test-Path -LiteralPath $File)) { throw "Secret file not found: $File" }
-        return (Get-Content -LiteralPath $File -Raw).Trim().TrimStart([char]0xFEFF)
+        return (Get-Content -LiteralPath $File -Raw).TrimStart([char]0xFEFF).Trim()
     }
     $secure = Read-Host -AsSecureString "Agent token (must match LabManager AgentToken)"
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
@@ -175,7 +175,7 @@ if ($tokenWasRequested) {
     if ([string]::IsNullOrWhiteSpace($resolvedToken)) {
         $resolvedToken = Resolve-Secret -Value "" -File ""
     }
-    $resolvedToken = $resolvedToken.Trim().TrimStart([char]0xFEFF)
+    $resolvedToken = $resolvedToken.TrimStart([char]0xFEFF).Trim()
     if ([string]::IsNullOrWhiteSpace($resolvedToken)) {
         throw "Agent token is empty."
     }

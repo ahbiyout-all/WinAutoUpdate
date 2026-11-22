@@ -147,12 +147,30 @@ jobs:
       - name: Prepare release notes
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          UPDATEAGENT_AGENT_TOKEN: ${{ secrets.UPDATEAGENT_AGENT_TOKEN }}
+          UPDATEAGENT_LABMANAGER_ADMIN_TOKEN: ${{ secrets.UPDATEAGENT_LABMANAGER_ADMIN_TOKEN }}
+          UPDATEAGENT_LABMANAGER_AGENT_TOKEN: ${{ secrets.UPDATEAGENT_LABMANAGER_AGENT_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
           $version = $env:RELEASE_VERSION
 
           $innoInfo = Get-Content -LiteralPath 'artifacts\inno\build-info.json' -Raw | ConvertFrom-Json
           $msiInfo = Get-Content -LiteralPath 'artifacts\msi\build-info.json' -Raw | ConvertFrom-Json
+
+          # 잘못된 버전/시크릿 메타데이터가 있는 아티팩트는 릴리스하지 않는다.
+          foreach ($pair in @(@('Inno', $innoInfo), @('MSI', $msiInfo))) {
+            $label = $pair[0]
+            $info = $pair[1]
+            if ($info.productVersion -ne $version) {
+              throw "$label build-info productVersion '$($info.productVersion)' does not match $version."
+            }
+          }
+          $expectedSecrets =
+            -not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_AGENT_TOKEN) -or
+            -not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_LABMANAGER_ADMIN_TOKEN)
+          if ([bool]$innoInfo.containsSecrets -ne [bool]$expectedSecrets) {
+            throw "Inno build-info containsSecrets '$($innoInfo.containsSecrets)' does not match the configured token secrets."
+          }
 
           $lines = [System.Collections.Generic.List[string]]::new()
           $lines.Add("# UpdateAgent $version")
@@ -172,6 +190,12 @@ jobs:
             $lines.Add(('- `{0}`: `{1}`' -f $setup.setupFile, $setup.sha256))
           }
           $lines.Add(('- `{0}`: `{1}`' -f $msiInfo.msiFile, $msiInfo.sha256))
+          $lines.Add('')
+          $lines.Add('## 주요 변경 사항')
+          $lines.Add('')
+          $lines.Add('- 첫 설치 토큰 검증을 fail-closed로 강화했습니다(업데이트는 내장 토큰을 사용하지 않습니다).')
+          $lines.Add('- 기능 업데이트 2차 승인, 명령 결과 소유자 검증, 정책 영속화 등 보안/안정성 결함을 수정했습니다.')
+          $lines.Add('- 자세한 내용은 저장소의 `docs/WORKLOG.md`를 참고하세요.')
           $lines.Add('')
           $lines.Add('## 설치 방법')
           $lines.Add('')

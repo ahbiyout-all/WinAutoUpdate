@@ -86,7 +86,9 @@ public sealed class OverlayPipeServer : IAsyncDisposable
                     // 구독자의 실패가 파이프 수용 루프를 중단하지 않게 한다.
                 }
 
-                _ = Task.Run(() => HandleClientAsync(id, connection, cancellationToken), cancellationToken);
+                // 이미 취소된 토큰을 Task.Run에 넘기면 대리자가 실행되지 않아 연결 핸들이 새므로
+                // 취소 여부는 핸들러가 linked token으로 판단하게 한다.
+                _ = Task.Run(() => HandleClientAsync(id, connection, cancellationToken));
             }
             catch (OperationCanceledException)
             {

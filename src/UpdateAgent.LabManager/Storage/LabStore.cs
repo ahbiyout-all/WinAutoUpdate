@@ -32,11 +32,14 @@ public sealed record AuditEntry
 /// <summary>교사 PC의 LabManager SQLite 저장소. 작업 상태의 원본이다.</summary>
 public sealed class LabStore
 {
-    private const int OnlineThresholdSeconds = 90;
+    private readonly int _onlineThresholdSeconds;
     private readonly string _connectionString;
 
-    public LabStore(string databasePath)
+    public LabStore(string databasePath, int onlineThresholdSeconds = 90)
     {
+        if (onlineThresholdSeconds <= 0)
+            throw new ArgumentOutOfRangeException(nameof(onlineThresholdSeconds));
+        _onlineThresholdSeconds = onlineThresholdSeconds;
         Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
         _connectionString = new SqliteConnectionStringBuilder
         {
@@ -145,8 +148,26 @@ public sealed class LabStore
         command.Parameters.AddWithValue("$state", (int)telemetry.State);
         command.Parameters.AddWithValue("$seen", DateTimeOffset.Now.ToString("O"));
         command.Parameters.AddWithValue("$info", UpdateAgentJson.Serialize(agent));
-        command.Parameters.AddWithValue("$telemetry", UpdateAgentJson.Serialize(telemetry));
+        // 사용자 표시 이름은 개인정보이므로 DB에 저장하지 않는다. 레거시 값도 여기서 제거한다.
+        command.Parameters.AddWithValue("$telemetry",
+            UpdateAgentJson.Serialize(telemetry with { LoggedOnUsers = [] }));
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>재이미징/폐기된 PC를 목록에서 제거한다. 작업 이력은 보존한다.</summary>
+    public async Task<bool> DeleteAgentAsync(string agentId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM agents WHERE agent_id = $id;";
+        command.Parameters.AddWithValue("$id", agentId);
+        var deleted = await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+
+        await using var settingCommand = connection.CreateCommand();
+        settingCommand.CommandText = "DELETE FROM settings WHERE key = $key;";
+        settingCommand.Parameters.AddWithValue("$key", "agent-policy:" + agentId);
+        await settingCommand.ExecuteNonQueryAsync(cancellationToken);
+        return deleted;
     }
 
     public async Task<IReadOnlyList<AgentRecord>> GetAgentsAsync(CancellationToken cancellationToken = default)
@@ -165,6 +186,7 @@ public sealed class LabStore
             var info = UpdateAgentJson.Deserialize<AgentInfo>(reader.GetString(0));
             var telemetry = UpdateAgentJson.Deserialize<AgentTelemetry>(reader.GetString(1));
             if (info is null || telemetry is null) continue;
+            if (telemetry.LoggedOnUsers.Count > 0) telemetry = telemetry with { LoggedOnUsers = [] };
 
             var lastSeen = DateTimeOffset.TryParse(reader.GetString(2), out var parsed)
                 ? parsed
@@ -175,7 +197,7 @@ public sealed class LabStore
                 Agent = info,
                 Telemetry = telemetry,
                 LastSeen = lastSeen,
-                Online = DateTimeOffset.Now - lastSeen < TimeSpan.FromSeconds(OnlineThresholdSeconds),
+                Online = DateTimeOffset.Now - lastSeen < TimeSpan.FromSeconds(_onlineThresholdSeconds),
             });
         }
 
@@ -408,19 +430,23 @@ public sealed class LabStore
     }
 
     public async Task CompleteCommandResultsAsync(
+        string agentId,
         IEnumerable<CommandResult> results,
         CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
+        // 공유 에이전트 토큰을 가진 다른 PC의 명령 결과로 상태를 바꿀 수 없도록 소유자를 함께 검사한다.
         command.CommandText = """
             UPDATE commands SET status = $status, result_message = $message, completed_at = $ts
-            WHERE command_id = $id;
+            WHERE command_id = $id AND agent_id = $agent;
             """;
         var statusParam = command.Parameters.Add("$status", SqliteType.Integer);
         var messageParam = command.Parameters.Add("$message", SqliteType.Text);
         var tsParam = command.Parameters.Add("$ts", SqliteType.Text);
         var idParam = command.Parameters.Add("$id", SqliteType.Text);
+        var agentParam = command.Parameters.Add("$agent", SqliteType.Text);
+        agentParam.Value = agentId;
 
         foreach (var result in results)
         {

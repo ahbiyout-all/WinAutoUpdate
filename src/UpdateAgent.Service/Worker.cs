@@ -14,6 +14,7 @@ using UpdateAgent.Service.Overlay;
 using UpdateAgent.Service.Sessions;
 using UpdateAgent.Shared;
 using UpdateAgent.Shared.Models;
+using UpdateAgent.Shared.Serialization;
 
 namespace UpdateAgent.Service;
 
@@ -203,6 +204,25 @@ public sealed class Worker : BackgroundService
             var response = await _labManager.CheckInAsync(request, cancellationToken);
             if (response is null) return;
 
+            // 교사가 저장한 정책을 로컬 캐시에 반영한다. 그렇지 않으면 학생용 앱과
+            // ScanNow가 서버 제한을 모른 채 기본 정책을 사용하게 된다.
+            if (response.Policy is { } serverPolicy)
+            {
+                try
+                {
+                    var os = _runner.Os ?? WindowsOsInfoProvider.GetCurrent();
+                    var effective = serverPolicy.SanitizeFor(os).WithoutFeatureUpdates();
+                    await _store.SetSettingAsync(
+                        ServerPolicyProvider.SettingKey,
+                        UpdateAgentJson.Serialize(effective),
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "서버 정책 캐시 저장 실패");
+                }
+            }
+
             // 서버가 받은 결과는 큐에서 제거한다.
             if (request.CommandResults.Count > 0)
             {
@@ -282,7 +302,6 @@ public sealed class Worker : BackgroundService
             CurrentJobDetail = current,
             CurrentPhase = current?.Summary.Phase,
             UserLoggedOn = sessions.Count > 0,
-            LoggedOnUsers = sessions.Select(s => s.DisplayName).ToList(),
             WuBusy = wuBusy,
             RebootPending = _reboot.IsRebootPending(),
             Maestro = maestro,

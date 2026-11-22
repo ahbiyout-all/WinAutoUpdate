@@ -52,8 +52,12 @@ public static class UpdatePolicyEvaluator
             if (!os.SupportsFeatureUpdates)
                 return (false, $"이 OS는 기능 업데이트를 지원하지 않습니다: {os.SupportSummary}");
 
-            if (!string.IsNullOrWhiteSpace(policy.ApprovedFeatureRelease)
-                && !update.Title.Contains(policy.ApprovedFeatureRelease, StringComparison.OrdinalIgnoreCase))
+            // 기능 업데이트는 포함 옵션만으로 충분하지 않다. 별도의 2차 승인 릴리스가
+            // 명시되어야만 선택된다. 비어 있으면 승인되지 않은 것으로 취급한다.
+            if (string.IsNullOrWhiteSpace(policy.ApprovedFeatureRelease))
+                return (false, "기능 업데이트 2차 승인 릴리스가 지정되지 않았습니다");
+
+            if (!update.Title.Contains(policy.ApprovedFeatureRelease, StringComparison.OrdinalIgnoreCase))
             {
                 return (false, $"승인된 릴리스({policy.ApprovedFeatureRelease})가 아닙니다");
             }
@@ -67,6 +71,10 @@ public static class UpdatePolicyEvaluator
                 ? (true, "정의 업데이트 포함 정책")
                 : (false, "정의 업데이트 제외 정책");
         }
+
+        // 교사가 모든 범주를 껐으면 WUA의 필수 플래그도 설치를 강행하지 못한다.
+        if (!policy.HasAnyUpdateCategory)
+            return (false, "모든 업데이트 범주가 비활성화되었습니다");
 
         var selected = update.Category switch
         {

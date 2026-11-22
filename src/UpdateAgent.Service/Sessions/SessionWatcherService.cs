@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using UpdateAgent.Core.Sessions;
+using UpdateAgent.Core.Windows;
 using UpdateAgent.Service.Configuration;
 
 namespace UpdateAgent.Service.Sessions;
@@ -57,7 +58,13 @@ public sealed class SessionWatcherService : BackgroundService
 
     private void EnsureHelpers()
     {
-        var executable = _options.CurrentValue.ResolveSessionHelperPath();
+        var options = _options.CurrentValue;
+        if (!options.OverlayEnabled || !WindowsOsInfoProvider.GetCurrent().SupportsOverlay)
+        {
+            return;
+        }
+
+        var executable = options.ResolveSessionHelperPath();
         if (!File.Exists(executable))
         {
             // 아직 빌드/배포 전이면 조용히 넘어간다. 오버레이만 비활성화된다.
@@ -93,16 +100,14 @@ public sealed class SessionWatcherService : BackgroundService
             {
                 _launched[session.SessionId] = DateTimeOffset.Now;
                 _logger.LogInformation(
-                    "SessionHelper 실행: session={SessionId}, user={User}",
-                    session.SessionId,
-                    session.DisplayName);
+                    "SessionHelper 실행: session={SessionId}",
+                    session.SessionId);
             }
             else
             {
                 _logger.LogWarning(
-                    "SessionHelper 실행 실패: session={SessionId}, user={User}, error={Error}",
+                    "SessionHelper 실행 실패: session={SessionId}, error={Error}",
                     session.SessionId,
-                    session.DisplayName,
                     error);
             }
         }

@@ -1,4 +1,4 @@
-﻿; ============================================================================
+; ============================================================================
 ;  UpdateAgent LabManager - Inno Setup 6 installer (교사 PC)
 ;
 ;  설치 흐름
@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.26"
+  #define AppVersion "0.1.27"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -283,7 +283,10 @@ function InitializeSetup: Boolean;
 begin
   { 종료 → 언인스톨 → 설치 순서는 PrepareToInstall에서 안내와 함께 수행한다. }
   OldInnoUninstall := FindInnoUninstallString;
-  FirstInstall := OldInnoUninstall = '';
+  { 레지스트리만 보고 첫 설치로 판단하면 레지스트리가 남은 재이미징 PC에서
+    내장 토큰 검증이 건너뛰어진다. 기존 설정 파일이 있으면 업데이트로 취급한다. }
+  FirstInstall := (OldInnoUninstall = '') and
+    (not FileExists(ExpandConstant('{app}\appsettings.json')));
   Result := True;
 end;
 
@@ -335,35 +338,20 @@ begin
     Exit;
   end;
 
-  { secret이 설정되지 않은 빌드는 빈 파일을 포함한다. 이 경우 내장 토큰이 없는 것으로 보고
-    기존 동작(appsettings.json의 샘플 토큰 사용)을 유지한다. }
-  if GetArrayLength(Lines) = 0 then
+  { Fail closed: 공개된 샘플/기본 토큰으로 서버가 뜨면 lab 전체가 노출된다.
+    첫 설치에는 반드시 실제 토큰 두 개가 내장되어 있어야 한다. 업데이트는 이 함수를 통과하지 않는다. }
+  if GetArrayLength(Lines) < 2 then
   begin
-    Log('No embedded LabManager tokens in this build; keeping appsettings.json values.');
+    Result := '첫 설치용 내장 LabManager 토큰 파일에 AdminToken과 AgentToken 두 줄이 없습니다. ' +
+      '실제 토큰 두 개를 넣어 다시 빌드하세요.';
     Exit;
   end;
   AdminToken := NormalizeTokenLine(Lines[0]);
-  if (GetArrayLength(Lines) = 1) and (AdminToken = '') then
-  begin
-    Log('No embedded LabManager tokens in this build; keeping appsettings.json values.');
-    Exit;
-  end;
-
-  if GetArrayLength(Lines) < 2 then
-  begin
-    Result := '첫 설치용 내장 LabManager 토큰 파일에 AdminToken과 AgentToken 두 줄이 없습니다.';
-    Exit;
-  end;
-
   AgentToken := NormalizeTokenLine(Lines[1]);
-  if (AdminToken = '') and (AgentToken = '') then
-  begin
-    Log('No embedded LabManager tokens in this build; keeping appsettings.json values.');
-    Exit;
-  end;
   if (AdminToken = '') or (AgentToken = '') then
   begin
-    Result := '첫 설치용 내장 LabManager 토큰 파일에 빈 값이 있습니다.';
+    Result := '첫 설치용 내장 LabManager 토큰 파일에 빈 값이 있습니다. ' +
+      '실제 토큰 두 개를 넣어 다시 빌드하세요.';
     Exit;
   end;
   if IsPlaceholderToken(AdminToken) or IsPlaceholderToken(AgentToken) then
@@ -639,51 +627,13 @@ begin
   end;
 end;
 
-{ Upgrade path: the restored config may still contain change-me-* placeholders.
-  Replace only those placeholders with the shipped sample tokens so the server
-  starts immediately. Tokens the user already configured are left untouched. }
-function ReplaceDefaultLabManagerTokens(const FileName: String): Boolean;
-var
-  Lines: TStringList;
-  I: Integer;
-  Changed: Boolean;
-begin
-  Result := False;
-  Lines := TStringList.Create;
-  try
-    try
-      Lines.LoadFromFile(FileName);
-      Changed := False;
-      for I := 0 to Lines.Count - 1 do
-      begin
-        if Pos('change-me-admin-token', Lines.Strings[I]) > 0 then
-        begin
-          Lines.Strings[I] := ReplaceAllText(Lines.Strings[I],
-            'change-me-admin-token', SampleAdminToken);
-          Changed := True;
-        end;
-        if Pos('change-me-agent-token', Lines.Strings[I]) > 0 then
-        begin
-          Lines.Strings[I] := ReplaceAllText(Lines.Strings[I],
-            'change-me-agent-token', SampleAgentToken);
-          Changed := True;
-        end;
-      end;
-      if Changed then
-        Lines.SaveToFile(FileName);
-      Result := True;
-    except
-      Result := False;
-    end;
-  finally
-    Lines.Free;
-  end;
-end;
-
+{ 보존된 설정에 공개된 기본/샘플 토큰이 남아 있는지 확인한다.
+  남아 있으면 서버가 시작하지 않으므로 대시보드 자동 실행도 생략한다. }
 function HasDefaultLabManagerToken: Boolean;
 var
   Lines: TStringList;
   I: Integer;
+  LowerLine: String;
 begin
   Result := False;
   if LabManagerConfigFile = '' then
@@ -694,11 +644,15 @@ begin
   try
     Lines.LoadFromFile(LabManagerConfigFile);
     for I := 0 to Lines.Count - 1 do
-      if Pos('change-me-', Lowercase(Lines.Strings[I])) > 0 then
+    begin
+      LowerLine := Lowercase(Lines.Strings[I]);
+      if (Pos('change-me-', LowerLine) > 0) or
+         (Pos('sample-', LowerLine) > 0) and (Pos('-replace-before-pilot', LowerLine) > 0) then
       begin
         Result := True;
         Exit;
       end;
+    end;
   finally
     Lines.Free;
   end;
@@ -735,9 +689,10 @@ begin
       { [Files] may have created appsettings.json with onlyifdoesntexist; overwrite with the backup. }
       if not CopyFile(LabManagerConfigBackup, LabManagerConfigFile, False) then
         RaiseException('기존 LabManager appsettings.json 복원에 실패해 설치를 중단합니다. 백업: ' + LabManagerConfigBackup);
-      { 이전 버전에서 남은 기본 토큰은 새 샘플 토큰으로 교체해 서버가 바로 시작되도록 한다. }
-      if not ReplaceDefaultLabManagerTokens(LabManagerConfigFile) then
-        RaiseException('기존 appsettings.json의 기본 토큰을 샘플 토큰으로 교체하지 못해 설치를 중단합니다.');
+      { 보존된 토큰은 절대 바꾸지 않는다. 공개된 기본/샘플 값이 남아 있으면
+        LabManager가 시작 시 fail-closed로 거부하므로 교사가 실제 토큰을 넣어야 한다. }
+      if HasDefaultLabManagerToken then
+        Log('appsettings.json still contains placeholder tokens; LabManager will refuse to start until real tokens are configured.');
       DeleteFile(LabManagerConfigBackup);
       LabManagerConfigRestoreNeeded := False;
     end;

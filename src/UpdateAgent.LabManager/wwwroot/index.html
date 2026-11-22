@@ -279,12 +279,8 @@
       <div class="modal-body">
         <div class="section-label">대시보드 연결</div>
         <p class="muted small">appsettings.json의 <code>LabManager:AdminToken</code> 값과 같아야 합니다.</p>
-        <input type="password" id="token-input" class="text-input" placeholder="관리자 토큰" autocomplete="current-password" />
-        <div class="token-hint">
-          <span class="muted small">설치 시 기본값(샘플):</span>
-          <code id="sample-token-text" class="token-value mono">sample-admin-token-replace-before-pilot</code>
-          <button id="token-use-sample" type="button" class="btn btn-mini">이 값 사용</button>
-        </div>
+        <input type="text" id="token-input" class="text-input" placeholder="관리자 토큰" autocomplete="off" />
+        <p class="muted small">sample-*-replace-before-pilot 값은 배포용 토큰이 아닙니다. 설치 후 반드시 교체하세요.</p>
         <div id="token-status" class="token-status hidden"></div>
         <div class="modal-foot">
           <button id="token-save" class="btn btn-primary">저장</button>
@@ -292,8 +288,8 @@
 
         <div class="section-label">서버 관리자 토큰 변경</div>
         <p class="muted small">변경하면 서버에 즉시 적용되고 저장된 관리자 토큰도 함께 갱신됩니다. 새 토큰을 안전한 곳에 기록하세요.</p>
-        <input type="password" id="new-token-input" class="text-input" placeholder="새 관리자 토큰 (8자 이상)" autocomplete="new-password" />
-        <input type="password" id="new-token-confirm" class="text-input" placeholder="새 토큰 확인" autocomplete="new-password" />
+        <input type="text" id="new-token-input" class="text-input" placeholder="새 관리자 토큰 (8자 이상)" autocomplete="off" />
+        <input type="text" id="new-token-confirm" class="text-input" placeholder="새 토큰 확인" autocomplete="off" />
         <div class="modal-foot">
           <button id="token-change" class="btn btn-primary">서버 토큰 변경</button>
         </div>

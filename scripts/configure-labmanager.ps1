@@ -36,7 +36,7 @@ function Resolve-Secret {
     if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value.Trim() }
     if (-not [string]::IsNullOrWhiteSpace($File)) {
         if (-not (Test-Path -LiteralPath $File)) { throw "Secret file not found: $File" }
-        return (Get-Content -LiteralPath $File -Raw).Trim().TrimStart([char]0xFEFF)
+        return (Get-Content -LiteralPath $File -Raw).TrimStart([char]0xFEFF).Trim()
     }
     if (-not [string]::IsNullOrWhiteSpace($EnvName)) {
         $fromEnv = [Environment]::GetEnvironmentVariable($EnvName, "Process")

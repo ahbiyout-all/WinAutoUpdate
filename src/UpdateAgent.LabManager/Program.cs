@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
@@ -21,6 +22,9 @@ var hostArgs = args
     .ToArray();
 
 var builder = WebApplication.CreateBuilder(hostArgs);
+
+// 같은 PC의 체크인을 직렬화해 이전 상태 읽기→검증→저장 사이에 최신 상태가 덮어써지지 않게 한다.
+var checkinGates = new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.OrdinalIgnoreCase);
 
 builder.Host.UseSerilog((context, logger) => logger
     .ReadFrom.Configuration(context.Configuration)
@@ -50,17 +54,12 @@ if (!startupOptions.AllowDefaultTokens)
     var adminToken = startupOptions.AdminToken?.Trim();
     var agentToken = startupOptions.AgentToken?.Trim();
     var invalidTokens = new List<string>();
-    if (string.IsNullOrWhiteSpace(adminToken) ||
-        string.Equals(adminToken, UpdateAgentConstants.DefaultAdminToken.Trim(), StringComparison.OrdinalIgnoreCase))
-    {
+    // change-me-* 및 sample-*-replace-before-pilot 모두 공개된 값이므로 시작을 막는다.
+    if (UpdateAgentConstants.IsPlaceholderToken(adminToken))
         invalidTokens.Add("AdminToken");
-    }
 
-    if (string.IsNullOrWhiteSpace(agentToken) ||
-        string.Equals(agentToken, UpdateAgentConstants.DefaultAgentToken.Trim(), StringComparison.OrdinalIgnoreCase))
-    {
+    if (UpdateAgentConstants.IsPlaceholderToken(agentToken))
         invalidTokens.Add("AgentToken");
-    }
 
     if (invalidTokens.Count > 0)
     {
@@ -83,7 +82,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddSingleton(sp =>
 {
     var options = sp.GetRequiredService<IOptions<LabManagerOptions>>().Value;
-    return new LabStore(options.ResolveDatabasePath());
+    return new LabStore(options.ResolveDatabasePath(), options.OnlineThresholdSeconds);
 });
 builder.Services.AddSingleton<WakeOnLanService>();
 builder.Services.AddHttpClient("github", client =>
@@ -141,6 +140,11 @@ app.MapPost("/api/agents/checkin", async (
     LiveEventBus liveEvents,
     CancellationToken cancellationToken) =>
 {
+    var checkinGate = checkinGates.GetOrAdd(
+        request.Agent.AgentId, _ => new SemaphoreSlim(1, 1));
+    await checkinGate.WaitAsync(cancellationToken);
+    try
+    {
     if (!JobStateGuard.AgentIdsMatch(request.Agent.AgentId, request.Telemetry.AgentId))
     {
         await labStore.AddAuditAsync(
@@ -225,7 +229,24 @@ app.MapPost("/api/agents/checkin", async (
 
     if (request.CommandResults.Count > 0)
     {
-        await labStore.CompleteCommandResultsAsync(request.CommandResults, cancellationToken);
+        // 공유 토큰 환경에서 다른 에이전트의 명령 결과를 위조해 제출할 수 없도록
+        // 보고된 AgentId가 체크인 주체와 다르면 전체 결과를 거부한다.
+        var foreignResults = request.CommandResults
+            .Where(r => !string.Equals(r.AgentId, request.Agent.AgentId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (foreignResults.Count > 0)
+        {
+            await labStore.AddAuditAsync(
+                "agent",
+                "command-result-rejected",
+                $"{request.Agent.MachineName}/{foreignResults.Count}",
+                "다른 에이전트의 명령 결과 제출",
+                cancellationToken);
+            return Results.BadRequest(new { error = "자신의 명령 결과만 제출할 수 있습니다." });
+        }
+
+        await labStore.CompleteCommandResultsAsync(
+            request.Agent.AgentId, request.CommandResults, cancellationToken);
         foreach (var result in request.CommandResults)
         {
             await labStore.AddAuditAsync(
@@ -239,7 +260,8 @@ app.MapPost("/api/agents/checkin", async (
         // StartJob 명령이 실패하면 서버 작업이 Pending에 남지 않도록 실패로 정리한다.
         foreach (var result in request.CommandResults.Where(r => !r.Success))
         {
-            await FailJobForRejectedCommandAsync(labStore, result, cancellationToken);
+            await FailJobForRejectedCommandAsync(
+                labStore, request.Agent.AgentId, result, cancellationToken);
         }
     }
 
@@ -264,6 +286,11 @@ app.MapPost("/api/agents/checkin", async (
         Policy = policy,
         MaestroManualConfirmationRequired = policy.RequireMaestroManualConfirmation,
     });
+    }
+    finally
+    {
+        checkinGate.Release();
+    }
 });
 
 // ---------------- 대시보드 ----------------
@@ -333,6 +360,15 @@ app.MapGet("/api/admin/live", async (
 
 app.MapGet("/api/admin/agents", async (LabStore labStore, CancellationToken cancellationToken) =>
     Results.Ok(await labStore.GetAgentsAsync(cancellationToken)));
+
+app.MapDelete("/api/admin/agents/{agentId}", async (
+    string agentId,
+    LabStore labStore,
+    CancellationToken cancellationToken) =>
+{
+    var deleted = await labStore.DeleteAgentAsync(agentId, cancellationToken);
+    return deleted ? Results.NoContent() : Results.NotFound(new { error = "등록되지 않은 PC입니다." });
+});
 
 // 리터럴 경로는 {agentId} 라우트보다 먼저 등록해야 한다.
 app.MapGet("/api/admin/agents/policies", async (
@@ -753,7 +789,6 @@ app.MapGet("/api/admin/token", (AdminTokenStore adminTokenStore) =>
     {
         isPlaceholder = adminTokenStore.IsUsingPlaceholder,
         hasRuntimeOverride = adminTokenStore.HasRuntimeOverride,
-        sampleAdminToken = UpdateAgentConstants.SampleAdminToken,
     }));
 
 app.MapPost("/api/admin/token", async (
@@ -792,11 +827,12 @@ app.MapPut("/api/admin/policy", async (
     LabStore labStore,
     CancellationToken cancellationToken) =>
 {
+    var stored = policy.WithoutFeatureUpdates();
     await labStore.SetSettingAsync(
-        AgentPolicyService.DefaultSettingKey, UpdateAgentJson.Serialize(policy), cancellationToken);
+        AgentPolicyService.DefaultSettingKey, UpdateAgentJson.Serialize(stored), cancellationToken);
     await labStore.AddAuditAsync(
         "teacher", "policy", "default", "기본 업데이트 정책 변경", cancellationToken);
-    return Results.Ok(policy);
+    return Results.Ok(stored);
 });
 
 app.MapGet("/api/admin/audit", async (
@@ -812,17 +848,20 @@ return;
 
 static async Task FailJobForRejectedCommandAsync(
     LabStore store,
+    string reportingAgentId,
     CommandResult result,
     CancellationToken cancellationToken)
 {
     var command = await store.GetCommandAsync(result.CommandId, cancellationToken);
     if (command is null || command.Type != CommandType.StartJob) return;
+    if (!string.Equals(command.AgentId, reportingAgentId, StringComparison.OrdinalIgnoreCase)) return;
 
     var payload = UpdateAgentJson.Deserialize<StartJobCommandPayload>(command.PayloadJson);
     if (payload?.JobId is not { Length: > 0 } jobId) return;
 
     var job = await store.GetJobAsync(jobId, cancellationToken);
     if (job is null || job.Summary.IsTerminal) return;
+    if (!string.Equals(job.Summary.AgentId, reportingAgentId, StringComparison.OrdinalIgnoreCase)) return;
 
     var now = DateTimeOffset.Now;
     var failed = job.Summary with

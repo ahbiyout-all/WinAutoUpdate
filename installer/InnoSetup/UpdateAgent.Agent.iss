@@ -1,4 +1,4 @@
-﻿; ============================================================================
+; ============================================================================
 ;  UpdateAgent Agent - Inno Setup 6 installer
 ;
 ;  설치 흐름
@@ -27,7 +27,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.26"
+  #define AppVersion "0.1.27"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -525,7 +525,34 @@ begin
       (Copy(UpperToken, Length(UpperToken) - 20, 21) = '-REPLACE-BEFORE-PILOT');
 end;
 
-{ 업그레이드에서 기존 agent.json을 유지하기 전에 최소한의 형태를 확인한다. }
+{ JSON 텍스트에서 문자열 값 하나를 읽는다(이스케이프된 따옴표 처리). }
+function GetJsonStringValue(const Text, Key: String): String;
+var
+  KeyPos, I, StartPos, EndPos: Integer;
+begin
+  Result := '';
+  KeyPos := Pos('"' + Key + '"', Text);
+  if KeyPos = 0 then Exit;
+  I := KeyPos + Length(Key) + 2;
+  while (I <= Length(Text)) and (Text[I] <> ':') do Inc(I);
+  if I > Length(Text) then Exit;
+  Inc(I);
+  while (I <= Length(Text)) and (Text[I] <= ' ') do Inc(I);
+  if (I > Length(Text)) or (Text[I] <> '"') then Exit;
+  Inc(I);
+  StartPos := I;
+  while (I <= Length(Text)) and (Text[I] <> '"') do
+  begin
+    if (Text[I] = '\') and (I < Length(Text)) then Inc(I);
+    Inc(I);
+  end;
+  if I > Length(Text) then Exit;
+  EndPos := I - 1;
+  Result := Copy(Text, StartPos, EndPos - StartPos + 1);
+end;
+
+{ 업그레이드에서 기존 agent.json을 유지하기 전에 형태와 토큰을 확인한다.
+  공개된 기본/샘플 토큰이 들어 있는 설정은 재사용하지 않는다. }
 function IsValidExistingAgentConfig(const Path: String): Boolean;
 var
   Lines: TArrayOfString;
@@ -545,7 +572,8 @@ begin
   Result := (Text[1] = '{') and (Text[Length(Text)] = '}') and
     (Pos('"Agent"', Text) > 0) and
     (Pos('"LabManagerUrl"', Text) > 0) and
-    (Pos('"AgentToken"', Text) > 0);
+    (Pos('"AgentToken"', Text) > 0) and
+    (not IsPlaceholderToken(GetJsonStringValue(Text, 'AgentToken')));
 end;
 
 function JsonEscape(const Value: String): String;
@@ -573,11 +601,16 @@ begin
 end;
 
 function InitializeSetup: Boolean;
+var
+  ConfigPath: String;
 begin
   { 종료 → 언인스톨 → 설치 순서는 PrepareToInstall에서 안내와 함께 수행한다. }
   OldInnoUninstall := FindInnoUninstallString;
   OldMsiProduct := FindMsiProductCode;
-  FirstInstall := (OldInnoUninstall = '') and (OldMsiProduct = '');
+  { 레지스트리 잔존 여부가 아니라 재사용 가능한 설정 파일이 있는지로 첫 설치를 판단한다.
+    레지스트리가 남았지만 설정이 없거나 기본/샘플 토큰이면 첫 설치로 취급해 토큰을 다시 요청한다. }
+  ConfigPath := ExpandConstant('{commonappdata}\UpdateAgent\agent.json');
+  FirstInstall := not IsValidExistingAgentConfig(ConfigPath);
   Result := True;
 end;
 
@@ -842,7 +875,8 @@ begin
 
     if CanKeepExisting then
     begin
-      Log('No install settings after a previous install; keeping the existing agent.json.');
+      Log('No install settings after a previous install; refreshing SessionHelperPath only.');
+      AgentConfigRequested := True;
       AgentConfigSkipWrite := True;
       Exit;
     end;
@@ -877,7 +911,8 @@ begin
     내장 토큰은 첫 설치에서만 사용하고, 업데이트에서는 절대 읽지 않는다. }
   if (not HasExternalToken) and CanKeepExisting then
   begin
-    Log('Upgrade detected without an explicit token file; keeping the existing agent.json.');
+    Log('Upgrade detected without an explicit token file; refreshing SessionHelperPath only.');
+    AgentConfigRequested := True;
     AgentConfigSkipWrite := True;
     Exit;
   end;
@@ -1068,7 +1103,7 @@ var
   I: Integer;
 begin
   AgentConfigWriteFailed := False;
-  if (not AgentConfigRequested) or AgentConfigSkipWrite then Exit;
+  if not AgentConfigRequested then Exit;
 
   ConfigPath := ExpandConstant('{commonappdata}\UpdateAgent\agent.json');
   SessionHelper := ExpandConstant('{app}\SessionHelper\UpdateAgent.SessionHelper.exe');
@@ -1085,7 +1120,17 @@ begin
       else
         ConfigText := ConfigText + ExistingLines[I] + #13#10;
     end;
-    if (not SetJsonStringValue(ConfigText, 'LabManagerUrl', AgentConfigUrl)) or
+    if AgentConfigSkipWrite then
+    begin
+      { URL/토큰은 유지하고 설치 경로가 바뀐 경우 SessionHelperPath만 갱신한다. }
+      if not SetJsonStringValue(ConfigText, 'SessionHelperPath', SessionHelper) then
+      begin
+        AgentConfigWriteFailed := True;
+        AgentConfigError := '기존 에이전트 설정의 SessionHelperPath를 갱신할 수 없습니다: ' + ConfigPath;
+        Exit;
+      end;
+    end
+    else if (not SetJsonStringValue(ConfigText, 'LabManagerUrl', AgentConfigUrl)) or
        (not SetJsonStringValue(ConfigText, 'AgentToken', AgentConfigToken)) or
        (not SetJsonStringValue(ConfigText, 'SessionHelperPath', SessionHelper)) then
     begin
@@ -1098,6 +1143,12 @@ begin
   end
   else
   begin
+    if AgentConfigSkipWrite then
+    begin
+      AgentConfigWriteFailed := True;
+      AgentConfigError := '기존 에이전트 설정이 없어 SessionHelperPath만 갱신할 수 없습니다: ' + ConfigPath;
+      Exit;
+    end;
     SetArrayLength(Lines, 6);
     Lines[0] := '{';
     Lines[1] := '  "Agent": {';
@@ -1129,6 +1180,36 @@ begin
     AgentConfigWriteFailed := True;
     AgentConfigError := '에이전트 설정 파일을 쓸 수 없습니다: ' + ConfigPath;
     Exit;
+  end;
+end;
+
+{ 서비스가 실제로 RUNNING 상태에 도달했는지 확인한다(최대 30초). }
+function WaitForServiceRunning: Boolean;
+var
+  I, J: Integer;
+  OutputFile, Output: String;
+  Strings: TArrayOfString;
+begin
+  Result := False;
+  OutputFile := ExpandConstant('{tmp}\updateagent-sc-query.txt');
+  for I := 0 to 30 do
+  begin
+    DeleteFile(OutputFile);
+    RunHidden(ExpandConstant('{sys}\cmd.exe'),
+      '/c "' + ExpandConstant('{sys}\sc.exe') + '" query "' + ServiceName +
+      '" > "' + OutputFile + '" 2>&1');
+    if FileExists(OutputFile) and LoadStringsFromFile(OutputFile, Strings) then
+    begin
+      Output := '';
+      for J := 0 to GetArrayLength(Strings) - 1 do
+        Output := Output + Strings[J];
+      if Pos('RUNNING', Uppercase(Output)) > 0 then
+      begin
+        Result := True;
+        Exit;
+      end;
+    end;
+    Sleep(1000);
   end;
 end;
 
@@ -1171,9 +1252,12 @@ begin
       RaiseException('UpdateAgent 방화벽 규칙을 등록하지 못해 설치를 중단합니다. ' +
         'Setup 로그와 Windows Defender 방화벽 상태를 확인하세요.');
 
-    Code := RunHidden(ExpandConstant('{sys}\sc.exe'), 'start ' + ServiceName);
+    Code := RunHidden(ExpandConstant('{sys}\sc.exe'), 'start "' + ServiceName + '"');
     if (Code <> 0) and (Code <> 1056) then
       RaiseException('UpdateAgentService 시작에 실패했습니다(sc ' + IntToStr(Code) + ').');
+    if not WaitForServiceRunning then
+      RaiseException('UpdateAgentService가 RUNNING 상태가 되지 못했습니다. ' +
+        'Setup 로그와 이벤트 로그를 확인하세요.');
   end;
 end;
 

@@ -39,21 +39,21 @@ try
 {
     Log.Information("UpdateAgent.Service 구성 중...");
 
-    var builder = Host.CreateApplicationBuilder(args);
+    // 명령줄 인자는 구성 공급자에 넣지 않는다. 토큰 값이 프로세스 목록에 노출되는 것을 막는다.
+    var builder = Host.CreateApplicationBuilder();
 
     // MSI 배포용 머신 설정: %ProgramData%\UpdateAgent\agent.json
-    // appsettings.json보다 우선하고, 환경 변수/명령줄보다는 낮은 우선순위를 유지한다.
+    // appsettings.json보다 우선하고, 환경 변수보다는 낮은 우선순위를 유지한다.
     builder.Configuration
         .AddJsonFile(UpdateAgentConstants.ConfigFilePath, optional: true, reloadOnChange: false)
-        .AddEnvironmentVariables()
-        .AddCommandLine(args);
+        .AddEnvironmentVariables();
 
     builder.Services.Configure<AgentOptions>(
         builder.Configuration.GetSection(AgentOptions.SectionName));
 
     builder.Services.AddWindowsService(options =>
     {
-        options.ServiceName = UpdateAgentConstants.ServiceDisplayName;
+        options.ServiceName = UpdateAgentConstants.ServiceName;
     });
 
     builder.Services.AddSerilog(Log.Logger, dispose: false);

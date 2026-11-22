@@ -18,13 +18,15 @@ public sealed class AdminTokenStore
     private readonly string _overridePath;
     private readonly ILogger<AdminTokenStore> _logger;
     private readonly object _sync = new();
+    private readonly SemaphoreSlim _writeSync = new(1, 1);
+    private readonly bool _restrictAcl;
     private string? _overrideToken;
 
     /// <summary>프로덕션 생성자. DI가 사용한다.</summary>
     public AdminTokenStore(
         IOptionsMonitor<LabManagerOptions> options,
         ILogger<AdminTokenStore> logger)
-        : this(options, ResolveOverridePath(), logger)
+        : this(options, ResolveOverridePath(), logger, restrictAcl: true)
     {
     }
 
@@ -32,11 +34,13 @@ public sealed class AdminTokenStore
     public AdminTokenStore(
         IOptionsMonitor<LabManagerOptions> options,
         string overridePath,
-        ILogger<AdminTokenStore> logger)
+        ILogger<AdminTokenStore> logger,
+        bool restrictAcl = false)
     {
         _options = options;
         _overridePath = overridePath;
         _logger = logger;
+        _restrictAcl = restrictAcl;
         _overrideToken = LoadOverrideToken();
     }
 
@@ -81,13 +85,64 @@ public sealed class AdminTokenStore
         var directory = Path.GetDirectoryName(_overridePath);
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
 
-        var tempPath = _overridePath + ".tmp";
-        var json = JsonSerializer.Serialize(new AdminTokenFile { AdminToken = candidate });
-        await File.WriteAllTextAsync(tempPath, json, new System.Text.UTF8Encoding(false), cancellationToken);
-        File.Move(tempPath, _overridePath, overwrite: true);
+        // 동시에 두 요청이 같은 임시 파일을 덮어쓰지 않도록 기록 전체를 직렬화한다.
+        await _writeSync.WaitAsync(cancellationToken);
+        try
+        {
+            var tempPath = _overridePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            var json = JsonSerializer.Serialize(new AdminTokenFile { AdminToken = candidate });
+            try
+            {
+                await File.WriteAllTextAsync(tempPath, json, new System.Text.UTF8Encoding(false), cancellationToken);
+                if (_restrictAcl) RestrictAcl(tempPath);
+                File.Move(tempPath, _overridePath, overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(tempPath)) File.Delete(tempPath);
+            }
 
-        lock (_sync) _overrideToken = candidate;
+            lock (_sync) _overrideToken = candidate;
+        }
+        finally
+        {
+            _writeSync.Release();
+        }
         _logger.LogInformation("관리자 토큰이 대시보드에서 변경되었습니다. (길이: {Length})", candidate.Length);
+    }
+
+    /// <summary>토큰 파일을 관리자/SYSTEM만 읽을 수 있도록 제한한다.</summary>
+    private void RestrictAcl(string path)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "icacls.exe",
+                    Arguments = $"\"{path}\" /inheritance:r " +
+                        "/grant:r \"*S-1-5-32-544:(F)\" \"*S-1-5-18:(F)\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                });
+            if (process is not null && !process.WaitForExit(5000))
+            {
+                process.Kill(entireProcessTree: true);
+                throw new TimeoutException("icacls did not finish in time.");
+            }
+            if (process?.ExitCode != 0)
+                throw new InvalidOperationException("icacls returned a non-zero exit code.");
+        }
+        catch (Exception ex)
+        {
+            // ACL을 제한하지 못하면 토큰을 남기지 않는다.
+            _logger.LogError(ex, "런타임 관리자 토큰 파일 ACL 제한 실패: {Path}", path);
+            throw new InvalidOperationException(
+                "런타임 관리자 토큰 파일 권한을 제한하지 못해 저장을 중단했습니다.", ex);
+        }
     }
 
     private string? LoadOverrideToken()

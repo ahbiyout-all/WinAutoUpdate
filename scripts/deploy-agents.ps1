@@ -103,7 +103,7 @@ function Resolve-AgentTokenFile {
     # The installer reads only the first line. Validate the same line here.
     $firstLine = (Get-Content -LiteralPath $full -TotalCount 1)
     if ($null -eq $firstLine) { $firstLine = '' }
-    $value = ([string]$firstLine).Trim().TrimStart([char]0xFEFF)
+    $value = ([string]$firstLine).TrimStart([char]0xFEFF).Trim()
     if ([string]::IsNullOrWhiteSpace($value)) {
         throw "Agent token file is empty: $full"
     }
@@ -209,7 +209,7 @@ if not exist "%CONFIG%" (
 __TOKEN_BLOCK__
 echo [UpdateAgent] Installing Agent for __PC__
 echo [UpdateAgent] Settings: %CONFIG%
-"%SETUP%" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+"%SETUP%" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART __UPGRADE_FLAG__
 if errorlevel 1 (
   echo [UpdateAgent] Install failed with code !ERRORLEVEL!. Token file kept for retry.
   echo [UpdateAgent] Setup log: %TEMP%\Setup Log ^<date^>.txt
@@ -239,6 +239,7 @@ __TOKEN_LINE__
 if ($UseEmbeddedToken) {
     $tokenBlock = 'rem First-install token is embedded in the setup executable.'
     $tokenLine = ''
+    $upgradeFlag = ''
 }
 else {
     $tokenBlock = @'
@@ -256,6 +257,9 @@ if "!UPGRADE!"=="0" (
 )
 '@
     $tokenLine = 'AgentTokenFile=agent-token.txt'
+    # 업그레이드에서는 토큰 파일이 삭제되어 있으므로 INI의 AgentTokenFile을 빈 값으로 덮어쓴다.
+    # 토큰 값 자체는 명령줄에 오르지 않는다.
+    $upgradeFlag = '/AgentTokenFile='
 }
 
 $packages = @()
@@ -278,7 +282,8 @@ foreach ($target in $targets) {
     $cmd = $cmdTemplate.
         Replace('__SETUP__', $installer.Name).
         Replace('__PC__', $safeName).
-        Replace('__TOKEN_BLOCK__', $tokenBlock)
+        Replace('__TOKEN_BLOCK__', $tokenBlock).
+        Replace('__UPGRADE_FLAG__', $upgradeFlag)
     $cmd = [regex]::Replace($cmd, "\r?\n", "`r`n")
     [IO.File]::WriteAllText((Join-Path $packageDir 'install-agent.cmd'), $cmd, (New-Object System.Text.UTF8Encoding($false)))
 

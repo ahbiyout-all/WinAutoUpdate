@@ -19,12 +19,12 @@ to upgrade without prompting.
 Run from an elevated 64-bit PowerShell prompt.
 
 .EXAMPLE
-$env:UPDATEAGENT_AGENT_TOKEN = Read-Host -AsSecureString
+$env:UPDATEAGENT_AGENT_TOKEN = Get-Content ".\agent-token.txt" -Raw
 .\scripts\install-agent-msi.ps1 -LabManagerUrl "http://192.168.0.10:5080" -ConfirmMaestro
 
 .EXAMPLE
 .\scripts\install-agent-msi.ps1 `
-  -MsiPath ".\artifacts\msi\UpdateAgent.Agent-0.1.26-x64.msi" `
+  -MsiPath ".\artifacts\msi\UpdateAgent.Agent-0.1.27-x64.msi" `
   -LabManagerUrl "http://192.168.0.10:5080" `
   -AgentTokenFile ".\pilot-agent-token.txt" `
   -ConfirmMaestro -Quiet
@@ -67,14 +67,20 @@ function Resolve-Secret {
     param(
         [string]$Value,
         [string]$File,
-        [string]$Prompt
+        [string]$Prompt,
+        [string]$EnvName
     )
 
     if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value.Trim() }
 
+    if (-not [string]::IsNullOrWhiteSpace($EnvName)) {
+        $fromEnv = [Environment]::GetEnvironmentVariable($EnvName)
+        if (-not [string]::IsNullOrWhiteSpace($fromEnv)) { return $fromEnv.TrimStart([char]0xFEFF).Trim() }
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($File)) {
         if (-not (Test-Path -LiteralPath $File)) { throw "Secret file not found: $File" }
-        return (Get-Content -LiteralPath $File -Raw).Trim().TrimStart([char]0xFEFF)
+        return (Get-Content -LiteralPath $File -Raw).TrimStart([char]0xFEFF).Trim()
     }
 
     $secure = Read-Host -AsSecureString $Prompt
@@ -168,7 +174,23 @@ function Get-LatestMsi {
         throw "No MSI found. Run scripts\build-msi.ps1 first, or pass -MsiPath."
     }
 
-    return ($candidates | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).FullName
+    $ranked = $candidates | ForEach-Object {
+        $parsedVersion = $null
+        if ($_.BaseName -match '^UpdateAgent\.Agent-(\d+\.\d+\.\d+)-x64$') {
+            $parsedVersion = [version]::Parse($Matches[1])
+        }
+        [pscustomobject]@{
+            FullName   = $_.FullName
+            Version    = $parsedVersion
+            Modified   = $_.LastWriteTimeUtc
+        }
+    }
+
+    # 최신 빌드 시각보다 실제 제품 버전을 우선한다. 오래된 버전을 나중에 복사해도 다시 선택되지 않는다.
+    return ($ranked |
+        Sort-Object -Property @{ Expression = { if ($_.Version) { $_.Version } else { [version]'0.0.0' } }; Descending = $true },
+                               @{ Expression = 'Modified'; Descending = $true } |
+        Select-Object -First 1).FullName
 }
 
 function Get-InstalledAgent {
@@ -366,6 +388,7 @@ $tokenProvided =
 if ($tokenProvided) {
     $resolvedToken = Resolve-Secret `
         -Value '' `
+        -EnvName 'UPDATEAGENT_AGENT_TOKEN' `
         -File $AgentTokenFile `
         -Prompt "Agent token (must match LabManager AgentToken)"
 }
@@ -380,6 +403,7 @@ elseif ($legacy -and -not [string]::IsNullOrWhiteSpace($legacy.Agent.AgentToken)
 else {
     $resolvedToken = Resolve-Secret `
         -Value "" `
+        -EnvName 'UPDATEAGENT_AGENT_TOKEN' `
         -File "" `
         -Prompt "Agent token (must match LabManager AgentToken)"
 }
@@ -387,9 +411,13 @@ else {
 if ([string]::IsNullOrWhiteSpace($resolvedToken)) {
     throw "Agent token is required."
 }
-if ($resolvedToken -eq "change-me-agent-token") {
-    Write-Warning "The default agent token is still in use. Change it before a real lab rollout."
+$normalizedToken = $resolvedToken.TrimStart([char]0xFEFF).Trim()
+$lowerToken = $normalizedToken.ToLowerInvariant()
+if ($lowerToken.StartsWith('change-me-') -or
+    ($lowerToken.StartsWith('sample-') -and $lowerToken.EndsWith('-replace-before-pilot'))) {
+    throw "Placeholder agent tokens are not allowed. Supply a real token file or UPDATEAGENT_AGENT_TOKEN."
 }
+$resolvedToken = $normalizedToken
 
 $msiArguments = @("/i", "`"$MsiPath`"", "/norestart")
 if ($Quiet) {
@@ -468,6 +496,9 @@ Set-SecretAcl $configPath
 
 # util:ServiceConfig sets failure actions; it cannot set the non-crash failure flag.
 & sc.exe failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "Could not set service failure actions. Run 'sc.exe failure $ServiceName ...' manually."
+}
 & sc.exe failureflag $ServiceName 1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "Could not set service failure flags. Run 'sc.exe failureflag $ServiceName 1' manually."

@@ -19,6 +19,7 @@ public sealed class OverlayJobProgressSink : IJobProgressSink, IDisposable
 
     private CancellationTokenSource? _hideCts;
     private JobSummary? _lastSummary;
+    private UpdatePolicy? _lastPolicy;
     private string? _suppressedJobId;
 
     public OverlayJobProgressSink(
@@ -52,7 +53,11 @@ public sealed class OverlayJobProgressSink : IJobProgressSink, IDisposable
         }
 
         var summary = detail.Summary;
-        lock (_gate) _lastSummary = summary;
+        lock (_gate)
+        {
+            _lastSummary = summary;
+            _lastPolicy = detail.Policy;
+        }
 
         if (summary.IsTerminal)
         {
@@ -90,8 +95,20 @@ public sealed class OverlayJobProgressSink : IJobProgressSink, IDisposable
     public async Task ResyncAsync(CancellationToken cancellationToken = default)
     {
         JobSummary? summary;
-        lock (_gate) summary = _lastSummary;
-        if (summary is null)
+        UpdatePolicy? policy;
+        lock (_gate)
+        {
+            summary = _lastSummary;
+            policy = _lastPolicy;
+        }
+        if (summary is null) return;
+
+        // 오버레이가 정책에서 꺼졌으면 재동기화로 다시 띄우지 않는다.
+        var options = _options.CurrentValue;
+        if (!options.OverlayEnabled ||
+            policy is null ||
+            !policy.OverlayEnabled ||
+            policy.OverlayMode != OverlayMode.FullOverlay)
         {
             return;
         }

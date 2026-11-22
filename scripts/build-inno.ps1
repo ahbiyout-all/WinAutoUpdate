@@ -372,8 +372,9 @@ if ($removed.Count -gt 0) {
 }
 
 # 첫 설치 전용 토큰 파일은 정리 이후에 스테이징한다(.txt는 기본 제외 대상).
-# 값이 없으면 빈 파일을 넣어 ISCC가 항상 같은 파일 목록을 컴파일하게 하고,
-# 인스톨러가 빈 파일을 "내장 토큰 없음"으로 처리한다.
+# ISCC가 항상 같은 파일 목록을 컴파일하도록 값이 없어도 빈 파일을 넣는다.
+# 첫 설치 인스톨러는 빈/플레이스홀더 토큰을 만나면 fail-closed로 중단한다.
+# 업데이트 경로는 이 파일을 읽지 않으므로 토큰이 없어도 정상 동작한다.
 $agentTokenFromEnv = $env:UPDATEAGENT_AGENT_TOKEN
 $agentTokenLines = @()
 if (-not [string]::IsNullOrWhiteSpace($agentTokenFromEnv)) {
@@ -399,6 +400,10 @@ if (-not $AgentOnly) {
     }
     Write-BundledTokenFile -Path (Join-Path $labManagerStage $bundledLabManagerTokenName) -Lines $labManagerTokenLines
 }
+
+# 빌드 메타데이터에 실제 시크릿 내장 여부를 정확히 기록한다.
+$containsSecrets = ($agentTokenLines.Count -gt 0) -or
+    ((-not $AgentOnly) -and ($labManagerTokenLines.Count -gt 0))
 
 Write-Host ""
 Write-Host "Checking the included file set..." -ForegroundColor Cyan
@@ -499,7 +504,7 @@ $buildInfo = [pscustomobject]@{
     gitCommit       = "$gitCommit".Trim()
     builtAtUtc      = (Get-Date).ToUniversalTime().ToString("o")
     setupFiles      = $results
-    containsSecrets = $false
+    containsSecrets = [bool]$containsSecrets
 }
 
 $buildInfoPath = Join-Path $OutputRoot "build-info.json"
