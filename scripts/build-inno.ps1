@@ -387,13 +387,25 @@ catch {
     $gitCommit = ""
 }
 
+# iscc /?는 사용법을 stderr로 출력한다. Windows PowerShell 5.1에서 $ErrorActionPreference가
+# Stop이면 이게 종료 오류가 되므로 버전 확인 동안만 잠시 완화한다.
+$previousErrorAction = $ErrorActionPreference
+try {
+    $ErrorActionPreference = 'SilentlyContinue'
+    $innoVersionText = (& $iscc /? 2>$null | Select-Object -First 1)
+}
+finally {
+    $ErrorActionPreference = $previousErrorAction
+}
+$innoVersion = ("$innoVersionText" -replace '^Inno Setup\s+', '' -replace '\s+Command-Line Compiler.*$', '')
+
 $buildInfo = [pscustomobject]@{
     productVersion  = $ProductVersion
     target          = $buildTarget
     platform        = "x64"
     selfContained   = $true
     unpackedInstall = $true
-    innoVersion     = ((& $iscc /? 2>$null | Select-Object -First 1) -replace '^Inno Setup\s+', '' -replace '\s+Command-Line Compiler.*$', '')
+    innoVersion     = $innoVersion
     gitCommit       = "$gitCommit".Trim()
     builtAtUtc      = (Get-Date).ToUniversalTime().ToString("o")
     setupFiles      = $results

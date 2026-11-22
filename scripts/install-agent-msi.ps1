@@ -215,7 +215,9 @@ function Remove-InstalledAgent {
                 $uninstallExe = ($uninstallExe -split '\s+/', 2)[0].Trim('"')
             }
             if (-not (Test-Path -LiteralPath $uninstallExe)) {
-                throw "Inno uninstaller not found: $uninstallExe"
+                # 레지스트리만 남은 경우: 이미 제거된 것으로 보고 설치를 계속한다.
+                Write-Warning "Inno uninstaller not found; skipping removal of stale registration: $uninstallExe"
+                continue
             }
             $removeProcess = Start-Process -FilePath $uninstallExe `
                 -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru

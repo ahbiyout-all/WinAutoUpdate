@@ -297,7 +297,7 @@ begin
   end;
 
   ShowStepNotice('기존 설치 제거',
-    '기존 UpdateAgent LabManager 설치를 제거합니다.',
+    '기존 UpdateAgent LabManager 설치가 있으면 제거합니다.',
     'appsettings.json은 백업된 뒤 새 설치에 복원됩니다.');
 
   { 이전 제거 프로그램/InstallDelete가 appsettings.json을 지우므로 먼저 백업한다. }
@@ -321,23 +321,25 @@ begin
     UninstallExe := ExtractExePath(OldInnoUninstall);
     if (UninstallExe = '') or not FileExists(UninstallExe) then
     begin
-      Result := '기존 UpdateAgent LabManager 제거 프로그램을 찾을 수 없어 설치를 중단합니다.';
-      Exit;
-    end;
-
-    Code := -1;
-    if not Exec(UninstallExe, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '',
-        SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+      { 레지스트리만 남고 제거 프로그램이 없으면 이미 제거된 것으로 보고 계속 진행한다. }
+      Log('Previous LabManager uninstaller not found; continuing installation: ' + OldInnoUninstall);
+    end
+    else
     begin
-      Result := '기존 UpdateAgent LabManager 제거에 실패했습니다. (code ' +
-        IntToStr(Code) + ') 설치를 중단합니다.';
-      Exit;
-    end;
+      Code := -1;
+      if not Exec(UninstallExe, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '',
+          SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+      begin
+        Result := '기존 UpdateAgent LabManager 제거에 실패했습니다. (code ' +
+          IntToStr(Code) + ') 설치를 중단합니다.';
+        Exit;
+      end;
 
-    if not WaitForInnoUninstallComplete then
-    begin
-      Result := '기존 UpdateAgent LabManager 제거가 완료되지 않아 설치를 중단합니다.';
-      Exit;
+      if not WaitForInnoUninstallComplete then
+      begin
+        Result := '기존 UpdateAgent LabManager 제거가 완료되지 않아 설치를 중단합니다.';
+        Exit;
+      end;
     end;
   end;
 

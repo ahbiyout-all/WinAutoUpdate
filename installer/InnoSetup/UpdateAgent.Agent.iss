@@ -479,7 +479,7 @@ begin
   end;
 
   ShowStepNotice('기존 설치 제거',
-    '기존 UpdateAgent 설치를 제거합니다.',
+    '기존 UpdateAgent 설치가 있으면 제거합니다.',
     'appsettings.json은 백업된 뒤 새 설치에 복원됩니다.');
 
   { 이전 제거 프로그램/InstallDelete가 appsettings.json을 지우므로 먼저 백업한다. }
@@ -511,21 +511,27 @@ begin
       Exit;
     end;
 
-    { 0/3010/1641은 모두 성공이다. 3010/1641은 재부팅이 필요함을 의미한다. }
-    if not (Code in [0, 3010, 1641]) then
+    { 1605는 이미 설치되지 않은 제품(레지스트리만 남은 경우)이므로 무시하고 계속한다. }
+    if Code = 1605 then
+      Log('Previous Agent MSI product is not installed; continuing installation: ' + OldMsiProduct)
+    else
     begin
-      Result := '기존 WiX MSI UpdateAgent Agent 제거에 실패했습니다. (code ' +
-        IntToStr(Code) + ') 설치를 중단합니다.';
-      Exit;
+      { 0/3010/1641은 모두 성공이다. 3010/1641은 재부팅이 필요함을 의미한다. }
+      if not (Code in [0, 3010, 1641]) then
+      begin
+        Result := '기존 WiX MSI UpdateAgent Agent 제거에 실패했습니다. (code ' +
+          IntToStr(Code) + ') 설치를 중단합니다.';
+        Exit;
+      end;
+      if Code in [3010, 1641] then
+      begin
+        NeedsRestart := True;
+        Result := '기존 WiX MSI UpdateAgent Agent 제거에 재부팅이 필요합니다. ' +
+          'PC를 재부팅한 뒤 설치를 다시 실행해 주세요.';
+        Exit;
+      end;
+      Sleep(1200);
     end;
-    if Code in [3010, 1641] then
-    begin
-      NeedsRestart := True;
-      Result := '기존 WiX MSI UpdateAgent Agent 제거에 재부팅이 필요합니다. ' +
-        'PC를 재부팅한 뒤 설치를 다시 실행해 주세요.';
-      Exit;
-    end;
-    Sleep(1200);
   end;
 
   if OldInnoUninstall <> '' then
@@ -533,23 +539,25 @@ begin
     UninstallExe := ExtractExePath(OldInnoUninstall);
     if (UninstallExe = '') or not FileExists(UninstallExe) then
     begin
-      Result := '기존 UpdateAgent Agent 제거 프로그램을 찾을 수 없어 설치를 중단합니다.';
-      Exit;
-    end;
-
-    Code := -1;
-    if not Exec(UninstallExe, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '',
-        SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+      { 레지스트리만 남고 제거 프로그램이 없으면 이미 제거된 것으로 보고 계속 진행한다. }
+      Log('Previous Agent uninstaller not found; continuing installation: ' + OldInnoUninstall);
+    end
+    else
     begin
-      Result := '기존 UpdateAgent Agent 제거에 실패했습니다. (code ' +
-        IntToStr(Code) + ') 설치를 중단합니다.';
-      Exit;
-    end;
+      Code := -1;
+      if not Exec(UninstallExe, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '',
+          SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+      begin
+        Result := '기존 UpdateAgent Agent 제거에 실패했습니다. (code ' +
+          IntToStr(Code) + ') 설치를 중단합니다.';
+        Exit;
+      end;
 
-    if not WaitForInnoUninstallComplete then
-    begin
-      Result := '기존 UpdateAgent Agent 제거가 완료되지 않아 설치를 중단합니다.';
-      Exit;
+      if not WaitForInnoUninstallComplete then
+      begin
+        Result := '기존 UpdateAgent Agent 제거가 완료되지 않아 설치를 중단합니다.';
+        Exit;
+      end;
     end;
   end;
 
