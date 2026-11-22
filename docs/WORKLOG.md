@@ -32,7 +32,11 @@
 
 ### 릴리스 검증
 
-- (CI 완료 후 자산 해시와 워크플로 번호를 추가합니다.)
+- 릴리스 워크플로 [`45012380690`](https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/45012380690) 성공.
+- release [`v0.1.24`](https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.24) 생성 및 자산 3개 다운로드·해시 검증 완료:
+  - `UpdateAgent.Agent-Setup-0.1.24-x64.exe` — `005fd6cc65ea88c42a47b1118b279bb5c846cf314314968a742d3ac5d686cf13`
+  - `UpdateAgent.LabManager-Setup-0.1.24-x64.exe` — `b70c918e5c00655af9c66a1f5d88e67621e0968ed76b778ebcfcf5f5a33eb6f0`
+  - `UpdateAgent.Agent-0.1.24-x64.msi` — `db925c4adb6439883e13b56fdc2f24ce11e749974beb926308089083cdcda5a7`
 
 ---
 
