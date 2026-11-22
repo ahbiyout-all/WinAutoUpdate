@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.25"
+  #define AppVersion "0.1.26"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -329,14 +329,38 @@ begin
     Exit;
   end;
 
-  if (not LoadStringsFromFile(Path, Lines)) or (GetArrayLength(Lines) < 2) then
+  if not LoadStringsFromFile(Path, Lines) then
+  begin
+    Result := '첫 설치용 내장 LabManager 토큰 파일을 읽을 수 없습니다.';
+    Exit;
+  end;
+
+  { secret이 설정되지 않은 빌드는 빈 파일을 포함한다. 이 경우 내장 토큰이 없는 것으로 보고
+    기존 동작(appsettings.json의 샘플 토큰 사용)을 유지한다. }
+  if GetArrayLength(Lines) = 0 then
+  begin
+    Log('No embedded LabManager tokens in this build; keeping appsettings.json values.');
+    Exit;
+  end;
+  AdminToken := NormalizeTokenLine(Lines[0]);
+  if (GetArrayLength(Lines) = 1) and (AdminToken = '') then
+  begin
+    Log('No embedded LabManager tokens in this build; keeping appsettings.json values.');
+    Exit;
+  end;
+
+  if GetArrayLength(Lines) < 2 then
   begin
     Result := '첫 설치용 내장 LabManager 토큰 파일에 AdminToken과 AgentToken 두 줄이 없습니다.';
     Exit;
   end;
 
-  AdminToken := NormalizeTokenLine(Lines[0]);
   AgentToken := NormalizeTokenLine(Lines[1]);
+  if (AdminToken = '') and (AgentToken = '') then
+  begin
+    Log('No embedded LabManager tokens in this build; keeping appsettings.json values.');
+    Exit;
+  end;
   if (AdminToken = '') or (AgentToken = '') then
   begin
     Result := '첫 설치용 내장 LabManager 토큰 파일에 빈 값이 있습니다.';

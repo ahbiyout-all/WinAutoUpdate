@@ -27,7 +27,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.25"
+  #define AppVersion "0.1.26"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -928,7 +928,8 @@ begin
       AgentConfigError := '에이전트 토큰 파일이 비어 있습니다: ' + TokenFile
     else
       AgentConfigError := '첫 설치용 내장 에이전트 토큰이 비어 있습니다. ' +
-        '설치 프로그램을 실제 토큰으로 다시 빌드하세요.';
+        'UPDATEAGENT_AGENT_TOKEN secret을 설정해 다시 빌드하거나 ' +
+        InstallConfigFileName + '에 AgentTokenFile을 지정하세요.';
     Exit;
   end;
 
@@ -943,7 +944,8 @@ begin
       AgentConfigError := '에이전트 토큰 파일이 비어 있습니다: ' + TokenFile
     else
       AgentConfigError := '첫 설치용 내장 에이전트 토큰이 비어 있습니다. ' +
-        '설치 프로그램을 실제 토큰으로 다시 빌드하세요.';
+        'UPDATEAGENT_AGENT_TOKEN secret을 설정해 다시 빌드하거나 ' +
+        InstallConfigFileName + '에 AgentTokenFile을 지정하세요.';
     Exit;
   end;
 

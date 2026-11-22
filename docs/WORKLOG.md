@@ -5,6 +5,29 @@
 
 ---
 
+## 2026-11-22 — 토큰 secret이 없는 빌드의 첫 설치 실패 수정 (v0.1.26)
+
+### 배경
+
+- v0.1.25에서는 GitHub 토큰 secret이 설정되지 않으면 내장 토큰 파일이 빈 파일로 컴파일되었고,
+  LabManager 첫 설치가 "두 줄이 없습니다" 오류로 중단되었습니다. 공개 릴리고 자산에도 토큰이 없어
+  교사 PC 설치가 불가능한 회귀(defect)였습니다.
+
+### 변경
+
+| 파일 | 변경 |
+|---|---|
+| `installer/InnoSetup/UpdateAgent.LabManager.iss` | 빈 내장 토큰 파일을 "내장 토큰 없음"으로 처리해 기존 `appsettings.json` 샘플 토큰 동작 유지. 한 줄만 있거나 한쪽 값만 비면 계속 오류 |
+| `installer/InnoSetup/UpdateAgent.Agent.iss` | 빈 내장 토큰 오류 메시지에 secret 설정 또는 `AgentTokenFile` 지정 안내 추가 |
+| `Directory.Build.props`, `.iss`, `.wixproj`, 문서 예제 | 버전 0.1.26으로 갱신 |
+
+### 검증
+
+- Release 빌드 경고 0/오류 0, 전체 테스트 165/165 통과, Inno/MSI 빌드 성공.
+- 토큰 secret이 없는 상태(내장 파일 빈 값)에서 LabManager 첫 설치가 중단되지 않는 경로를 코드로 보장.
+
+---
+
 ## 2026-11-22 — 첫 설치 전용 내장 토큰 지원 (v0.1.25)
 
 ### 배경
