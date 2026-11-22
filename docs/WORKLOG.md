@@ -5,6 +5,42 @@
 
 ---
 
+## 2026-11-22 — 자아성찰과 심층 감사: 옵션 창/파이프 오류 수정 (v0.1.20)
+
+### 배경
+
+- `v0.1.19`로 학생용 수동 업데이트 옵션을 배포한 뒤, 구현 흐름과 문서·릴리스 일관성에 대해 두 차례의 독립 감사를 수행했습니다.
+- 사용자 흐름을 망가뜨리는 결함, 정책 상한 누락, 방어적 오류 처리 누락, 문서 정합성 문제를 확인했습니다.
+
+### 발견 및 수정
+
+| 심각도 | 발견 | 수정 |
+|---|---|---|
+| 높음 | 프리셋을 선택하면 체크박스 값 변경 이벤트가 다시 `DetailChanged`를 호출해 선택이 즉시 “사용자 설정”으로 되돌아감 | `ManualUpdateOptionsWindow.PresetCombo_SelectionChanged`에서 값 적용 동안 `_applyingPreset` 잠금 |
+| 높음 | 학생 옵션이 캐시된 교사 정책을 그대로 덮어써 교사의 `RebootPolicy.Never`·항목 제외·오버레이 비활성화를 다시 켤 수 있음 | `ManualUpdateOptions.LimitTo`/`ApplyTo`에 교사 정책 상한 적용. 학생은 줄이기만 가능 |
+| 중간 | 업데이트 범위를 모두 해제한 뒤에도 작업을 시작할 수 있고, UI 검증만 있어 파이프 요청으로 우회 가능 | `HasAnyUpdateCategory`를 서비스 `LocalUpdateTrigger`에서도 검사 |
+| 중간 | 옵션이 있는 요청에서 `MaestroConfirmed=false` 차단 경로에 회귀 테스트가 없음 | `LocalUpdateTrigger_RequiresMaestroConfirmationEvenWithOptions` 추가 |
+| 중간 | `LocalUpdateTrigger`의 정책/OS 해석이 `try` 밖에 있어 예외 시 파이프 응답 없이 연결이 끊김 | 정책 해석 전체를 `try/catch`로 감싸 실패 응답 반환 |
+| 낮음 | 중단할 작업이 없어도 오버레이를 숨기며 “중지했습니다” 안내를 보냄 | `summary is not null`일 때만 오버레이 숨김 |
+| 낮음 | 옵션을 수정해도 이전 검증 오류 메시지가 남고, 시작 버튼이 최신 상태 갱신 전에 활성화됨 | `DetailChanged`에서 안내 초기화, `RefreshAsync`가 시작 버튼 상태를 결정 |
+| 낮음 | `build-inno.ps1`이 `iscc /?`의 stderr를 버려 `build-info.json.innoVersion`이 비어질 수 있음 | `2>$null`을 `2>&1`로 변경 |
+| 문서 | 현재 테스트 수(89개), 설치 예제의 `0.1.10`, RELEASE.md의 잘못된 패치 예시와 자산 2개 체크리스트가 최신 상태와 불일치 | 157개/`0.1.20`/3개 자산으로 갱신, `<버전>` placeholders 정리 |
+
+### 검증
+
+- Release 빌드 경고 0/오류 0, 테스트 **157개 통과**.
+- `node --check` 2개 통과, 시크릿 스캔 정상, `.iss` BOM `EF BB BF` 유지.
+- 회귀 테스트: 범위 검증, 교사 정책 상한, 옵션 있는 Maestro 차단, 정책 해석 실패, 빈 작업 중단 시 오버레이 유지 추가.
+- `README.md`, `docs/PILOT.md`, `docs/DEPLOYMENT.md`, `docs/RELEASE.md`, `docs/MSI.md`, `docs/INSTALLER.md`와
+  WiX/Inno/MSI 빌드 스크립트의 기본 버전 예시를 정리했습니다.
+
+### 검토 후 유지
+
+- `v0.1.18`의 남은 레지스트리 항목은 새 설치가 동일 AppId로 덮어써 정리되므로 이번 패치에서 추가 삭제하지 않습니다.
+- `WORKLOG.md`의 오래된 릴리스 해시(prefix만 기록된 항목)는 과거 기록이며 기능 영향이 없어 변경하지 않습니다.
+
+---
+
 ## 2026-11-22 — 학생용 앱에서 수동 업데이트 옵션 선택 (v0.1.19)
 
 ### 배경

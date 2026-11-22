@@ -21,6 +21,9 @@ public static class UpdateAgentConstants
     /// <summary>학생용 상태 앱 ↔ 서비스 로컬 제어 명명된 파이프.</summary>
     public const string LocalControlPipeName = "UpdateAgent.LocalControl.v1";
 
+    /// <summary>에이전트 로컬 DB에 캐시된 교사 정책 설정 키.</summary>
+    public const string ServerPolicySettingKey = "server-policy";
+
     /// <summary>교사 PC LabManager 기본 주소.</summary>
     public const string DefaultLabManagerUrl = "http://localhost:5080";
 

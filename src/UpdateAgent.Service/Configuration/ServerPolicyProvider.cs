@@ -7,7 +7,7 @@ namespace UpdateAgent.Service.Configuration;
 /// <summary>LabManager가 캐시해 둔 서버 정책을 읽는다. 없으면 기본 정책을 사용한다.</summary>
 public sealed class ServerPolicyProvider
 {
-    public const string SettingKey = "server-policy";
+    public const string SettingKey = UpdateAgent.Shared.UpdateAgentConstants.ServerPolicySettingKey;
 
     private readonly Func<string, CancellationToken, Task<string?>> _readSetting;
 

@@ -26,6 +26,11 @@ public sealed record ManualUpdateOptions
     /// <summary>최대 자동 재부팅 횟수. 0~10으로 제한한다.</summary>
     public int MaxRebootCount { get; init; } = 5;
 
+    /// <summary>하나 이상의 업데이트 범위가 선택되었는지. 아무것도 고르지 않은 작업은 시작하지 않는다.</summary>
+    public bool HasAnyUpdateCategory =>
+        IncludeSecurity || IncludeCritical || IncludeImportant ||
+        IncludeOptional || IncludeDrivers || IncludeDefinitionUpdates;
+
     /// <summary>프리셋 ID에 해당하는 옵션을 반환한다. 알 수 없는 ID는 표준값을 사용한다.</summary>
     public static ManualUpdateOptions FromPreset(string? presetId, OsInfo? os = null)
     {
@@ -56,27 +61,47 @@ public sealed record ManualUpdateOptions
     }
 
     /// <summary>
-    /// 캐시된 교사 정책에 학생 선택 옵션을 반영한다. 학생이 바꿀 수 없는 필드는 원래 정책을 유지하고
-    /// 기능 업데이트는 2차 승인 전까지 항상 꺼 둔다.
+    /// 캐시된 교사 정책에 학생 선택 옵션을 반영한다. 학생은 교사 정책이 허용한 범위에서
+    /// 항목을 줄이거나 자동 재부팅을 꺼 갈 수 있지만, 교사가 금지한 항목·재부팅·오버레이는
+    /// 다시 켤 수 없다. 기능 업데이트는 2차 승인 전까지 항상 꺼 둔다.
     /// </summary>
     public UpdatePolicy ApplyTo(UpdatePolicy basePolicy, OsInfo? os = null)
     {
-        var merged = basePolicy with
+        var baseline = basePolicy.SanitizeFor(os);
+        var limited = LimitTo(baseline, os);
+        return baseline with
         {
-            IncludeSecurity = IncludeSecurity,
-            IncludeCritical = IncludeCritical,
-            IncludeImportant = IncludeImportant,
-            IncludeOptional = IncludeOptional,
-            IncludeDrivers = IncludeDrivers,
-            IncludeDefinitionUpdates = IncludeDefinitionUpdates,
-            RebootPolicy = PreventAutomaticReboot ? RebootPolicy.Never : RebootPolicy.Auto,
-            MaxRebootCount = Clamp(MaxRebootCount),
-            OverlayEnabled = OverlayEnabled,
+            IncludeSecurity = limited.IncludeSecurity,
+            IncludeCritical = limited.IncludeCritical,
+            IncludeImportant = limited.IncludeImportant,
+            IncludeOptional = limited.IncludeOptional,
+            IncludeDrivers = limited.IncludeDrivers,
+            IncludeDefinitionUpdates = limited.IncludeDefinitionUpdates,
+            RebootPolicy = limited.PreventAutomaticReboot ? RebootPolicy.Never : RebootPolicy.Auto,
+            MaxRebootCount = limited.MaxRebootCount,
+            OverlayEnabled = limited.OverlayEnabled,
             IncludeFeatureUpdates = false,
             ApprovedFeatureRelease = null,
         };
+    }
 
-        return merged.SanitizeFor(os);
+    /// <summary>학생 선택값을 교사 정책 상한으로 제한한다. UI도 이 결과로 표시값을 맞춘다.</summary>
+    public ManualUpdateOptions LimitTo(UpdatePolicy policy, OsInfo? os = null)
+    {
+        var allowed = policy.SanitizeFor(os);
+        return new ManualUpdateOptions
+        {
+            PresetId = PresetId,
+            IncludeSecurity = allowed.IncludeSecurity && IncludeSecurity,
+            IncludeCritical = allowed.IncludeCritical && IncludeCritical,
+            IncludeImportant = allowed.IncludeImportant && IncludeImportant,
+            IncludeOptional = allowed.IncludeOptional && IncludeOptional,
+            IncludeDrivers = allowed.IncludeDrivers && IncludeDrivers,
+            IncludeDefinitionUpdates = allowed.IncludeDefinitionUpdates && IncludeDefinitionUpdates,
+            OverlayEnabled = allowed.OverlayEnabled && OverlayEnabled,
+            PreventAutomaticReboot = allowed.RebootPolicy == RebootPolicy.Never || PreventAutomaticReboot,
+            MaxRebootCount = Math.Min(Clamp(allowed.MaxRebootCount), Clamp(MaxRebootCount)),
+        };
     }
 
     internal static int Clamp(int value) => Math.Clamp(value, 0, 10);

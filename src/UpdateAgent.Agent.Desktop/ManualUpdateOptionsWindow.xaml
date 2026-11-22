@@ -18,6 +18,8 @@
             <TextBlock x:Name="OsText" Text="" Foreground="#666666" Margin="0,4,0,0" />
             <TextBlock Text="설치 중 입력이 잠기고 PC가 여러 번 재부팅될 수 있습니다."
                        Foreground="#9A6700" Margin="0,4,0,0" TextWrapping="Wrap" />
+            <TextBlock Text="교사 정책에서 허용되지 않은 항목은 선택해도 적용되지 않습니다."
+                       Foreground="#666666" Margin="0,4,0,0" TextWrapping="Wrap" />
         </StackPanel>
 
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">

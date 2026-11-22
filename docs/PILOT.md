@@ -52,7 +52,7 @@ dotnet build UpdateAgent.sln
 dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj
 ```
 
-기대 결과: 빌드 경고 0/오류 0, 테스트 89개 통과.
+기대 결과: 빌드 경고 0/오류 0, 테스트 157개 통과.
 
 ## 2. 게시
 
@@ -179,7 +179,7 @@ Phase 0 파일럿에서는 Inno Setup을 먼저 검증하고, 문제가 있으�
 ```powershell
 Set-Location "<복사한 폴더>"
 
-.\UpdateAgent.Agent-Setup-0.1.10-x64.exe `
+.\UpdateAgent.Agent-Setup-<버전>-x64.exe `
   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
   /LabManagerUrl=http://<교사-PC-IP>:5080 `
   /AgentTokenFile="<agent-token.txt 경로>"
@@ -209,7 +209,7 @@ Set-Location "<복사한 폴더>"
 
 $env:UPDATEAGENT_AGENT_TOKEN = Get-Content "<agent-token.txt 경로>" -Raw
 .\scripts\install-agent-msi.ps1 `
-  -MsiPath ".\UpdateAgent.Agent-0.1.10-x64.msi" `
+  -MsiPath ".\UpdateAgent.Agent-<버전>-x64.msi" `
   -LabManagerUrl "http://<교사-PC-IP>:5080" `
   -ConfirmMaestro
 ```
@@ -369,7 +369,9 @@ DRY RUN에서는 실제 다운로드/설치/재부팅 없이 작업 흐름만 �
 3. **업데이트 시작**을 누르면 **수동 업데이트 옵션** 창이 열립니다.
    - 프리셋(표준/보안 중심/서버 안전/전체)을 고르거나 세부 항목을 직접 조정합니다.
    - 세부 항목: 보안/중요/권장/선택/드라이버/Defender 정의 업데이트, 전체화면 오버레이, 자동 재부팅, 최대 재부팅 횟수(0~10).
-   - 기능 업데이트는 2차 승인 전용이라 선택할 수 없고, 서버/서버 코어에서는 지원하지 않는 항목이 자동으로 비활성화됩니다.
+   - 기능 업데이트는 2차 승인 전용이라 선택할 수 없습니다.
+   - Server Core에서는 오버레이가 비활성화되고, 교사 정책이 허용하지 않은 항목은 선택해도 적용되지 않습니다.
+   - 업데이트 범위를 모두 해제하면 시작할 수 없습니다.
 4. 옵션 창에서 Maestro 복원 보호 해제 확인을 체크하고 **업데이트 시작**을 누릅니다.
 5. 사전 점검을 통과하면 작업이 시작되고, 상태 앱과 교사 대시보드에 진행 상황이 표시됩니다.
    - 체크인 주기(기본 30초)와 무관하게 시작 직후 한 번 즉시 체크인합니다.
@@ -378,8 +380,9 @@ DRY RUN에서는 실제 다운로드/설치/재부팅 없이 작업 흐름만 �
 
 > 학생은 로컬 관리자이므로 상태 앱의 로컬 제어 파이프(`UpdateAgent.LocalControl.v1`)로 작업을 시작할 수 있습니다.
 > 토큰은 앱에 저장하지 않으며, 선택 옵션은 `start-update` 요청의 `options`로 전달됩니다.
-> 서비스는 캐시된 교사 정책에 학생이 고른 업데이트 범위·재부팅·오버레이 항목만 반영하고,
-> 기능 업데이트·Maestro 확인 요구·로그온 일시중지·종료 등 교사/2차 승인 항목은 그대로 유지합니다.
+> 서비스는 캐시된 교사 정책을 상한으로 사용해 학생이 고른 범위·재부팅·오버레이를 반영합니다.
+> 학생은 항목을 줄이거나 자동 재부팅을 끌 수 있지만, 교사가 금지한 항목·재부팅·오버레이를 다시 켜거나
+> 기능 업데이트·Maestro 확인 요구·로그온 일시중지·종료 등 교사/2차 승인 항목을 바꿀 수 없습니다.
 > CLI `run`으로 직접 실행한 작업은 로컬에만 남고 대시보드에 보고되지 않습니다.
 
 ## 8. 관찰 체크리스트

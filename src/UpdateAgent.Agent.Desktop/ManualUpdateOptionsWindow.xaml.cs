@@ -9,17 +9,19 @@ namespace UpdateAgent.Agent.Desktop;
 public partial class ManualUpdateOptionsWindow : Window
 {
     private readonly OsInfo _os;
+    private readonly UpdatePolicy _teacherPolicy;
     private bool _applyingPreset;
 
     public ManualUpdateOptions Options { get; private set; } = new();
 
     public bool MaestroConfirmed => MaestroCheck.IsChecked == true;
 
-    public ManualUpdateOptionsWindow()
+    public ManualUpdateOptionsWindow(UpdatePolicy teacherPolicy)
     {
         InitializeComponent();
 
         _os = WindowsOsInfoProvider.GetCurrent();
+        _teacherPolicy = teacherPolicy.SanitizeFor(_os);
         OsText.Text = $"이 PC: {_os.SupportSummary}";
 
         if (!_os.SupportsOverlay)
@@ -38,7 +40,7 @@ public partial class ManualUpdateOptionsWindow : Window
             PresetCombo.Items.Add(new ComboBoxItem { Content = preset.Label, Tag = preset.Id });
         }
 
-        foreach (var count in new[] { 0, 1, 2, 3, 5, 10 })
+        for (var count = 0; count <= 10; count++)
         {
             MaxRebootsCombo.Items.Add(count);
         }
@@ -64,13 +66,23 @@ public partial class ManualUpdateOptionsWindow : Window
         if (_applyingPreset) return;
         if (PresetCombo.SelectedItem is ComboBoxItem { Tag: string presetId })
         {
-            ApplyPresetValues(presetId);
+            // 체크박스 변경 이벤트가 "사용자 설정"으로 되돌리지 않도록 값 적용 동안 잠근다.
+            _applyingPreset = true;
+            try
+            {
+                ApplyPresetValues(presetId);
+            }
+            finally
+            {
+                _applyingPreset = false;
+            }
         }
     }
 
     private void DetailChanged(object sender, RoutedEventArgs e)
     {
         if (_applyingPreset) return;
+        ValidationText.Text = "";
         SelectPreset(UpdatePolicyPresets.Custom, applyValues: false);
     }
 
@@ -105,7 +117,7 @@ public partial class ManualUpdateOptionsWindow : Window
 
     private void ApplyPresetValues(string presetId)
     {
-        var options = ManualUpdateOptions.FromPreset(presetId, _os);
+        var options = ManualUpdateOptions.FromPreset(presetId, _os).LimitTo(_teacherPolicy, _os);
         SecurityCheck.IsChecked = options.IncludeSecurity;
         CriticalCheck.IsChecked = options.IncludeCritical;
         ImportantCheck.IsChecked = options.IncludeImportant;
@@ -133,7 +145,7 @@ public partial class ManualUpdateOptionsWindow : Window
             return;
         }
 
-        Options = new ManualUpdateOptions
+        var selected = new ManualUpdateOptions
         {
             PresetId = (PresetCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? UpdatePolicyPresets.Custom,
             IncludeSecurity = SecurityCheck.IsChecked == true,
@@ -145,8 +157,15 @@ public partial class ManualUpdateOptionsWindow : Window
             OverlayEnabled = OverlayCheck.IsChecked == true && _os.SupportsOverlay,
             PreventAutomaticReboot = NoRebootCheck.IsChecked == true,
             MaxRebootCount = MaxRebootsCombo.SelectedItem is int count ? count : 5,
-        };
+        }.LimitTo(_teacherPolicy, _os);
 
+        if (!selected.HasAnyUpdateCategory)
+        {
+            ValidationText.Text = "업데이트 범위를 하나 이상 선택해야 합니다.";
+            return;
+        }
+
+        Options = selected;
         DialogResult = true;
         Close();
     }

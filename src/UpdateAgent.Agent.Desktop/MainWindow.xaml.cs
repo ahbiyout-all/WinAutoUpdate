@@ -7,6 +7,7 @@ namespace UpdateAgent.Agent.Desktop;
 public partial class MainWindow : Window
 {
     private readonly AgentStatusReader _reader = new();
+    private readonly LocalPolicyReader _policyReader = new();
     private readonly LocalUpdateClient _updateClient = new();
 
     public MainWindow()
@@ -61,7 +62,8 @@ public partial class MainWindow : Window
 
     private async Task StartUpdateAsync()
     {
-        var optionsWindow = new ManualUpdateOptionsWindow { Owner = this };
+        var teacherPolicy = await _policyReader.ReadAsync().ConfigureAwait(true);
+        var optionsWindow = new ManualUpdateOptionsWindow(teacherPolicy) { Owner = this };
         if (optionsWindow.ShowDialog() != true) return;
 
         var options = optionsWindow.Options;
@@ -104,10 +106,10 @@ public partial class MainWindow : Window
         }
         finally
         {
-            StartButton.IsEnabled = true;
             RefreshButton.IsEnabled = true;
         }
 
+        // 시작 버튼은 최신 작업 상태를 반영하는 RefreshAsync에서 다시 활성화한다.
         await RefreshAsync().ConfigureAwait(true);
     }
 

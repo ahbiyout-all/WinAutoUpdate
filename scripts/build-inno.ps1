@@ -392,7 +392,7 @@ catch {
 $previousErrorAction = $ErrorActionPreference
 try {
     $ErrorActionPreference = 'SilentlyContinue'
-    $innoVersionText = (& $iscc /? 2>$null | Select-Object -First 1)
+    $innoVersionText = (& $iscc /? 2>&1 | Select-Object -First 1)
 }
 finally {
     $ErrorActionPreference = $previousErrorAction

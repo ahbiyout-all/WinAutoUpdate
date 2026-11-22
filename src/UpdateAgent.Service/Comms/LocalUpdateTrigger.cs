@@ -63,11 +63,26 @@ public sealed class LocalUpdateTrigger
             return Fail("지원하지 않는 로컬 제어 요청입니다.");
         }
 
-        var cachedPolicy = await _policies.GetAsync(cancellationToken).ConfigureAwait(false);
-        var os = _getOs();
-        var policy = request.Options is null
-            ? cachedPolicy.SanitizeFor(os)
-            : request.Options.ApplyTo(cachedPolicy, os);
+        UpdatePolicy policy;
+        try
+        {
+            var cachedPolicy = await _policies.GetAsync(cancellationToken).ConfigureAwait(false);
+            var os = _getOs();
+            policy = request.Options is null
+                ? cachedPolicy.SanitizeFor(os)
+                : request.Options.ApplyTo(cachedPolicy, os);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "학생 수동 업데이트 옵션을 적용하지 못했습니다.");
+            return Fail("수동 업데이트 옵션을 적용하지 못했습니다: " + ex.Message);
+        }
+
+        // UI 검증은 우회될 수 있으므로 서비스에서도 빈 범위 요청을 거부한다.
+        if (request.Options is not null && !request.Options.HasAnyUpdateCategory)
+        {
+            return Fail("업데이트 범위를 하나 이상 선택해야 합니다.");
+        }
 
         if (request.Options is not null)
         {
@@ -119,7 +134,7 @@ public sealed class LocalUpdateTrigger
         {
             var summary = await _cancelJob(true, cancellationToken).ConfigureAwait(false);
 
-            if (_hideOverlay is not null)
+            if (summary is not null && _hideOverlay is not null)
             {
                 try
                 {

@@ -65,6 +65,25 @@ public sealed class LocalControlTests
     }
 
     [Fact]
+    public void ManualUpdateOptions_HasAnyUpdateCategory_ReflectsSelection()
+    {
+        Assert.False(new ManualUpdateOptions
+        {
+            IncludeSecurity = false,
+            IncludeCritical = false,
+            IncludeImportant = false,
+        }.HasAnyUpdateCategory);
+
+        Assert.True(new ManualUpdateOptions
+        {
+            IncludeSecurity = false,
+            IncludeCritical = false,
+            IncludeImportant = false,
+            IncludeDefinitionUpdates = true,
+        }.HasAnyUpdateCategory);
+    }
+
+    [Fact]
     public void ManualUpdateOptions_ApplyTo_KeepsProtectedTeacherFields()
     {
         var basePolicy = new UpdatePolicy
@@ -72,6 +91,12 @@ public sealed class LocalControlTests
             RequireMaestroManualConfirmation = false,
             PauseOnUserLogon = true,
             ShutdownAfterComplete = true,
+            IncludeOptional = true,
+            IncludeDrivers = true,
+            IncludeDefinitionUpdates = false,
+            RebootPolicy = RebootPolicy.Never,
+            OverlayEnabled = false,
+            MaxRebootCount = 7,
             IncludeFeatureUpdates = true,
             ApprovedFeatureRelease = "26H2",
         };
@@ -80,6 +105,7 @@ public sealed class LocalControlTests
             PresetId = UpdatePolicyPresets.Full,
             IncludeOptional = true,
             IncludeDrivers = true,
+            IncludeDefinitionUpdates = true,
             MaxRebootCount = 99,
             OverlayEnabled = true,
         };
@@ -88,12 +114,48 @@ public sealed class LocalControlTests
 
         Assert.True(applied.IncludeOptional);
         Assert.True(applied.IncludeDrivers);
-        Assert.Equal(10, applied.MaxRebootCount);
+        Assert.False(applied.IncludeDefinitionUpdates);
+        Assert.Equal(7, applied.MaxRebootCount);
+        Assert.Equal(RebootPolicy.Never, applied.RebootPolicy);
+        Assert.False(applied.OverlayEnabled);
         Assert.False(applied.RequireMaestroManualConfirmation);
         Assert.True(applied.PauseOnUserLogon);
         Assert.True(applied.ShutdownAfterComplete);
         Assert.False(applied.IncludeFeatureUpdates);
         Assert.Null(applied.ApprovedFeatureRelease);
+    }
+
+    [Fact]
+    public void ManualUpdateOptions_ApplyTo_AllowsStudentToNarrowPolicy()
+    {
+        var basePolicy = new UpdatePolicy
+        {
+            IncludeOptional = true,
+            IncludeDrivers = true,
+            IncludeDefinitionUpdates = true,
+            RebootPolicy = RebootPolicy.Auto,
+            OverlayEnabled = true,
+            MaxRebootCount = 5,
+        };
+        var options = new ManualUpdateOptions
+        {
+            IncludeOptional = false,
+            IncludeDrivers = false,
+            IncludeDefinitionUpdates = false,
+            PreventAutomaticReboot = true,
+            OverlayEnabled = false,
+            MaxRebootCount = 10,
+        };
+
+        var applied = options.ApplyTo(basePolicy, Windows11);
+
+        Assert.True(applied.IncludeSecurity);
+        Assert.False(applied.IncludeOptional);
+        Assert.False(applied.IncludeDrivers);
+        Assert.False(applied.IncludeDefinitionUpdates);
+        Assert.Equal(RebootPolicy.Never, applied.RebootPolicy);
+        Assert.False(applied.OverlayEnabled);
+        Assert.Equal(5, applied.MaxRebootCount);
     }
 
     [Fact]
@@ -202,7 +264,7 @@ public sealed class LocalControlTests
         UpdatePolicy? usedPolicy = null;
         var cachedPolicy = new UpdatePolicy
         {
-            IncludeOptional = false,
+            IncludeOptional = true,
             IncludeFeatureUpdates = true,
             ApprovedFeatureRelease = "26H2",
         };
@@ -230,10 +292,102 @@ public sealed class LocalControlTests
         Assert.NotNull(usedPolicy);
         Assert.True(usedPolicy!.IncludeOptional);
         Assert.Equal(RebootPolicy.Never, usedPolicy.RebootPolicy);
-        Assert.Equal(10, usedPolicy.MaxRebootCount);
+        Assert.Equal(5, usedPolicy.MaxRebootCount);
         Assert.False(usedPolicy.OverlayEnabled);
         Assert.False(usedPolicy.IncludeFeatureUpdates);
         Assert.Null(usedPolicy.ApprovedFeatureRelease);
+    }
+
+    [Fact]
+    public async Task LocalUpdateTrigger_RejectsEmptyStudentOptions()
+    {
+        var called = false;
+        var trigger = CreateTrigger((_, _, _, _) =>
+        {
+            called = true;
+            return Task.FromResult(Started());
+        });
+
+        var response = await trigger.HandleAsync(new LocalControlRequest
+        {
+            Action = LocalControlActions.StartUpdate,
+            MaestroConfirmed = true,
+            Options = new ManualUpdateOptions
+            {
+                IncludeSecurity = false,
+                IncludeCritical = false,
+                IncludeImportant = false,
+            },
+        });
+
+        Assert.False(response.Success);
+        Assert.Contains("업데이트 범위", response.Message);
+        Assert.False(called);
+    }
+
+    [Fact]
+    public async Task LocalUpdateTrigger_RequiresMaestroConfirmationEvenWithOptions()
+    {
+        var called = false;
+        var trigger = CreateTrigger((_, _, _, _) =>
+        {
+            called = true;
+            return Task.FromResult(Started());
+        });
+
+        var response = await trigger.HandleAsync(new LocalControlRequest
+        {
+            Action = LocalControlActions.StartUpdate,
+            MaestroConfirmed = false,
+            Options = ManualUpdateOptions.FromPreset(UpdatePolicyPresets.Standard),
+        });
+
+        Assert.False(response.Success);
+        Assert.Contains("Maestro", response.Message);
+        Assert.False(called);
+    }
+
+    [Fact]
+    public async Task LocalUpdateTrigger_KeepsTeacherNeverRebootFloor()
+    {
+        UpdatePolicy? usedPolicy = null;
+        var trigger = CreateTrigger((p, _, _, _) =>
+        {
+            usedPolicy = p;
+            return Task.FromResult(Started());
+        }, new UpdatePolicy { RebootPolicy = RebootPolicy.Never });
+
+        var response = await trigger.HandleAsync(new LocalControlRequest
+        {
+            Action = LocalControlActions.StartUpdate,
+            MaestroConfirmed = true,
+            Options = new ManualUpdateOptions { PreventAutomaticReboot = false },
+        });
+
+        Assert.True(response.Success);
+        Assert.NotNull(usedPolicy);
+        Assert.Equal(RebootPolicy.Never, usedPolicy!.RebootPolicy);
+    }
+
+    [Fact]
+    public async Task LocalUpdateTrigger_ReportsPolicyResolutionFailure()
+    {
+        var called = false;
+        var trigger = CreateTrigger((_, _, _, _) =>
+        {
+            called = true;
+            return Task.FromResult(Started());
+        }, os: () => throw new InvalidOperationException("OS 정보 조회 실패"));
+
+        var response = await trigger.HandleAsync(new LocalControlRequest
+        {
+            Action = LocalControlActions.StartUpdate,
+            MaestroConfirmed = true,
+        });
+
+        Assert.False(response.Success);
+        Assert.Contains("수동 업데이트 옵션", response.Message);
+        Assert.False(called);
     }
 
     [Fact]
@@ -363,7 +517,7 @@ public sealed class LocalControlTests
 
         Assert.False(response.Success);
         Assert.Contains("중단할 작업이 없습니다", response.Message);
-        Assert.True(hideCalled);
+        Assert.False(hideCalled);
     }
 
     [Fact]
