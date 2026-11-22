@@ -175,6 +175,7 @@ Phase 0 파일럿에서는 Inno Setup을 먼저 검증하고, 문제가 있으�
 ```
 
 학생 PC에서 **관리자 PowerShell**을 열고 같은 폴더의 설정 파일로 무인 설치합니다.
+샘플은 [`scripts/agent-install.sample.ini`](../scripts/agent-install.sample.ini)를 복사해 사용하세요.
 
 ```ini
 ; agent-install.ini (설치 exe와 같은 폴더)
