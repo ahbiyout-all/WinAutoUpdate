@@ -1,5 +1,6 @@
 using System.Windows;
 using UpdateAgent.Agent.Desktop.Services;
+using UpdateAgent.Shared.Models;
 
 namespace UpdateAgent.Agent.Desktop;
 
@@ -60,27 +61,25 @@ public partial class MainWindow : Window
 
     private async Task StartUpdateAsync()
     {
-        var confirm = MessageBox.Show(
-            "업데이트 작업을 시작합니다.\n\n" +
-            "• Maestro를 '수동 복구/해제' 모드로 전환했고 확인했습니다.\n" +
-            "• 설치 중 입력이 잠기고 PC가 여러 번 재부팅될 수 있습니다.\n\n" +
-            "계속하시겠습니까?",
-            "수동 업데이트 확인",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning,
-            MessageBoxResult.No);
+        var optionsWindow = new ManualUpdateOptionsWindow { Owner = this };
+        if (optionsWindow.ShowDialog() != true) return;
 
-        if (confirm != MessageBoxResult.Yes) return;
+        var options = optionsWindow.Options;
+        var maestroConfirmed = optionsWindow.MaestroConfirmed;
 
         StartButton.IsEnabled = false;
         RefreshButton.IsEnabled = false;
         try
         {
-            var response = await _updateClient.StartAsync(maestroConfirmed: true).ConfigureAwait(true);
+            var response = await _updateClient
+                .StartAsync(maestroConfirmed, options)
+                .ConfigureAwait(true);
             if (response.Success)
             {
                 MessageBox.Show(
-                    $"업데이트 작업을 시작했습니다.\n작업 ID: {response.JobId}\n\n" +
+                    $"업데이트 작업을 시작했습니다.\n" +
+                    $"선택 옵션: {UpdatePolicyPresets.Label(options.PresetId)}\n" +
+                    $"작업 ID: {response.JobId}\n\n" +
                     "진행 상황은 이 창과 교사 대시보드에서 확인할 수 있습니다.",
                     "업데이트 시작",
                     MessageBoxButton.OK,

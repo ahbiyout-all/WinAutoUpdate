@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using UpdateAgent.Core.Orchestration;
+using UpdateAgent.Core.Windows;
 using UpdateAgent.Service.Configuration;
 using UpdateAgent.Shared.Models;
 
@@ -29,6 +30,7 @@ public sealed class LocalUpdateTrigger
     private readonly CancelJobDelegate? _cancelJob;
     private readonly Func<string, CancellationToken, Task>? _hideOverlay;
     private readonly ServerPolicyProvider _policies;
+    private readonly Func<OsInfo> _getOs;
     private readonly ILogger<LocalUpdateTrigger> _logger;
 
     public LocalUpdateTrigger(
@@ -36,13 +38,15 @@ public sealed class LocalUpdateTrigger
         ServerPolicyProvider policies,
         ILogger<LocalUpdateTrigger> logger,
         CancelJobDelegate? cancelJob = null,
-        Func<string, CancellationToken, Task>? hideOverlay = null)
+        Func<string, CancellationToken, Task>? hideOverlay = null,
+        Func<OsInfo>? osProvider = null)
     {
         _startJob = startJob;
         _policies = policies;
         _logger = logger;
         _cancelJob = cancelJob;
         _hideOverlay = hideOverlay;
+        _getOs = osProvider ?? WindowsOsInfoProvider.GetCurrent;
     }
 
     public async Task<LocalControlResponse> HandleAsync(
@@ -59,7 +63,20 @@ public sealed class LocalUpdateTrigger
             return Fail("지원하지 않는 로컬 제어 요청입니다.");
         }
 
-        var policy = await _policies.GetAsync(cancellationToken).ConfigureAwait(false);
+        var cachedPolicy = await _policies.GetAsync(cancellationToken).ConfigureAwait(false);
+        var os = _getOs();
+        var policy = request.Options is null
+            ? cachedPolicy.SanitizeFor(os)
+            : request.Options.ApplyTo(cachedPolicy, os);
+
+        if (request.Options is not null)
+        {
+            _logger.LogInformation(
+                "학생 수동 옵션 적용: preset={PresetId}, overlay={OverlayEnabled}, reboot={RebootPolicy}",
+                request.Options.PresetId ?? UpdatePolicyPresets.Custom,
+                policy.OverlayEnabled,
+                policy.RebootPolicy);
+        }
 
         if (policy.RequireMaestroManualConfirmation && !request.MaestroConfirmed)
         {

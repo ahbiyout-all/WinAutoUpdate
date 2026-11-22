@@ -5,6 +5,38 @@
 
 ---
 
+## 2026-11-22 — 학생용 앱에서 수동 업데이트 옵션 선택 (v0.1.19)
+
+### 배경
+
+- 학생 PC의 `UpdateAgent 상태 확인` 앱은 **업데이트 시작** 버튼만 제공하고, 누르면 곧바로 서비스에 요청을 보냈습니다.
+- 학생이 해당 PC에서 설치할 업데이트 범위나 재부팅/오버레이 동작을 고를 수 없어 교사 대시보드를 열어야 했습니다.
+
+### 변경
+
+| 파일 | 변경 |
+|---|---|
+| `src/UpdateAgent.Shared/Models/ManualUpdateOptions.cs` | 학생이 고르는 프리셋/세부 옵션 모델 추가. 프리셋 변환, OS 안전 처리, 교사 정책 병합 로직 포함 |
+| `src/UpdateAgent.Shared/Models/LocalControlModels.cs` | `start-update` 요청에 `options` 필드 추가 (없으면 기존 정책 사용) |
+| `src/UpdateAgent.Service/Comms/LocalUpdateTrigger.cs` | 전달된 옵션을 캐시된 교사 정책에 병합. 기능 업데이트·Maestro 요구·로그온 일시중지 등 보호 항목은 유지 |
+| `src/UpdateAgent.Agent.Desktop/ManualUpdateOptionsWindow.xaml(.cs)` | 프리셋 + 세부 옵션 선택 창 추가 |
+| `src/UpdateAgent.Agent.Desktop/MainWindow.xaml.cs`, `Services/LocalUpdateClient.cs` | 시작 버튼이 옵션 창을 열고 선택 값을 파이프로 전달 |
+| `tests/UpdateAgent.Tests/LocalControlTests.cs` | 옵션 직렬화, 프리셋/OS 안전 처리, 정책 병합, 트리거 반영 테스트 추가 |
+| `README.md`, `docs/PILOT.md`, `docs/INSTALLER.md` | 학생용 옵션 선택 흐름 반영 |
+
+### 설계 메모
+
+- 학생이 바꿀 수 있는 항목: 보안/중요/권장/선택/드라이버/정의 업데이트, 오버레이, 자동 재부팅 여부, 최대 재부팅 횟수(0~10).
+- 학생이 바꿀 수 없는 항목: 기능 업데이트(2차 승인 전용), Maestro 확인 요구, `PauseOnUserLogon`, 완료 후 종료 등 교사 정책의 나머지 값.
+- 확인 주체는 기존처럼 서버에서 `student`로 고정되며, 토큰은 여전히 학생 앱에 저장하지 않습니다.
+
+### 검증
+
+- Release 빌드 경고 0/오류 0, 테스트 **151개 통과**.
+- 릴리스 검증은 배포 후 기록합니다.
+
+---
+
 ## 2026-11-22 — 기존 설치를 찾을 수 없어도 설치 계속 (v0.1.18)
 
 ### 배경

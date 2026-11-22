@@ -10,10 +10,12 @@ public sealed class LocalUpdateClient
 
     public Task<LocalControlResponse> StartAsync(
         bool maestroConfirmed,
+        ManualUpdateOptions? options = null,
         CancellationToken cancellationToken = default) =>
         _pipe.SendAsync(new LocalControlRequest
         {
             Action = LocalControlActions.StartUpdate,
             MaestroConfirmed = maestroConfirmed,
+            Options = options,
         }, cancellationToken);
 }

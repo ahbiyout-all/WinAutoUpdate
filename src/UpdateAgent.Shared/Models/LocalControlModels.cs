@@ -16,6 +16,11 @@ public sealed record LocalControlRequest
 
     /// <summary>Maestro를 수동 복구 모드로 전환하고 학생이 확인했는지.</summary>
     public bool MaestroConfirmed { get; init; }
+
+    /// <summary>
+    /// 학생이 수동 시작 전 선택한 옵션. 없으면 서비스에 캐시된 정책을 그대로 사용한다.
+    /// </summary>
+    public ManualUpdateOptions? Options { get; init; }
 }
 
 /// <summary>서비스 → 학생용 상태 앱 로컬 제어 응답.</summary>

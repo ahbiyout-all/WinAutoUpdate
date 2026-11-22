@@ -113,7 +113,8 @@ C:\Program Files\UpdateAgent\LabManager\
    - Agent: 서비스를 시작하고 마지막 화면에서 `UpdateAgent 상태 확인` 데스크톱 앱을 실행할 수 있습니다.
      시작 메뉴/바탕화면 바로가기도 같은 앱(`{app}\Desktop\UpdateAgent.Agent.Desktop.exe`)을 엽니다.
       이 앱은 상태 조회와 함께 **업데이트 시작** 버튼을 제공하며, 로컬 제어 파이프(`UpdateAgent.LocalControl.v1`)로
-      실행 중인 서비스에 작업을 요청합니다. 학생 계정(UAC 필터링 토큰 포함)이 연결할 수 있도록 파이프 ACL에
+      실행 중인 서비스에 작업을 요청합니다. 시작 전 **수동 업데이트 옵션** 창에서 프리셋과 세부 항목을 고를 수 있고,
+      선택 값은 파이프 요청의 `options`로 전달됩니다. 학생 계정(UAC 필터링 토큰 포함)이 연결할 수 있도록 파이프 ACL에
       인증 사용자가 포함됩니다.
    - LabManager: 설치 파일에는 샘플 토큰(`sample-*-token-replace-before-pilot`)이 들어 있어 서버와 대시보드가 바로 시작됩니다.
      다만 샘플 값은 공개된 예시이므로 **파일럿 전에 반드시 실제 토큰으로 교체**해야 합니다.

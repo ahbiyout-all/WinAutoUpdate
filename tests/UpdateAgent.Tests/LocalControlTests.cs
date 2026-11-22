@@ -27,6 +27,76 @@ public sealed class LocalControlTests
     }
 
     [Fact]
+    public void LocalControlRequest_Options_RoundTripsThroughSharedJson()
+    {
+        var json = UpdateAgentJson.Serialize(new LocalControlRequest
+        {
+            Action = LocalControlActions.StartUpdate,
+            MaestroConfirmed = true,
+            Options = new ManualUpdateOptions
+            {
+                PresetId = UpdatePolicyPresets.SecurityOnly,
+                IncludeOptional = true,
+                PreventAutomaticReboot = true,
+                MaxRebootCount = 4,
+                OverlayEnabled = false,
+            },
+        });
+
+        var parsed = UpdateAgentJson.Deserialize<LocalControlRequest>(json);
+
+        Assert.NotNull(parsed);
+        Assert.NotNull(parsed!.Options);
+        Assert.Equal(UpdatePolicyPresets.SecurityOnly, parsed.Options!.PresetId);
+        Assert.True(parsed.Options.IncludeOptional);
+        Assert.True(parsed.Options.PreventAutomaticReboot);
+        Assert.Equal(4, parsed.Options.MaxRebootCount);
+        Assert.False(parsed.Options.OverlayEnabled);
+    }
+
+    [Fact]
+    public void ManualUpdateOptions_FromPreset_SanitizesForOs()
+    {
+        var options = ManualUpdateOptions.FromPreset(UpdatePolicyPresets.ServerSafe, ServerCore);
+
+        Assert.True(options.IncludeDefinitionUpdates);
+        Assert.True(options.PreventAutomaticReboot);
+        Assert.False(options.OverlayEnabled);
+    }
+
+    [Fact]
+    public void ManualUpdateOptions_ApplyTo_KeepsProtectedTeacherFields()
+    {
+        var basePolicy = new UpdatePolicy
+        {
+            RequireMaestroManualConfirmation = false,
+            PauseOnUserLogon = true,
+            ShutdownAfterComplete = true,
+            IncludeFeatureUpdates = true,
+            ApprovedFeatureRelease = "26H2",
+        };
+        var options = new ManualUpdateOptions
+        {
+            PresetId = UpdatePolicyPresets.Full,
+            IncludeOptional = true,
+            IncludeDrivers = true,
+            MaxRebootCount = 99,
+            OverlayEnabled = true,
+        };
+
+        var applied = options.ApplyTo(basePolicy, Windows11);
+
+        Assert.True(applied.IncludeOptional);
+        Assert.True(applied.IncludeDrivers);
+        Assert.Equal(10, applied.MaxRebootCount);
+        Assert.False(applied.RequireMaestroManualConfirmation);
+        Assert.True(applied.PauseOnUserLogon);
+        Assert.True(applied.ShutdownAfterComplete);
+        Assert.False(applied.IncludeFeatureUpdates);
+        Assert.Null(applied.ApprovedFeatureRelease);
+    }
+
+    [Fact]
     public void CancelJobCommandPayload_Force_RoundTripsThroughSharedJson()
     {
         var json = UpdateAgentJson.Serialize(new CancelJobCommandPayload { Force = true });
@@ -124,6 +194,68 @@ public sealed class LocalControlTests
         Assert.True(usedConfirmed);
         Assert.Equal("student", usedBy);
         Assert.Equal(LocalUpdateTrigger.ConfirmedBy, usedBy);
+    }
+
+    [Fact]
+    public async Task LocalUpdateTrigger_AppliesStudentOptionsAndDisablesFeatureUpdates()
+    {
+        UpdatePolicy? usedPolicy = null;
+        var cachedPolicy = new UpdatePolicy
+        {
+            IncludeOptional = false,
+            IncludeFeatureUpdates = true,
+            ApprovedFeatureRelease = "26H2",
+        };
+        var trigger = CreateTrigger((p, _, _, _) =>
+        {
+            usedPolicy = p;
+            return Task.FromResult(Started());
+        }, cachedPolicy);
+
+        var response = await trigger.HandleAsync(new LocalControlRequest
+        {
+            Action = LocalControlActions.StartUpdate,
+            MaestroConfirmed = true,
+            Options = new ManualUpdateOptions
+            {
+                PresetId = UpdatePolicyPresets.Custom,
+                IncludeOptional = true,
+                PreventAutomaticReboot = true,
+                MaxRebootCount = 99,
+                OverlayEnabled = false,
+            },
+        });
+
+        Assert.True(response.Success);
+        Assert.NotNull(usedPolicy);
+        Assert.True(usedPolicy!.IncludeOptional);
+        Assert.Equal(RebootPolicy.Never, usedPolicy.RebootPolicy);
+        Assert.Equal(10, usedPolicy.MaxRebootCount);
+        Assert.False(usedPolicy.OverlayEnabled);
+        Assert.False(usedPolicy.IncludeFeatureUpdates);
+        Assert.Null(usedPolicy.ApprovedFeatureRelease);
+    }
+
+    [Fact]
+    public async Task LocalUpdateTrigger_SanitizesStudentOptionsForServerCore()
+    {
+        UpdatePolicy? usedPolicy = null;
+        var trigger = CreateTrigger((p, _, _, _) =>
+        {
+            usedPolicy = p;
+            return Task.FromResult(Started());
+        }, new UpdatePolicy(), os: () => ServerCore);
+
+        var response = await trigger.HandleAsync(new LocalControlRequest
+        {
+            Action = LocalControlActions.StartUpdate,
+            MaestroConfirmed = true,
+            Options = new ManualUpdateOptions { OverlayEnabled = true },
+        });
+
+        Assert.True(response.Success);
+        Assert.NotNull(usedPolicy);
+        Assert.False(usedPolicy!.OverlayEnabled);
     }
 
     [Fact]
@@ -267,11 +399,29 @@ public sealed class LocalControlTests
         Assert.True(received.MaestroConfirmed);
     }
 
+    private static OsInfo Windows11 => new()
+    {
+        ProductName = "Windows 11 Pro",
+        EditionId = "Professional",
+        DisplayVersion = "23H2",
+        Build = 22631,
+    };
+
+    private static OsInfo ServerCore => new()
+    {
+        ProductName = "Windows Server 2022 Standard",
+        EditionId = "ServerStandard",
+        Build = 20348,
+        IsServer = true,
+        IsServerCore = true,
+    };
+
     private static LocalUpdateTrigger CreateTrigger(
         StartJobDelegate start,
         UpdatePolicy? policy = null,
         CancelJobDelegate? cancel = null,
-        Func<string, CancellationToken, Task>? hide = null)
+        Func<string, CancellationToken, Task>? hide = null,
+        Func<OsInfo>? os = null)
     {
         var policies = new ServerPolicyProvider((_, _) => Task.FromResult<string?>(
             policy is null ? null : UpdateAgentJson.Serialize(policy)));
@@ -280,7 +430,8 @@ public sealed class LocalControlTests
             policies,
             NullLogger<LocalUpdateTrigger>.Instance,
             cancel,
-            hide);
+            hide,
+            os ?? (() => Windows11));
     }
 
     private static StartJobResult Started(string jobId = "job-test") => new()
