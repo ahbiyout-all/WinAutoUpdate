@@ -25,6 +25,10 @@
 - Inno Setup 6으로 에이전트 설치 프로그램 컴파일 성공.
 - `deploy-agents.ps1`로 생성한 패키지에 `agent-install.ini`가 들어가고 설치 명령에 설정 인자가 없음을 확인.
 - 설정 파일에는 토큰 값이 없이 파일 경로만 기록되며, 토큰 값은 별도 파일 첫 줄에서만 읽습니다.
+- 릴리스 워크플로 `45007862553` 성공, release `v0.1.23` 생성 및 자산 3개 다운로드·해시 검증 완료:
+  - `UpdateAgent.Agent-Setup-0.1.23-x64.exe` — `0146786e5f037e9fde6855210439c747a12b00743a4fcc9dfac7563ef2c51aa1`
+  - `UpdateAgent.LabManager-Setup-0.1.23-x64.exe` — `1556ab22f4c7e7f5de38c2d72f4af640d28be88e5db3b39cef77d8e8e85a828a`
+  - `UpdateAgent.Agent-0.1.23-x64.msi` — `c492ea0fa6bde2a9876e079533684c39122edd690b267fb373745458725ed3aa`
 
 ---
 
