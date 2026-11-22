@@ -52,8 +52,22 @@ v0.1.24~v0.1.26 배포·검증 후 설치 관리자, 배포 스크립트/CI, 에
 - `scripts\publish.ps1`, `scripts\build-inno.ps1`, `scripts\build-msi.ps1`: 모두 성공(로컬 테스트 토큰 사용)
 - PowerShell 스크립트 구문 검사: 전체 통과, `git diff --check`: 오류 없음
 - BOM 스캔: `agent-install.sample.ini` 및 스크립트는 UTF-8 BOM 없음, 시크릿 스캔: 통과
+- **Inno Setup 스크립트(.iss)는 UTF-8 BOM이 필수**입니다. BOM을 제거하면 `build-inno.ps1`의
+  `Assert-InnoScriptBom`이 중단됩니다(첫 CI 실행 실패 원인, BOM 복구 후 재실행 성공).
 
-> GitHub 릴리스 워크플로 완료 후 공개 자산의 SHA-256과 실행 결과를 이 섹션에 추가합니다.
+### GitHub 릴리스 검증
+
+- 워크플로: https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/45024570303 (성공)
+- 릴리스: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.27
+- 공개 자산은 토큰 secret이 설정되지 않은 빌드이므로 `containsSecrets=false`이며,
+  첫 설치에는 실제 토큰이 내장된 빌드(또는 에이전트는 외부 토큰 파일)가 필요합니다. 업데이트는 가능합니다.
+- 다운로드한 자산의 SHA-256이 릴리스 노트의 값과 일치함을 확인했습니다.
+
+| 자산 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.27-x64.exe` | `ba2ad5a1a6d5cc73d03bbb689e5b0c935e56daaca80578f4aa5f8ae1dc881011` |
+| `UpdateAgent.LabManager-Setup-0.1.27-x64.exe` | `4833a3a2d48821b969b5f7c7ec2ccc3176f2ea9014c8060b3c23ca1e23433b91` |
+| `UpdateAgent.Agent-0.1.27-x64.msi` | `37c0bb1f95f9accd4cf1889c70c9d84b6d7fe2e685638c7ee5242c73b086cc6b` |
 
 ---
 
