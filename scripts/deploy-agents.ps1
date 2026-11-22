@@ -5,10 +5,13 @@ Generates self-contained silent-install packages for student PCs from an invento
 .DESCRIPTION
 For each ComputerName in the CSV, creates <OutputDir>\<ComputerName>\ containing:
   - the Inno Agent setup executable
-  - the agent token file (used only through the installer's /AgentTokenFile switch)
+  - agent-install.ini with the LabManager URL and the token file name
+  - the agent token file (referenced by the INI, never by a command line)
   - install-agent.cmd, which runs the silent install and removes the token file
 
-No token is ever placed on a command line. Generation is the default and performs
+The installer reads agent-install.ini from its own folder, so no settings are
+passed on the command line. No token is ever placed on a command line.
+Generation is the default and performs
 no remote action. Packages can be copied to each PC (USB/RDP) or wrapped by
 PsExec/WinRM. Use -ExecuteLocal to run one package on the current PC.
 
@@ -151,10 +154,14 @@ if errorlevel 1 (
 set "PKG=%~dp0"
 set "SETUP=%PKG%__SETUP__"
 set "TOKEN=%PKG%agent-token.txt"
-set "URL=__URL__"
+set "CONFIG=%PKG%agent-install.ini"
 
 if not exist "%SETUP%" (
   echo [UpdateAgent] Installer not found: %SETUP%
+  exit /b 2
+)
+if not exist "%CONFIG%" (
+  echo [UpdateAgent] Install config not found: %CONFIG%
   exit /b 2
 )
 if not exist "%TOKEN%" (
@@ -165,8 +172,8 @@ if not exist "%TOKEN%" (
 icacls "%TOKEN%" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)" >nul 2>&1
 
 echo [UpdateAgent] Installing Agent for __PC__
-echo [UpdateAgent] LabManager: %URL%
-"%SETUP%" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LabManagerUrl=%URL% /AgentTokenFile="%TOKEN%"
+echo [UpdateAgent] Settings: %CONFIG%
+"%SETUP%" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 if errorlevel 1 (
   echo [UpdateAgent] Install failed with code !ERRORLEVEL!. Token file kept for retry.
   exit /b 3
@@ -176,6 +183,12 @@ del /f /q "%TOKEN%" >nul 2>&1
 echo [UpdateAgent] Install complete. Token file removed.
 echo [UpdateAgent] Confirm this PC appears online in the LabManager within 90 seconds.
 endlocal
+'@
+
+$iniTemplate = @'
+[Agent]
+LabManagerUrl=__URL__
+AgentTokenFile=agent-token.txt
 '@
 
 $packages = @()
@@ -189,10 +202,13 @@ foreach ($target in $targets) {
 
     $cmd = $cmdTemplate.
         Replace('__SETUP__', $installer.Name).
-        Replace('__URL__', $LabManagerUrl).
         Replace('__PC__', $target.ComputerName)
     $cmd = [regex]::Replace($cmd, "\r?\n", "`r`n")
     [IO.File]::WriteAllText((Join-Path $packageDir 'install-agent.cmd'), $cmd, (New-Object System.Text.UTF8Encoding($false)))
+
+    $ini = [regex]::Replace(
+        $iniTemplate.Replace('__URL__', $LabManagerUrl), "\r?\n", "`r`n")
+    [IO.File]::WriteAllText((Join-Path $packageDir 'agent-install.ini'), $ini, (New-Object System.Text.UTF8Encoding($false)))
 
     $packages += [pscustomobject]@{
         ComputerName = $target.ComputerName
@@ -211,12 +227,14 @@ UpdateAgent student agent deployment packages
 
 Each <ComputerName> folder is self-contained:
   UpdateAgent.Agent-Setup-<version>-x64.exe  silent installer
+  agent-install.ini                          LabManager URL + token file name
   agent-token.txt                            shared agent token (do not distribute widely)
   install-agent.cmd                          elevated silent install + token cleanup
 
 Run install-agent.cmd on the matching student PC from an elevated prompt.
-The token is passed to the installer with /AgentTokenFile and is deleted after
-a successful install. If the install fails, the token file is kept for retry.
+The installer reads agent-install.ini from its own folder, so no settings are
+passed on the command line. The token file is deleted after a successful install;
+if the install fails, the token file is kept for retry.
 
 Protect this output folder and delete it after the rollout is verified.
 See docs/DEPLOYMENT.md for the full lab runbook.

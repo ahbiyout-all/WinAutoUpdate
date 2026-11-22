@@ -16,7 +16,12 @@
 ;  무인 설치
 ;    UpdateAgent.Agent-Setup-<version>-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ;    선택: /LabManagerUrl=http://<teacher-ip>:5080 /AgentTokenFile=<token-file>
-;    토큰은 명령줄/로그에 남지 않도록 파일로만 전달한다.
+;    또는 설치 exe와 같은 폴더의 agent-install.ini([Agent] 섹션)를 자동으로 읽는다.
+;      [Agent]
+;      LabManagerUrl=http://labmanager:5080
+;      AgentTokenFile=agent-token.txt
+;    설정 파일의 상대 경로는 설치 exe가 있는 폴더 기준이다. 명령줄 값이 우선한다.
+;    토큰 값은 명령줄/설정 파일에 쓰지 않고 별도 파일로만 전달한다.
 ;
 ;  AppId는 제품 고유 값이며 절대 변경하지 않는다(업그레이드/제거 연결 기준).
 ; ============================================================================
@@ -124,6 +129,8 @@ const
   ServiceName = 'UpdateAgentService';
   FirewallGroup = 'UpdateAgent';
   NoticeSeconds = {#NoticeDelaySeconds};
+  InstallConfigFileName = 'agent-install.ini';
+  InstallConfigSection = 'Agent';
 
 procedure InitializeWizard;
 begin
@@ -428,6 +435,35 @@ begin
   end;
 end;
 
+{ 명령줄 값이 우선하고, 없으면 설치 exe와 같은 폴더의 INI에서 읽는다. }
+function InstallSetting(const IniPath, Key, CmdPrefix: String): String;
+begin
+  if CmdParamExists(CmdPrefix) then
+  begin
+    Result := Trim(CmdParamValue(CmdPrefix));
+    Exit;
+  end;
+
+  Result := '';
+  if FileExists(IniPath) then
+    Result := Trim(GetIniString(InstallConfigSection, Key, '', IniPath));
+end;
+
+{ 상대 경로는 설치 exe가 있는 폴더 기준으로 해석한다. }
+function ResolveInstallTokenFile(const Value: String): String;
+var
+  TokenFile: String;
+begin
+  TokenFile := Trim(RemoveQuotes(Value));
+  if Copy(TokenFile, 1, 2) = '.\' then
+    TokenFile := Copy(TokenFile, 3, Length(TokenFile) - 2);
+
+  if (Pos(':', TokenFile) = 2) or (Pos('\\', TokenFile) = 1) then
+    Result := TokenFile
+  else
+    Result := ExpandConstant('{src}\' + TokenFile);
+end;
+
 function JsonEscape(const Value: String): String;
 var
   I: Integer;
@@ -621,24 +657,41 @@ end;
 
 procedure WriteAgentConfigIfRequested;
 var
+  IniPath, ExistingConfigPath: String;
   Url, TokenFile, Token, ConfigPath, SessionHelper: String;
   TokenLines: TArrayOfString;
   Lines: TArrayOfString;
-  UrlRequested, TokenFileRequested: Boolean;
+  TokenFileFromCmd: Boolean;
 begin
   AgentConfigWriteFailed := False;
-  UrlRequested := CmdParamExists('/LabManagerUrl=');
-  TokenFileRequested := CmdParamExists('/AgentTokenFile=');
-  if (not UrlRequested) and (not TokenFileRequested) then Exit;
+  IniPath := AddBackslash(ExtractFileDir(ParamStr(0))) + InstallConfigFileName;
+  if FileExists(IniPath) then
+    Log('Loading agent install settings from: ' + IniPath);
 
-  Url := Trim(CmdParamValue('/LabManagerUrl='));
-  TokenFile := Trim(CmdParamValue('/AgentTokenFile='));
-  if (not UrlRequested) or (not TokenFileRequested) or (Url = '') or (TokenFile = '') then
+  TokenFileFromCmd := CmdParamExists('/AgentTokenFile=');
+  Url := InstallSetting(IniPath, 'LabManagerUrl', '/LabManagerUrl=');
+  TokenFile := InstallSetting(IniPath, 'AgentTokenFile', '/AgentTokenFile=');
+  if (Url = '') and (TokenFile = '') then Exit;
+
+  if (Url = '') or (TokenFile = '') then
   begin
     AgentConfigWriteFailed := True;
     if not WizardSilent then
-      MsgBox('/LabManagerUrl과 /AgentTokenFile은 함께 지정해야 합니다. 설정 파일을 쓰지 않습니다.',
+      MsgBox('LabManagerUrl과 AgentTokenFile은 함께 지정해야 합니다. ' +
+        '명령줄 인자 또는 설치 프로그램과 같은 폴더의 ' + InstallConfigFileName + '을 확인하세요.',
         mbError, MB_OK);
+    Exit;
+  end;
+
+  TokenFile := ResolveInstallTokenFile(TokenFile);
+  Log('Agent token file: ' + TokenFile);
+
+  { 배포 스크립트는 설치 성공 후 토큰 파일을 삭제한다. 같은 폴더의 INI가 남아 있어도
+    기존 agent.json이 있으면 업그레이드로 보고 설정을 유지한다. 명령줄 지정은 엄격히 검사한다. }
+  ExistingConfigPath := ExpandConstant('{commonappdata}\UpdateAgent\agent.json');
+  if (not TokenFileFromCmd) and (not FileExists(TokenFile)) and FileExists(ExistingConfigPath) then
+  begin
+    Log('Token file was removed after a previous install; keeping the existing agent.json.');
     Exit;
   end;
 
@@ -723,7 +776,8 @@ begin
     WriteAgentConfigIfRequested;
     if AgentConfigWriteFailed then
       RaiseException('에이전트 설정 파일을 기록하지 못해 설치를 중단합니다. ' +
-        '명령줄 인자(/LabManagerUrl, /AgentTokenFile)와 토큰 파일을 확인하세요.');
+        '명령줄 인자(/LabManagerUrl, /AgentTokenFile), 같은 폴더의 ' + InstallConfigFileName +
+        ' 및 토큰 파일을 확인하세요.');
 
     Code := RunHidden(ExpandConstant('{sys}\sc.exe'), 'start ' + ServiceName);
     if (Code <> 0) and (Code <> 1056) then

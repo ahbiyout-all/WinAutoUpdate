@@ -144,17 +144,28 @@ deploy\agents\
   manifest.csv
   STUDENT-01\
     UpdateAgent.Agent-Setup-<버전>-x64.exe
+    agent-install.ini
     agent-token.txt
     install-agent.cmd
   STUDENT-02\ ...
 ```
 
+`agent-install.ini`는 설치 exe와 같은 폴더에 두며, 설치 프로그램이 자동으로 읽습니다.
+
+```ini
+[Agent]
+LabManagerUrl=http://labmanager:5080
+AgentTokenFile=agent-token.txt
+```
+
+상대 경로는 설치 exe가 있는 폴더 기준입니다. **토큰 값은 설정 파일에 쓰지 않고** 토큰 파일에만 둡니다.
+
 `install-agent.cmd`는 관리자 권한을 확인한 뒤 다음을 수행합니다.
 
 1. `agent-token.txt`에 관리자/SYSTEM만 접근 가능하도록 ACL 적용
 2. `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`로 조용히 설치
-3. `/LabManagerUrl=<주소>`와 `/AgentTokenFile=<파일>` 전달 (**토큰 값은 명령줄에 없음**)
-4. 성공하면 토큰 파일 즉시 삭제, 실패하면 재시도 위해 보관
+3. 같은 폴더의 `agent-install.ini`에서 주소와 토큰 파일 경로를 자동으로 읽음 (**명령줄 인자 없음**)
+4. 성공하면 토큰 파일 즉시 삭제, 실패하면 재시도 위해 보관(`agent-install.ini`는 유지)
 
 DNS 별칭이 없다면 `-LabManagerUrl "http://192.168.0.10:5080"`로 IP를 지정하세요.
 다른 설치 파일을 쓰면 `-InstallerPath`로 경로를 넘깁니다.

@@ -174,6 +174,27 @@ C:\Program Files\UpdateAgent\LabManager\
 - 토큰 파일은 UTF-8(BOM 없음) 또는 ASCII로 저장하세요.
 - `/LabManagerUrl`과 `/AgentTokenFile`은 함께 지정해야 합니다.
 
+#### 설치 파일과 같은 폴더의 설정 파일 사용 (학생 PC 배포 권장)
+
+명령줄 인자 대신 설치 exe와 **같은 폴더**에 `agent-install.ini`를 두면 인스톨러가 자동으로 읽습니다.
+토큰 값은 쓰지 않고 토큰 **파일 경로만** 기록합니다.
+
+```ini
+[Agent]
+LabManagerUrl=http://labmanager:5080
+AgentTokenFile=agent-token.txt
+```
+
+- `agent-token.txt`도 같은 폴더에 두면 됩니다. 상대 경로는 설치 exe가 있는 폴더 기준으로 해석되며,
+  `C:\...` 또는 `\\서버\공유\...` 같은 절대 경로도 그대로 사용할 수 있습니다.
+- 설정 파일이 없으면 명령줄 인자만 사용합니다. 설정 파일도 명령줄 인자도 없으면 기존 설치의
+  `agent.json`을 그대로 유지합니다.
+- 명령줄에 `/LabManagerUrl`, `/AgentTokenFile`을 함께 지정하면 **명령줄 값이 우선**합니다.
+- 두 값 중 하나만 있으면 설치가 중단됩니다. 토큰 파일의 첫 줄만 읽어 `agent.json`에 기록한 뒤
+  ACL을 제한합니다.
+
+`scripts\deploy-agents.ps1`이 PC별 패키지에 이 설정 파일을 자동으로 생성합니다.
+
 ### 교사 PC
 
 ```powershell

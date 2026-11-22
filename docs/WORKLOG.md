@@ -5,6 +5,29 @@
 
 ---
 
+## 2026-11-22 — 설치 파일과 같은 폴더의 설정 파일로 학생 에이전트 설치 (v0.1.23)
+
+### 배경
+
+- 학생 PC 50대에 배포할 때마다 `/LabManagerUrl`, `/AgentTokenFile` 명령줄 인자를 반복해서 관리해야 했습니다.
+- 설치 exe와 같은 폴더에 설정 파일을 두고 인스톨러가 자동으로 읽도록 해 배포 패키지를 단순화했습니다.
+
+### 변경
+
+| 파일 | 변경 |
+|---|---|
+| `installer/InnoSetup/UpdateAgent.Agent.iss` | 설치 exe와 같은 폴더의 `agent-install.ini`(`[Agent]` 섹션) 자동 읽기. 상대 토큰 경로는 설치 폴더 기준, 명령줄 값 우선, 토큰 파일이 삭제된 업그레이드는 기존 `agent.json` 유지 |
+| `scripts/deploy-agents.ps1` | PC별 패키지에 `agent-install.ini` 생성, `install-agent.cmd`는 명령줄 인자 없이 조용히 설치 |
+| `docs/INSTALLER.md`, `docs/DEPLOYMENT.md` | 설정 파일 형식·우선순위·상대 경로 규칙과 패키지 구성 갱신 |
+
+### 검증
+
+- Inno Setup 6으로 에이전트 설치 프로그램 컴파일 성공.
+- `deploy-agents.ps1`로 생성한 패키지에 `agent-install.ini`가 들어가고 설치 명령에 설정 인자가 없음을 확인.
+- 설정 파일에는 토큰 값이 없이 파일 경로만 기록되며, 토큰 값은 별도 파일 첫 줄에서만 읽습니다.
+
+---
+
 ## 2026-11-22 — 자아성찰 3회 심층 감사와 오류 수정 (v0.1.22)
 
 ### 배경
