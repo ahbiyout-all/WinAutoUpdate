@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.28"
+  #define AppVersion "0.1.29"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -283,10 +283,9 @@ function InitializeSetup: Boolean;
 begin
   { 종료 → 언인스톨 → 설치 순서는 PrepareToInstall에서 안내와 함께 수행한다. }
   OldInnoUninstall := FindInnoUninstallString;
-  { 레지스트리만 보고 첫 설치로 판단하면 레지스트리가 남은 재이미징 PC에서
-    내장 토큰 검증이 건너뛰어진다. 기존 설정 파일이 있으면 업데이트로 취급한다. }
-  FirstInstall := (OldInnoUninstall = '') and
-    (not FileExists(ExpandConstant('{app}\appsettings.json')));
+  { app 상수는 InitializeSetup에서 아직 초기화되지 않는다.
+    기존 appsettings.json 확인은 app 상수가 사용 가능한 PrepareToInstall로 옮긴다. }
+  FirstInstall := True;
   Result := True;
 end;
 
@@ -407,6 +406,11 @@ var
   UninstallExe: String;
 begin
   Result := '';
+
+  { 이 시점에는 app 상수가 초기화되어 있다. 레지스트리만 남은 재이미징 PC에서도
+    기존 appsettings.json이 있으면 업데이트로 취급해 내장 토큰을 건너뛴다. }
+  FirstInstall := (OldInnoUninstall = '') and
+    (not FileExists(ExpandConstant('{app}\appsettings.json')));
 
   { 어떤 것도 지우기 전에 내장 토큰을 검증한다. 업데이트에서는 이 함수가 아무 것도 하지 않는다. }
   Result := ValidateBundledLabManagerTokens;
