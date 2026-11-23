@@ -5,6 +5,46 @@
 
 ---
 
+## 2026-11-23 — LabManager 설치 관리자 초기화 오류 수정 (v0.1.29)
+
+### 증상
+
+v0.1.28 LabManager 설치 파일을 관리자 권한으로 실행해도 시작 즉시 종료됩니다.
+
+```text
+Runtime error:
+내부 오류: An attempt was made to expand the "app" constant before it was initialized.
+```
+
+### 원인과 조치
+
+Inno Setup의 `InitializeSetup` 이벤트에서 `{app}`을 확장했습니다. 이 이벤트는 설치 경로가 정해지기 전이라 `{app}`이 초기화되지 않습니다.
+
+| 항목 | 변경 |
+|---|---|
+| `InitializeSetup` | `OldInnoUninstall` 조회만 수행, `FirstInstall := True`로 둠 |
+| `PrepareToInstall` | `{app}` 사용 가능 시점에 기존 `appsettings.json` 유무로 `FirstInstall` 재판정 |
+| Pascal 주석 | 주석 안의 `{app}` 표기는 중괄호 주석을 닫으므로 `app 상수`로 변경 |
+
+Agent 설치 관리자는 `{commonappdata}`를 사용하므로 같은 문제가 없습니다.
+
+### 검증
+
+- 로컬 Inno 컴파일 성공.
+- CI run `45159320812` 전체 성공, 첫 설치 토큰 내장 메시지 확인.
+- v0.1.28 설치 파일은 이 오류가 있으므로 사용하지 않습니다.
+
+| 파일 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.29-x64.exe` | `c747b85a312b0ece77935a83141b0f2cd7d6ca55c8eea93606af0cbdacc7ee66` |
+| `UpdateAgent.LabManager-Setup-0.1.29-x64.exe` | `8966e523f7a56c00bd3f85d6455af58ada7fc537412e977104802a1c22b0e049` |
+| `UpdateAgent.Agent-0.1.29-x64.msi` | `475191a6be4d8645384d57f1d7bb6dca767cd654b9bc3439b7b6604d949c2f5e` |
+
+- 릴리스: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.29
+- 워크플로: https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/45159320812
+
+---
+
 ## 2026-11-23 — 파일럿 토큰 secret 적용 릴리스 (v0.1.28)
 
 ### 배경
