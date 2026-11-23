@@ -162,7 +162,7 @@ C:\Program Files\UpdateAgent\LabManager\
 ### 학생 PC
 
 ```powershell
-# 가장 단순한 무인 설치(설정은 나중에 configure-agent.ps1로 적용)
+# 가장 단순한 무인 설치(v0.1.30 이상: labmanager DNS 별칭 + 내장 토큰 자동 사용)
 .\UpdateAgent.Agent-Setup-<버전>-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # 설치와 동시에 LabManager URL/토큰 적용(토큰은 파일로 전달)
@@ -176,7 +176,8 @@ C:\Program Files\UpdateAgent\LabManager\
   `agent.json`에 기록하고 ACL을 제한합니다.
 - 토큰 파일은 UTF-8(BOM 허용) 또는 ASCII로 저장하세요. 첫 줄만 읽습니다.
 - `/LabManagerUrl`과 `/AgentTokenFile`은 **키별로** 명령줄 값이 우선하고, 없으면 같은 폴더의
-  `agent-install.ini`에서 읽습니다. 두 값이 모두 없으면 기존 `agent.json`을 유지합니다.
+  `agent-install.ini`에서 읽습니다. **첫 설치**에서 둘 다 없으면 `http://labmanager:5080`과
+  내장 토큰을 사용합니다(v0.1.30 이상). **업그레이드**에서는 기존 `agent.json`을 유지합니다.
 
 #### 설치 파일과 같은 폴더의 설정 파일 사용 (학생 PC 배포 권장)
 
@@ -194,8 +195,9 @@ AgentTokenFile=agent-token.txt
   `C:\...`, `\\서버\공유\...`, `//서버/공유/...` 같은 절대 경로도 그대로 사용할 수 있습니다.
 - INI는 **UTF-8 BOM 없이** 저장하세요. BOM이 있으면 Windows API가 `[Agent]` 섹션을 읽지 못해
   설치가 중단됩니다. 값 뒤의 `; 주석`은 무시됩니다.
-- 설정 파일이 없으면 명령줄 인자만 사용합니다. 설정 파일도 명령줄 인자도 없으면 기존 설치의
-  `agent.json`을 그대로 유지합니다.
+- 설정 파일이 없으면 명령줄 인자만 사용합니다. 설정 파일도 명령줄 인자도 없으면 **첫 설치**에서는
+  기본 URL(`http://labmanager:5080`)과 내장 토큰을 쓰고, **기존 설치**에서는 `agent.json`을 그대로
+  유지합니다. 다른 DNS 이름/IP를 쓰는 실습실은 반드시 INI나 명령줄로 지정하세요.
 - **키별로 명령줄 값이 우선**합니다. 예를 들어 `/LabManagerUrl`만 명령줄로 주고 토큰 파일은 INI에서
   읽을 수도 있습니다. 두 값 중 하나라도 명령줄에 있으면 토큰 파일이 없을 때 업그레이드 예외를
   적용하지 않고 설치가 중단됩니다.
@@ -220,7 +222,7 @@ AgentTokenFile=agent-token.txt
 
 | 제품 | 상황 | 외부 토큰 지정 | 결과 |
 |---|---|---|---|
-| Agent | 첫 설치 | 없음 | 내장 `agent-token.txt` 첫 줄을 사용 |
+| Agent | 첫 설치 | 없음 | `http://labmanager:5080` + 내장 `agent-token.txt` 첫 줄(v0.1.30 이상) |
 | Agent | 첫 설치 | 있음(`/AgentTokenFile` 또는 INI) | 외부 토큰 우선 |
 | Agent | 업데이트 | 없음 | 내장 토큰 무시, 기존 `agent.json` 유지 |
 | Agent | 업데이트 | 있음 | 외부 토큰으로 교체 |

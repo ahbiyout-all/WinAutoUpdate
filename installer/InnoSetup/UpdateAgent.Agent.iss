@@ -27,7 +27,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.29"
+  #define AppVersion "0.1.30"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -140,6 +140,7 @@ const
   InstallConfigFileName = 'agent-install.ini';
   InstallConfigSection = 'Agent';
   BundledTokenFileName = 'agent-token.txt';
+  DefaultLabManagerUrl = 'http://labmanager:5080';
 
 procedure ValidateAgentConfigRequest; forward;
 
@@ -857,6 +858,15 @@ begin
   Url := InstallSetting(IniPath, 'LabManagerUrl', '/LabManagerUrl=');
   TokenFile := InstallSetting(IniPath, 'AgentTokenFile', '/AgentTokenFile=');
   HasExternalToken := TokenFile <> '';
+
+  { 설정 파일도 명령줄도 없이 첫 설치하면 교사 PC DNS 별칭을 기본값으로 쓴다.
+    외부 INI/명령줄은 항상 우선하며, BOM이 깨진 INI가 있으면 기본값으로 덮지 않고 오류를 유지한다. }
+  if (Url = '') and (not HasExternalToken) and (not SettingsFromCmd) and
+     (not FileExists(IniPath)) and FirstInstall then
+  begin
+    Url := DefaultLabManagerUrl;
+    Log('Using default first-install LabManagerUrl (labmanager DNS alias).');
+  end;
 
   ExistingConfigPath := ExpandConstant('{commonappdata}\UpdateAgent\agent.json');
   CanKeepExisting := (not FirstInstall) and IsValidExistingAgentConfig(ExistingConfigPath);
