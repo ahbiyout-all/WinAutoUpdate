@@ -19,9 +19,14 @@ public sealed class AgentPolicyService
 
     public AgentPolicyService(LabStore store) => _store = store;
 
+    /// <summary>2차 확인 체크박스는 클라이언트가 끌 수 없다. 서버가 항상 켠 상태로 강제한다.</summary>
+    private static UpdatePolicy ForceMaestroGate(UpdatePolicy policy) =>
+        policy with { RequireMaestroManualConfirmation = true };
+
     public async Task<UpdatePolicy> GetDefaultAsync(CancellationToken cancellationToken = default) =>
-        (TryParse(await _store.GetSettingAsync(DefaultSettingKey, cancellationToken)) ?? UpdatePolicy.Default)
-            .WithoutFeatureUpdates();
+        ForceMaestroGate(
+            (TryParse(await _store.GetSettingAsync(DefaultSettingKey, cancellationToken)) ?? UpdatePolicy.Default)
+                .WithoutFeatureUpdates());
 
     public async Task<EffectivePolicy> GetEffectiveAsync(
         string agentId,
@@ -32,12 +37,14 @@ public sealed class AgentPolicyService
         var overridePolicy = TryParse(await _store.GetSettingAsync(Key(agentId), cancellationToken));
         if (overridePolicy is not null)
         {
-            return new EffectivePolicy(overridePolicy.SanitizeFor(os).WithoutFeatureUpdates(), true, "PC별 설정");
+            return new EffectivePolicy(
+                ForceMaestroGate(overridePolicy.SanitizeFor(os).WithoutFeatureUpdates()), true, "PC별 설정");
         }
 
         var defaultPolicy = TryParse(await _store.GetSettingAsync(DefaultSettingKey, cancellationToken))
             ?? UpdatePolicy.Default;
-        return new EffectivePolicy(defaultPolicy.SanitizeFor(os).WithoutFeatureUpdates(), false, "기본 정책");
+        return new EffectivePolicy(
+            ForceMaestroGate(defaultPolicy.SanitizeFor(os).WithoutFeatureUpdates()), false, "기본 정책");
     }
 
     public async Task<EffectivePolicy> SaveAsync(
@@ -46,7 +53,7 @@ public sealed class AgentPolicyService
         OsInfo? os = null,
         CancellationToken cancellationToken = default)
     {
-        var sanitized = policy.SanitizeFor(os).WithoutFeatureUpdates();
+        var sanitized = ForceMaestroGate(policy.SanitizeFor(os).WithoutFeatureUpdates());
         await _store.SetSettingAsync(Key(agentId), UpdateAgentJson.Serialize(sanitized), cancellationToken);
         return new EffectivePolicy(sanitized, true, "PC별 설정");
     }
@@ -67,7 +74,7 @@ public sealed class AgentPolicyService
         CancellationToken cancellationToken = default)
     {
         var fallback = await GetEffectiveAsync(agentId, os, cancellationToken);
-        var policy = (requested ?? fallback.Policy).SanitizeFor(os).WithoutFeatureUpdates();
+        var policy = ForceMaestroGate((requested ?? fallback.Policy).SanitizeFor(os).WithoutFeatureUpdates());
         var warnings = new List<string>();
 
         if (requested is not null)

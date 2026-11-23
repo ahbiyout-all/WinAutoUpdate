@@ -140,8 +140,22 @@ app.MapPost("/api/agents/checkin", async (
     LiveEventBus liveEvents,
     CancellationToken cancellationToken) =>
 {
-    var checkinGate = checkinGates.GetOrAdd(
-        request.Agent.AgentId, _ => new SemaphoreSlim(1, 1));
+    // 공유 에이전트 토큰으로 임의 ID를 무한 생성해 DB/메모리를 오염시키지 않는다.
+    var agentId = request.Agent.AgentId;
+    if (string.IsNullOrWhiteSpace(agentId) || agentId.Length > 128 ||
+        agentId.Any(c => !char.IsLetterOrDigit(c) && c is not '-' and not '_'))
+    {
+        await labStore.AddAuditAsync(
+            "agent", "checkin-rejected", request.Agent.MachineName,
+            "잘못된 에이전트 ID 형식", cancellationToken);
+        return Results.BadRequest(new { error = "에이전트 ID 형식이 올바르지 않습니다." });
+    }
+    if (!checkinGates.ContainsKey(agentId) && checkinGates.Count >= 200)
+    {
+        return Results.StatusCode(StatusCodes.Status429TooManyRequests);
+    }
+
+    var checkinGate = checkinGates.GetOrAdd(agentId, _ => new SemaphoreSlim(1, 1));
     await checkinGate.WaitAsync(cancellationToken);
     try
     {
@@ -245,10 +259,22 @@ app.MapPost("/api/agents/checkin", async (
             return Results.BadRequest(new { error = "자신의 명령 결과만 제출할 수 있습니다." });
         }
 
-        await labStore.CompleteCommandResultsAsync(
+        var accepted = await labStore.CompleteCommandResultsAsync(
             request.Agent.AgentId, request.CommandResults, cancellationToken);
         foreach (var result in request.CommandResults)
         {
+            if (!accepted.Contains(result.CommandId))
+            {
+                // 존재하지 않거나 이미 종료/만료된 명령은 감사 로그에 성공으로 남기지 않는다.
+                await labStore.AddAuditAsync(
+                    "agent",
+                    "command-result-rejected",
+                    $"{request.Agent.MachineName}/{result.CommandId}",
+                    "알 수 없거나 이미 완료/만료된 명령 결과",
+                    cancellationToken);
+                continue;
+            }
+
             await labStore.AddAuditAsync(
                 "agent",
                 result.Success ? "command-ok" : "command-fail",
@@ -258,10 +284,15 @@ app.MapPost("/api/agents/checkin", async (
         }
 
         // StartJob 명령이 실패하면 서버 작업이 Pending에 남지 않도록 실패로 정리한다.
-        foreach (var result in request.CommandResults.Where(r => !r.Success))
+        foreach (var result in request.CommandResults.Where(r => !r.Success && accepted.Contains(r.CommandId)))
         {
             await FailJobForRejectedCommandAsync(
                 labStore, request.Agent.AgentId, result, cancellationToken);
+        }
+
+        if (request.CommandResults.Any(r => !accepted.Contains(r.CommandId)))
+        {
+            return Results.BadRequest(new { error = "유효하지 않은 명령 결과가 있어 전체 결과를 거부했습니다." });
         }
     }
 
@@ -624,6 +655,13 @@ app.MapPost("/api/admin/jobs/start", async (
         if (agent is null)
         {
             errors.Add($"{agentId}: 등록되지 않은 PC");
+            continue;
+        }
+
+        // Maestro가 설치된 PC는 API 직접 호출로도 보호 해제 확인을 건너뛸 수 없다.
+        if (agent.Agent.MaestroInstalled && !request.MaestroConfirmed)
+        {
+            errors.Add($"{agent.Agent.MachineName}: Maestro 보호 해제 확인이 필요합니다.");
             continue;
         }
 

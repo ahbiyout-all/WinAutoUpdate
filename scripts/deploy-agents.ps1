@@ -23,7 +23,7 @@ PsExec/WinRM. Use -ExecuteLocal to run one package on the current PC.
 .EXAMPLE
 .\scripts\deploy-agents.ps1 -InventoryCsv .\inventory.csv -AgentTokenFile .\secure\agent-token.txt -LabManagerUrl http://192.168.0.10:5080 -ExecuteLocal -ComputerName STUDENT-01
 
-# 사용할 설치 exe에 첫 설치용 토큰이 내장되어 있다면 별도 토큰 파일 없이 배포
+# Use the embedded first-install token when the setup exe was built with secrets.
 .\scripts\deploy-agents.ps1 -InventoryCsv .\inventory.csv -UseEmbeddedToken
 #>
 [CmdletBinding()]

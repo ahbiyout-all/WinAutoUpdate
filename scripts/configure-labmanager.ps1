@@ -17,7 +17,6 @@ $env:UPDATEAGENT_AGENT_TOKEN = "<agent-token>"
 [CmdletBinding()]
 param(
     [string]$PublishDir,
-    [string]$AdminToken,
     [string]$AdminTokenFile,
     [string]$AgentTokenFile,
     [string]$ListenUrl = "http://0.0.0.0:5080",
@@ -68,8 +67,9 @@ if (-not (Test-Path -LiteralPath $configPath)) {
     throw "LabManager appsettings.json not found: $configPath. Run scripts\publish.ps1 first."
 }
 
+# 토큰 값은 명령줄에 받지 않는다(프로세스 목록/로그 유출 방지).
 $AdminToken = Resolve-Secret `
-    -Value $AdminToken `
+    -Value '' `
     -File $AdminTokenFile `
     -EnvName "UPDATEAGENT_ADMIN_TOKEN" `
     -Prompt "Admin token (dashboard/API login)"

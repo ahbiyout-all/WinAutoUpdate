@@ -89,7 +89,7 @@ dotnet build UpdateAgent.sln
 dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj
 ```
 
-현재 기준: 빌드 경고 0 / 오류 0, 테스트 165개 통과.
+현재 기준: 빌드 경고 0 / 오류 0, 테스트 195개 통과.
 
 MSI는 솔루션 빌드에 포함되지 않습니다(일반 빌드에 WiX 복원을 강제하지 않기 위해).
 설치 프로그램이 필요하면 `publish.ps1` 후 `build-inno.ps1`(권장) 또는 `build-msi.ps1`을 실행합니다.
@@ -135,7 +135,8 @@ MSI 패키징 설계와 제약은 [`docs/MSI.md`](docs/MSI.md)에 있습니다.
 | `scripts/github-push.ps1` | 개발 PC | 버전 올림 → 빌드/테스트 → 비밀값 검사 → 커밋/태그/push (**로컬 전용, Git 제외**) |
 
 > `scripts/github-push.ps1`과 `scripts/github-push.bat`은 `.gitignore`에서 제외되어
-> 저장소에 업로드되지 않습니다.
+> 저장소에 업로드되지 않습니다. 새로 복제한 환경에는 없으므로 로컬에 직접 준비하거나
+> `publish.ps1` → `build-inno.ps1` → `git tag/push` 절차를 사용하세요.
 
 ```powershell
 # 개발 PC — 에이전트만 빌드 (버전별 폴더 + 탐색기 열기)

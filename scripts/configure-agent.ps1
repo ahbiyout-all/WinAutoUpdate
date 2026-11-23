@@ -85,7 +85,14 @@ function Write-JsonAtomic {
 
     $json = $Object | ConvertTo-Json -Depth 12
     $temp = "$Path.tmp"
+    if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force }
     [IO.File]::WriteAllText($temp, $json, (New-Object System.Text.UTF8Encoding($false)))
+    # Restrict the temporary file before the token is moved into place.
+    & icacls $temp /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+        throw "Could not tighten the ACL on $temp. Configuration was not changed."
+    }
     Move-Item -LiteralPath $temp -Destination $Path -Force
 }
 
@@ -166,7 +173,13 @@ $tokenWasRequested =
 
 if ($tokenWasRequested) {
     $resolvedToken = ''
-    if (-not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_AGENT_TOKEN)) {
+    # An explicitly supplied file always wins over a stale session/CI environment token.
+    if ($PSBoundParameters.ContainsKey('AgentTokenFile') -and
+        -not [string]::IsNullOrWhiteSpace($AgentTokenFile)) {
+        $resolvedToken = Resolve-Secret -Value "" -File $AgentTokenFile
+    }
+    if ([string]::IsNullOrWhiteSpace($resolvedToken) -and
+        -not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_AGENT_TOKEN)) {
         $resolvedToken = $env:UPDATEAGENT_AGENT_TOKEN
     }
     if ([string]::IsNullOrWhiteSpace($resolvedToken) -and -not [string]::IsNullOrWhiteSpace($AgentTokenFile)) {
@@ -219,11 +232,6 @@ if ($changes.Count -eq 0) {
 }
 
 Write-JsonAtomic -Path $ConfigPath -Object $config
-
-& icacls $ConfigPath /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)" | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Warning "Could not tighten the ACL on $ConfigPath. Check permissions manually."
-}
 
 Write-Host "Updated $ConfigPath ($mode mode)" -ForegroundColor Green
 foreach ($change in $changes) { Write-Host "  $change" }

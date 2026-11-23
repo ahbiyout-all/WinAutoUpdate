@@ -150,6 +150,24 @@ if (-not (Test-Path -LiteralPath (Join-Path $HelperSource $helperExeName))) {
     throw "SessionHelper publish output not found: $HelperSource\$helperExeName. Run scripts\publish.ps1 first."
 }
 
+# Validate all explicit inputs before stopping the service or removing any files.
+$serviceDir = Join-Path $InstallRoot "service"
+$helperDir = Join-Path $InstallRoot "sessionhelper"
+if ($PSBoundParameters.ContainsKey('SessionHelperPath') -and
+    -not [string]::IsNullOrWhiteSpace($SessionHelperPath)) {
+    $SessionHelperPath = [IO.Path]::GetFullPath($SessionHelperPath)
+    if (-not (Test-Path -LiteralPath $SessionHelperPath)) {
+        throw "SessionHelper executable not found: $SessionHelperPath"
+    }
+}
+else {
+    # The default path is inside the install root and is validated after files are copied.
+    $SessionHelperPath = ''
+}
+if (-not (Test-Path -LiteralPath (Join-Path $ServiceSource "appsettings.json"))) {
+    throw "appsettings.json not found in service publish output: $ServiceSource"
+}
+
 Write-Host "Install root : $InstallRoot"
 Write-Host "Service      : $ServiceName"
 Write-Host "LabManager   : $LabManagerUrl"
@@ -169,9 +187,6 @@ if ($existingService -and $existingService.Status -ne 'Stopped') {
     }
 }
 
-$serviceDir = Join-Path $InstallRoot "service"
-$helperDir = Join-Path $InstallRoot "sessionhelper"
-
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
 Remove-DirectoryWithRetry $serviceDir
 Remove-DirectoryWithRetry $helperDir
@@ -185,17 +200,11 @@ Copy-Item -Path (Join-Path $HelperSource "*") -Destination $helperDir -Recurse -
 if ([string]::IsNullOrWhiteSpace($SessionHelperPath)) {
     $SessionHelperPath = Join-Path $helperDir $helperExeName
 }
-else {
-    $SessionHelperPath = [IO.Path]::GetFullPath($SessionHelperPath)
-}
 if (-not (Test-Path -LiteralPath $SessionHelperPath)) {
     throw "SessionHelper executable not found: $SessionHelperPath"
 }
 
 $configPath = Join-Path $serviceDir "appsettings.json"
-if (-not (Test-Path -LiteralPath $configPath)) {
-    throw "appsettings.json not found in service publish output: $configPath"
-}
 
 $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $agent = $config.Agent
@@ -211,14 +220,17 @@ Set-JsonProperty $agent "OverlayEnabled" (-not $DisableOverlay)
 Set-JsonProperty $agent "DryRun" ([bool]$DryRun)
 
 $json = $config | ConvertTo-Json -Depth 12
-[IO.File]::WriteAllText($configPath, $json, (New-Object System.Text.UTF8Encoding($false)))
-Write-Host "Wrote agent configuration: $configPath"
-
-# The agent token is a secret: Administrators full control, SYSTEM read-only.
-& icacls $configPath /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)" | Out-Null
+# Restrict the temporary file before the token is moved into place.
+$configTempPath = "$configPath.tmp"
+if (Test-Path -LiteralPath $configTempPath) { Remove-Item -LiteralPath $configTempPath -Force }
+[IO.File]::WriteAllText($configTempPath, $json, (New-Object System.Text.UTF8Encoding($false)))
+& icacls $configTempPath /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)" | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning "Could not tighten the appsettings.json ACL. Check permissions manually."
+    Remove-Item -LiteralPath $configTempPath -Force -ErrorAction SilentlyContinue
+    throw "Could not tighten the appsettings.json ACL. Configuration was not changed."
 }
+Move-Item -LiteralPath $configTempPath -Destination $configPath -Force
+Write-Host "Wrote agent configuration: $configPath"
 
 $serviceExe = Join-Path $serviceDir $serviceExeName
 

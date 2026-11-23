@@ -71,7 +71,9 @@ jobs:
           else {
             # 수동 실행에서 이미 같은 태그가 다른 커밋을 가리키면 잘못된 릴리스를 막는다.
             $existingCommit = (& git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>$null).Trim()
-            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingCommit) -and
+            # rev-parse가 1을 반환하는 것은 '태그 없음'이며 정상 경로다. 단계 전체가 실패하지 않도록 초기화한다.
+            $global:LASTEXITCODE = 0
+            if (-not [string]::IsNullOrWhiteSpace($existingCommit) -and
                 $existingCommit -ne $env:GITHUB_SHA) {
               throw "Tag $tag already points to $existingCommit, not to $env:GITHUB_SHA. Update Directory.Build.props instead."
             }
@@ -193,9 +195,24 @@ jobs:
           $lines.Add('')
           $lines.Add('## 주요 변경 사항')
           $lines.Add('')
-          $lines.Add('- 첫 설치 토큰 검증을 fail-closed로 강화했습니다(업데이트는 내장 토큰을 사용하지 않습니다).')
-          $lines.Add('- 기능 업데이트 2차 승인, 명령 결과 소유자 검증, 정책 영속화 등 보안/안정성 결함을 수정했습니다.')
-          $lines.Add('- 자세한 내용은 저장소의 `docs/WORKLOG.md`를 참고하세요.')
+          # 고정 문구는 다음 릴리스에서 거짓 정보가 되므로 이전 태그 이후 커밋 제목을 사용한다.
+          $previousTag = ''
+          foreach ($candidate in @(& git tag --list 'v*' --sort=-version:refname)) {
+            if ($candidate -ne $tag) { $previousTag = $candidate; Break }
+          }
+          $global:LASTEXITCODE = 0
+          $changeLines = @()
+          if (-not [string]::IsNullOrWhiteSpace($previousTag)) {
+            $changeLines = @(& git log --pretty=format:'- %s' "$previousTag..HEAD" 2>$null)
+            $global:LASTEXITCODE = 0
+          }
+          if ($changeLines.Count -eq 0) {
+            $lines.Add('- 변경 내역은 저장소의 docs/WORKLOG.md에서 해당 버전 항목을 확인하세요.')
+          }
+          else {
+            foreach ($change in @($changeLines | Select-Object -First 30)) { $lines.Add($change) }
+            $lines.Add('- 전체 변경 내역: https://github.com/ahbiyout-all/WinAutoUpdate/blob/master/docs/WORKLOG.md')
+          }
           $lines.Add('')
           $lines.Add('## 설치 방법')
           $lines.Add('')
@@ -277,19 +294,16 @@ jobs:
           Write-Host 'Release assets:'
           $assets | ForEach-Object { Write-Host "  $_" }
 
-          # 수동 실행에서는 태그가 없을 수 있으므로 현재 커밋에 태그를 만든다.
-          $existingTag = (& git tag --list $tag).Trim()
-          if (-not $existingTag) {
-            git tag $tag
-            if ($LASTEXITCODE -ne 0) { throw "Failed to create tag $tag." }
-            git push origin "refs/tags/$tag"
-            if ($LASTEXITCODE -ne 0) { throw "Failed to push tag $tag." }
-          }
-          else {
-            $tagCommit = (& git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>$null).Trim()
+          # 워크플로에서 태그를 직접 push하면 태그 이벤트가 같은 워크플로를 중복 실행한다.
+          # 수동 실행에서는 gh release create가 --target 커밋에 태그를 만들도록 한다.
+          $tagCommit = (& git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>$null).Trim()
+          $global:LASTEXITCODE = 0
+          $verifyTag = $false
+          if (-not [string]::IsNullOrWhiteSpace($tagCommit)) {
             if ($tagCommit -ne $env:GITHUB_SHA) {
               throw "Existing tag $tag points to $tagCommit, not to $env:GITHUB_SHA."
             }
+            $verifyTag = $true
           }
 
           $releaseTags = @(& gh release list --limit 200 --json tagName |
@@ -322,7 +336,9 @@ jobs:
           else {
             Write-Host "Creating release $tag."
             $ghArgs = @('release', 'create', $tag) + $assets +
-              @('--verify-tag', '--title', "UpdateAgent $version", '--notes-file', 'release-notes.md')
+              @('--title', "UpdateAgent $version", '--notes-file', 'release-notes.md')
+            if ($verifyTag) { $ghArgs += '--verify-tag' }
+            else { $ghArgs += @('--target', $env:GITHUB_SHA) }
             if ($prerelease) { $ghArgs += '--prerelease' }
 
             & gh @ghArgs

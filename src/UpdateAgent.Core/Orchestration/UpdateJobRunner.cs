@@ -122,8 +122,9 @@ public sealed class UpdateJobRunner : IAsyncDisposable
     {
         EnsureInitialized();
         // 서버가 정책을 잘못 전달하거나 구버전 에이전트 캐시가 남아 있어도
-        // 실행 직전에 OS 안전 규칙을 한 번 더 강제한다.
-        policy = policy.SanitizeFor(_os);
+        // 실행 직전에 OS 안전 규칙과 기능 업데이트 2차 승인 규칙을 한 번 더 강제한다.
+        // 원격 StartJob 페이로드는 이 지점을 반드시 통과한다.
+        policy = policy.ForExecution(_os);
         await _control.WaitAsync(cancellationToken);
         try
         {

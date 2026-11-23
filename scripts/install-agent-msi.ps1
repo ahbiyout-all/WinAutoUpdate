@@ -24,7 +24,7 @@ $env:UPDATEAGENT_AGENT_TOKEN = Get-Content ".\agent-token.txt" -Raw
 
 .EXAMPLE
 .\scripts\install-agent-msi.ps1 `
-  -MsiPath ".\artifacts\msi\UpdateAgent.Agent-0.1.27-x64.msi" `
+  -MsiPath ".\artifacts\msi\UpdateAgent.Agent-0.1.31-x64.msi" `
   -LabManagerUrl "http://192.168.0.10:5080" `
   -AgentTokenFile ".\pilot-agent-token.txt" `
   -ConfirmMaestro -Quiet
@@ -68,10 +68,17 @@ function Resolve-Secret {
         [string]$Value,
         [string]$File,
         [string]$Prompt,
-        [string]$EnvName
+        [string]$EnvName,
+        [switch]$PreferFile
     )
 
     if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value.Trim() }
+
+    # An explicitly supplied file always wins over a stale session/CI environment token.
+    if ($PreferFile -and -not [string]::IsNullOrWhiteSpace($File)) {
+        if (-not (Test-Path -LiteralPath $File)) { throw "Secret file not found: $File" }
+        return (Get-Content -LiteralPath $File -Raw).TrimStart([char]0xFEFF).Trim()
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($EnvName)) {
         $fromEnv = [Environment]::GetEnvironmentVariable($EnvName)
@@ -114,16 +121,20 @@ function Write-JsonAtomic {
 
     $json = $Object | ConvertTo-Json -Depth 12
     $temp = "$Path.tmp"
+    if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force }
     [IO.File]::WriteAllText($temp, $json, (New-Object System.Text.UTF8Encoding($false)))
+    # Restrict the temporary file before the secret exists at the final path.
+    Set-SecretAcl -Path $temp -ThrowOnFailure
     Move-Item -LiteralPath $temp -Destination $Path -Force
 }
 
 function Set-SecretAcl {
-    param([string]$Path)
+    param([string]$Path, [switch]$ThrowOnFailure)
 
     # The agent token is a secret: Administrators full control, SYSTEM read-only.
     & icacls $Path /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)" | Out-Null
     if ($LASTEXITCODE -ne 0) {
+        if ($ThrowOnFailure) { throw "Could not tighten the ACL on $Path. Installation aborted." }
         Write-Warning "Could not tighten the ACL on $Path. Check permissions manually."
     }
 }
@@ -390,6 +401,7 @@ if ($tokenProvided) {
         -Value '' `
         -EnvName 'UPDATEAGENT_AGENT_TOKEN' `
         -File $AgentTokenFile `
+        -PreferFile:$PSBoundParameters.ContainsKey('AgentTokenFile') `
         -Prompt "Agent token (must match LabManager AgentToken)"
 }
 elseif ($existing -and -not [string]::IsNullOrWhiteSpace($existing.Agent.AgentToken)) {
@@ -492,7 +504,6 @@ if ($DryRun) {
 }
 
 Write-JsonAtomic -Path $configPath -Object $agentConfig
-Set-SecretAcl $configPath
 
 # util:ServiceConfig sets failure actions; it cannot set the non-crash failure flag.
 & sc.exe failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null

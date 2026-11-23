@@ -32,7 +32,7 @@ public sealed class ServerPolicyProvider
                 : UpdateAgentJson.Deserialize<UpdatePolicy>(json);
             if (policy is not null)
             {
-                policy = policy.SanitizeFor(null).WithoutFeatureUpdates();
+                policy = policy.ForExecution(null);
                 _lastKnownGood = policy;
                 return policy;
             }
@@ -42,6 +42,6 @@ public sealed class ServerPolicyProvider
             // 일시적인 DB 오류에서 정책을 관대한 기본값으로 되돌리면 교사 제한이 풀린다.
         }
 
-        return _lastKnownGood ?? UpdatePolicy.Default;
+        return (_lastKnownGood ?? UpdatePolicy.Default).WithoutFeatureUpdates();
     }
 }

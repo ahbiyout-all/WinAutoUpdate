@@ -56,11 +56,16 @@ public sealed record OsInfo
             ? $"Windows Server {ReleaseLabel}"
             : $"{ProductName} {DisplayVersion}";
 
-    /// <summary>기능 업데이트(OS 업그레이드)를 이 앱에서 다룰 수 있는지.</summary>
-    public bool SupportsFeatureUpdates => !IsServer && !IsLtsc && !IsWindows10;
+    /// <summary>
+    /// 기능 업데이트(OS 업그레이드)를 이 앱에서 다룰 수 있는지.
+    /// 감지 실패/unknown은 클라이언트 Windows로 추정하지 않고 fail closed한다.
+    /// </summary>
+    public bool SupportsFeatureUpdates => GroupId == "windows-11";
 
-    /// <summary>세션 오버레이를 표시할 수 있는지 (Server Core는 헤드리스).</summary>
-    public bool SupportsOverlay => !IsServerCore;
+    /// <summary>
+    /// 세션 오버레이를 표시할 수 있는지. Server Core(헤드리스)와 미확인 OS는 제외한다.
+    /// </summary>
+    public bool SupportsOverlay => GroupId is "windows-11" or "windows-10" or "ltsc" or "server";
 
     /// <summary>LTSC/IoT LTSC 여부까지 포함한 사람이 읽는 설명.</summary>
     public string SupportSummary

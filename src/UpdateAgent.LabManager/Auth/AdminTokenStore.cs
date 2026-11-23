@@ -1,3 +1,4 @@
+using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using UpdateAgent.LabManager.Configuration;
@@ -115,14 +116,24 @@ public sealed class AdminTokenStore
     private void RestrictAcl(string path)
     {
         if (!OperatingSystem.IsWindows()) return;
+
+        // 교사 PC의 대시보드 런처는 관리자 권한이 아니다. UAC 필터 토큰에서는
+        // Administrators SID가 deny-only라 서버 재시작 후 파일을 읽을 수 없으므로
+        // 현재 사용자 SID에도 명시적으로 권한을 준다.
+        var userSid = WindowsIdentity.GetCurrent().User?.Value;
+        if (string.IsNullOrWhiteSpace(userSid))
+        {
+            throw new InvalidOperationException("현재 사용자 SID를 확인할 수 없어 토큰 파일 권한을 제한할 수 없습니다.");
+        }
+
         try
         {
             using var process = System.Diagnostics.Process.Start(
                 new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = "icacls.exe",
-                    Arguments = $"\"{path}\" /inheritance:r " +
-                        "/grant:r \"*S-1-5-32-544:(F)\" \"*S-1-5-18:(F)\"",
+                    Arguments = $"\"{path}\" /inheritance:r /grant:r " +
+                        $"\"*S-1-5-18:(F)\" \"*S-1-5-32-544:(F)\" \"*{userSid}:(F)\"",
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardOutput = true,

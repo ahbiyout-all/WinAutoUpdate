@@ -230,7 +230,8 @@ public sealed class CommandExecutor
             case CommandType.ApplyPolicy:
             {
                 var policy = Deserialize<UpdatePolicy>(command.PayloadJson) ?? UpdatePolicy.Default;
-                var sanitized = policy.SanitizeFor(WindowsOsInfoProvider.GetCurrent());
+                // 캐시에도 기능 업데이트 승인 값을 남기지 않는다(대시보드가 원본 JSON을 읽는다).
+                var sanitized = policy.ForExecution(WindowsOsInfoProvider.GetCurrent());
                 await _store.SetSettingAsync(
                     ServerPolicyProvider.SettingKey, UpdateAgentJson.Serialize(sanitized), cancellationToken);
                 return Ok(command, "정책을 적용했습니다.");

@@ -27,7 +27,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.30"
+  #define AppVersion "0.1.31"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -129,6 +129,7 @@ var
   AgentConfigSkipWrite: Boolean;
   AgentConfigUrl: String;
   AgentConfigToken: String;
+  RunHiddenStarted: Boolean;
   ServiceRecoveryDisabled: Boolean;
   StepNoticePage: TOutputProgressWizardPage;
 
@@ -149,11 +150,18 @@ begin
   StepNoticePage := CreateOutputProgressPage('UpdateAgent 설치', '단계 안내');
 end;
 
+function BoolText(const Value: Boolean): String;
+begin
+  if Value then Result := 'true' else Result := 'false';
+end;
+
 function RunHidden(const FileName, Params: String): Integer;
 var
   Code: Integer;
 begin
-  Exec(FileName, Params, '', SW_HIDE, ewWaitUntilTerminated, Code);
+  { Exec가 실패하면 Code는 0으로 남으므로 별도로 성공 여부를 기록한다. }
+  RunHiddenStarted := Exec(FileName, Params, '', SW_HIDE, ewWaitUntilTerminated, Code);
+  if not RunHiddenStarted then Code := -1;
   Result := Code;
 end;
 
@@ -574,7 +582,30 @@ begin
     (Pos('"Agent"', Text) > 0) and
     (Pos('"LabManagerUrl"', Text) > 0) and
     (Pos('"AgentToken"', Text) > 0) and
+    (Length(Trim(GetJsonStringValue(Text, 'LabManagerUrl'))) > 0) and
+    (Length(Trim(GetJsonStringValue(Text, 'AgentToken'))) > 0) and
     (not IsPlaceholderToken(GetJsonStringValue(Text, 'AgentToken')));
+end;
+
+{ 업그레이드에서 기존 토큰을 유지할 때 사용한다. 내장 토큰은 읽지 않는다. }
+function ReadExistingAgentToken(const Path: String): String;
+var
+  Lines: TArrayOfString;
+  Text: String;
+  I: Integer;
+begin
+  Result := '';
+  if not FileExists(Path) then Exit;
+  if not LoadStringsFromFile(Path, Lines) then Exit;
+  Text := '';
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    if (I = 0) and (Length(Lines[0]) > 0) and (Lines[0][1] = #65279) then
+      Text := Copy(Lines[0], 2, Length(Lines[0]) - 1)
+    else
+      Text := Text + Lines[I];
+  end;
+  Result := GetJsonStringValue(Text, 'AgentToken');
 end;
 
 function JsonEscape(const Value: String): String;
@@ -688,10 +719,9 @@ begin
       end;
       if Code in [3010, 1641] then
       begin
+        { 실제 실패가 아니라 재부팅이 필요한 성공이다. 설치를 계속하고 마지막에 재부팅을 요청한다. }
         NeedsRestart := True;
-        Result := '기존 WiX MSI UpdateAgent Agent 제거에 재부팅이 필요합니다. ' +
-          'PC를 재부팅한 뒤 설치를 다시 실행해 주세요.';
-        Exit;
+        Log('Previous Agent MSI uninstall requested a restart; continuing installation.');
       end;
       Sleep(1200);
     end;
@@ -783,26 +813,19 @@ end;
   그룹 규칙을 실제로 만들고 정리하려면 PowerShell NetSecurity cmdlet을 사용해야 한다. }
 function ApplyFirewallRules: Boolean;
 var
-  ServiceExe, ScriptPath, PowerShellExe: String;
+  ScriptPath, PowerShellExe: String;
   Lines: TArrayOfString;
   Code: Integer;
 begin
-  ServiceExe := ExpandConstant('{app}\Service\UpdateAgent.Service.exe');
   ScriptPath := ExpandConstant('{tmp}\UpdateAgentFirewall.ps1');
-  SetArrayLength(Lines, 4);
+  { 학생 PC는 교사 PC로 폴링만 한다. 수신 대기 구성 요소가 없으므로 인바운드 규칙을
+    만들지 않고, 이전 버전이 만든 규칙만 그룹 단위로 정리한다. }
+  SetArrayLength(Lines, 2);
   Lines[0] := '$ErrorActionPreference = ''Stop''';
   Lines[1] := 'Get-NetFirewallRule -Group ' + PsLiteral(FirewallGroup) +
     ' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction Stop';
-  Lines[2] := 'New-NetFirewallRule -DisplayName ''UpdateAgent Agent'' -Direction Inbound' +
-    ' -Action Allow -Program ' + PsLiteral(ServiceExe) +
-    ' -Enabled True -Profile Any -Group ' + PsLiteral(FirewallGroup) +
-    ' -Description ''UpdateAgent Service (all networks)'' -ErrorAction Stop | Out-Null';
-  Lines[3] := 'New-NetFirewallRule -DisplayName ' + PsLiteral('UpdateAgent Agent {#AppVersion}') +
-    ' -Direction Inbound -Action Allow -Program ' + PsLiteral(ServiceExe) +
-    ' -Enabled True -Profile Any -Group ' + PsLiteral(FirewallGroup) +
-    ' -Description ''UpdateAgent Service (versioned rule)'' -ErrorAction Stop | Out-Null';
 
-  if not SaveStringsToUTF8File(ScriptPath, Lines, False) then
+  if not SaveStringsToUTF8File(ScriptPath, Lines, True) then
   begin
     Log('Could not create the firewall setup script: ' + ScriptPath);
     Result := False;
@@ -812,9 +835,10 @@ begin
   PowerShellExe := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
   Code := RunHidden(PowerShellExe,
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ScriptPath + '"');
-  Result := Code = 0;
+  Result := RunHiddenStarted and (Code = 0);
   if not Result then
-    Log('Failed to configure UpdateAgent firewall rules (code ' + IntToStr(Code) + ')');
+    Log('Failed to clean up legacy UpdateAgent firewall rules (started=' +
+      BoolText(RunHiddenStarted) + ', code ' + IntToStr(Code) + ')');
 end;
 
 procedure RemoveFirewallRules;
@@ -827,7 +851,7 @@ begin
   Lines[0] := '$ErrorActionPreference = ''SilentlyContinue''';
   Lines[1] := 'Get-NetFirewallRule -Group ' + PsLiteral(FirewallGroup) +
     ' | Remove-NetFirewallRule -ErrorAction SilentlyContinue';
-  if not SaveStringsToUTF8File(ScriptPath, Lines, False) then Exit;
+  if not SaveStringsToUTF8File(ScriptPath, Lines, True) then Exit;
   PowerShellExe := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
   RunHidden(PowerShellExe,
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ScriptPath + '"');
@@ -874,7 +898,8 @@ begin
   if (Url = '') and (not HasExternalToken) then
   begin
     { BOM이 있는 INI는 Windows API가 섹션을 찾지 못해 조용히 빈 값이 된다. }
-    if FileExists(IniPath) and (not SettingsFromCmd) and
+    { 명령줄 키가 있어도 BOM이 깨진 INI는 조용히 무시하지 않고 중단한다. }
+    if FileExists(IniPath) and
        LoadStringsFromFile(IniPath, IniLines) and (GetArrayLength(IniLines) > 0) then
     begin
       AgentConfigWriteFailed := True;
@@ -921,9 +946,13 @@ begin
     내장 토큰은 첫 설치에서만 사용하고, 업데이트에서는 절대 읽지 않는다. }
   if (not HasExternalToken) and CanKeepExisting then
   begin
-    Log('Upgrade detected without an explicit token file; refreshing SessionHelperPath only.');
+    { 업그레이드에서는 내장 토큰을 절대 사용하지 않고 기존 토큰을 유지한다.
+      INI/명령줄의 URL은 키별 override 규칙에 따라 반드시 반영한다. }
+    AgentConfigToken := ReadExistingAgentToken(ExistingConfigPath);
+    AgentConfigUrl := Url;
     AgentConfigRequested := True;
-    AgentConfigSkipWrite := True;
+    AgentConfigSkipWrite := False;
+    Log('Upgrade without external token: applying requested URL and preserving the existing token.');
     Exit;
   end;
 

@@ -449,8 +449,8 @@ installer\
 artifacts\
   staging\                    ← build-msi.ps1이 만드는 임시 게시물
   msi\
-    UpdateAgent.Agent-0.1.27-x64.msi
-    UpdateAgent.Agent-0.1.27-x64.msi.sha256
+    UpdateAgent.Agent-0.1.31-x64.msi
+    UpdateAgent.Agent-0.1.31-x64.msi.sha256
     build-info.json
 ```
 
@@ -461,7 +461,7 @@ artifacts\
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
-    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.27</ProductVersion>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.31</ProductVersion>
     <PublishRoot Condition="'$(PublishRoot)' == ''">$(MSBuildThisFileDirectory)..\..\publish</PublishRoot>
     <DefineConstants>ProductVersion=$(ProductVersion);PublishRoot=$(PublishRoot)</DefineConstants>
   </PropertyGroup>
@@ -490,7 +490,7 @@ artifacts\
 
 ```powershell
 .\scripts\publish.ps1
-.\scripts\build-msi.ps1 -ProductVersion 0.1.27
+.\scripts\build-msi.ps1 -ProductVersion 0.1.31
 ```
 
 ```powershell
@@ -499,12 +499,12 @@ dotnet build .\installer\UpdateAgent.Agent.Installer\UpdateAgent.Agent.Installer
   -c Release `
   -t:Rebuild `
   -p:Platform=x64 `
-  -p:ProductVersion=0.1.27 `
+  -p:ProductVersion=0.1.31 `
   -p:PublishRoot="$PWD\artifacts\staging"
 
 # 검증 (저장소 루트에서)
 dotnet tool restore
-dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.27-x64.msi
+dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.31-x64.msi
 ```
 
 ### 8-4. 버전 규칙
@@ -587,13 +587,13 @@ $env:UPDATEAGENT_AGENT_TOKEN = Get-Content ".\pilot-agent-token.txt" -Raw
 
 ```powershell
 # 최소 UI (수동 설치)
-msiexec /i ".\UpdateAgent.Agent-0.1.27-x64.msi" /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.31-x64.msi" /norestart /l*v ".\install.log"
 
 # 무인 설치
-msiexec /i ".\UpdateAgent.Agent-0.1.27-x64.msi" /qn /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.31-x64.msi" /qn /norestart /l*v ".\install.log"
 
 # 무인 + CLI
-msiexec /i ".\UpdateAgent.Agent-0.1.27-x64.msi" /qn /norestart ADDLOCAL=CliFeature
+msiexec /i ".\UpdateAgent.Agent-0.1.31-x64.msi" /qn /norestart ADDLOCAL=CliFeature
 ```
 
 - 토큰/URL은 이 명령으로 설정되지 않습니다. 설치 후 래퍼 또는 `configure-agent.ps1`을 실행해야 원격 관리가 활성화됩니다.
@@ -612,7 +612,7 @@ msiexec /i ".\UpdateAgent.Agent-0.1.27-x64.msi" /qn /norestart ADDLOCAL=CliFeatu
 ### 10-4. 제거
 
 ```powershell
-msiexec /x ".\UpdateAgent.Agent-0.1.27-x64.msi" /qn /norestart /l*v ".\uninstall.log"
+msiexec /x ".\UpdateAgent.Agent-0.1.31-x64.msi" /qn /norestart /l*v ".\uninstall.log"
 ```
 
 또는:
@@ -719,7 +719,7 @@ msiexec /x ".\UpdateAgent.Agent-0.1.27-x64.msi" /qn /norestart /l*v ".\uninstall
 
 ### 파일럿 전 추가 확인
 
-- [ ] `dotnet test` 전체 통과 (165개)
+- [ ] `dotnet test` 전체 통과 (195개)
 - [ ] `dotnet build UpdateAgent.sln` 경고 0/오류 0
 - [ ] MSI SHA-256 기록
 - [ ] 서명 검증 (`signtool verify /pa /all`)
@@ -738,7 +738,7 @@ msiexec /x ".\UpdateAgent.Agent-0.1.27-x64.msi" /qn /norestart /l*v ".\uninstall
 | 미서명 MSI | SmartScreen/백신 경고 | 인증서 확보, 파일럿 경고 |
 | 레거시 `configure-agent.ps1` | 잘못된 파일 수정 | MSI 모드로 전환, 레거시 모드 명시 |
 | Server Core 오버레이 | WPF 미동작 | 세션 없음 감지, 오버레이 생략 |
-| LabManager는 여전히 수동 실행 | 교사 PC 재부팅 후 대시보드 없음 | 2단계에서 서비스화 |
+| LabManager는 Windows 서비스가 아님 | 재부팅 후 자동 시작은 로그온 예약 작업/런처에 의존 | 서비스 등록은 2단계 과제, 헤드리스 서버 자체는 로그온 시 자동 시작 |
 
 ## 15. 확정된 결정
 
@@ -761,7 +761,7 @@ msiexec /x ".\UpdateAgent.Agent-0.1.27-x64.msi" /qn /norestart /l*v ".\uninstall
 
 | # | 항목 | 상태 |
 |---|---|---|
-| 1 | 코드 변경 (`agent.json`, `AgentVersion`, SessionHelper 폴백) + 단위 테스트 | 완료 (테스트 165개 통과) |
+| 1 | 코드 변경 (`agent.json`, `AgentVersion`, SessionHelper 폴백) + 단위 테스트 | 완료 (테스트 195개 통과) |
 | 2 | WiX 프로젝트 + `Package.wxs` | 완료 |
 | 3 | 정제된 `appsettings.json` 템플릿, `notice.ko.rtf` | 완료 |
 | 3-1 | `ko-KR.wxl` 한국어 WixUI 번역 (Control 테이블 검증) | 완료 |

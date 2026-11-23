@@ -159,6 +159,26 @@ public sealed class GitHubReleaseCheckerTests
     }
 
     [Fact]
+    public async Task CheckAsync_DoesNotOfferAnotherProductsInstaller()
+    {
+        const string json = """
+        {
+          "tag_name": "v9.9.9",
+          "assets": [
+            { "name": "UpdateAgent.Agent-Setup-9.9.9-x64.exe", "browser_download_url": "https://example.test/agent-setup.exe", "size": 10 }
+          ]
+        }
+        """;
+
+        using var http = new HttpClient(new StubHandler(json, HttpStatusCode.OK));
+        var info = await new GitHubReleaseChecker(http).CheckAsync(UpdateProduct.LabManager);
+
+        Assert.True(info.CheckSucceeded);
+        Assert.Null(info.AssetName);
+        Assert.Null(info.AssetUrl);
+    }
+
+    [Fact]
     public async Task CheckAsync_ReportsFailureOnHttpError()
     {
         using var http = new HttpClient(new StubHandler("{}", HttpStatusCode.NotFound));

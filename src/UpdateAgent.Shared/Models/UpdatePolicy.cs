@@ -107,6 +107,12 @@ public sealed record UpdatePolicy
         return sanitized;
     }
 
+    /// <summary>
+    /// 실행/캐시 직전에 반드시 적용하는 정규화. OS 안전 규칙과 기능 업데이트 2차 승인 규칙을
+    /// 함께 강제하므로 원격 StartJob 페이로드처럼 신뢰하지 않는 입력에도 안전하다.
+    /// </summary>
+    public UpdatePolicy ForExecution(OsInfo? os) => SanitizeFor(os).WithoutFeatureUpdates();
+
     /// <summary>SanitizeFor가 변경한 내용을 교사에게 보여줄 설명.</summary>
     public IReadOnlyList<string> SanitizationNotes(OsInfo? os)
     {

@@ -67,15 +67,15 @@ public sealed class GitHubReleaseChecker
 
             // 릴리스에는 설치 파일만 첨부한다.
             // 같은 릴리스를 에이전트/LabManager가 공유하므로 제품 접두사로 자산을 먼저 고른다.
-            // 제품 자산이 없으면 전체 자산에서 Inno Setup(.exe) → MSI → 첫 자산 순으로 고른다.
+            // 다른 제품의 설치 파일을 내려받지 않도록 제품 접두사 자체만 사용한다.
+            // 제품 자산이 없으면 다운로드 링크 없이 릴리스 페이지만 안내한다.
             var assets = release.Assets ?? [];
             var prefix = product == UpdateProduct.LabManager
                 ? "UpdateAgent.LabManager-"
                 : "UpdateAgent.Agent-";
-            var productAssets = assets
+            var candidates = assets
                 .Where(a => a.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 .ToList();
-            var candidates = productAssets.Count > 0 ? productAssets : assets;
             var asset =
                 candidates.FirstOrDefault(a =>
                     a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) &&

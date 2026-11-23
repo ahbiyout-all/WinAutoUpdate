@@ -429,24 +429,34 @@ public sealed class LabStore
         return results;
     }
 
-    public async Task CompleteCommandResultsAsync(
+    /// <summary>실제로 상태가 바뀐(유효한) 명령 ID 집합을 반환한다.</summary>
+    public async Task<IReadOnlySet<string>> CompleteCommandResultsAsync(
         string agentId,
         IEnumerable<CommandResult> results,
         CancellationToken cancellationToken = default)
     {
+        var accepted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        // 공유 에이전트 토큰을 가진 다른 PC의 명령 결과로 상태를 바꿀 수 없도록 소유자를 함께 검사한다.
+        // 공유 에이전트 토큰을 가진 다른 PC의 결과, 이미 종료된 명령, 만료된 명령은 거부한다.
         command.CommandText = """
             UPDATE commands SET status = $status, result_message = $message, completed_at = $ts
-            WHERE command_id = $id AND agent_id = $agent;
+            WHERE command_id = $id AND agent_id = $agent
+              AND status IN ($pending, $delivered)
+              AND expires_at > $now;
             """;
         var statusParam = command.Parameters.Add("$status", SqliteType.Integer);
         var messageParam = command.Parameters.Add("$message", SqliteType.Text);
         var tsParam = command.Parameters.Add("$ts", SqliteType.Text);
         var idParam = command.Parameters.Add("$id", SqliteType.Text);
         var agentParam = command.Parameters.Add("$agent", SqliteType.Text);
+        var pendingParam = command.Parameters.Add("$pending", SqliteType.Integer);
+        var deliveredParam = command.Parameters.Add("$delivered", SqliteType.Integer);
+        var nowParam = command.Parameters.Add("$now", SqliteType.Text);
         agentParam.Value = agentId;
+        pendingParam.Value = (int)CommandStatus.Pending;
+        deliveredParam.Value = (int)CommandStatus.Delivered;
+        nowParam.Value = DateTimeOffset.UtcNow.ToString("O");
 
         foreach (var result in results)
         {
@@ -454,8 +464,13 @@ public sealed class LabStore
             messageParam.Value = result.Message;
             tsParam.Value = result.CompletedAt.ToString("O");
             idParam.Value = result.CommandId;
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            if (await command.ExecuteNonQueryAsync(cancellationToken) > 0)
+            {
+                accepted.Add(result.CommandId);
+            }
         }
+
+        return accepted;
     }
 
     public async Task<AgentCommand?> GetCommandAsync(

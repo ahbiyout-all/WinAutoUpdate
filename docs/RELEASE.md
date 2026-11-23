@@ -13,7 +13,7 @@
 버전은 **`Directory.Build.props`의 `<Version>` 하나**만 사용합니다.
 
 ```xml
-<Version>0.1.27</Version>
+<Version>0.1.31</Version>
 ```
 
 이 값이 다음 위치에 그대로 반영됩니다.
@@ -27,12 +27,17 @@
 | MSI `ProductVersion`/파일 이름 | `scripts\build-msi.ps1` |
 | Git 태그 | `scripts\github-push.ps1`의 `v<version>` |
 
-`github-push.ps1`은 `Directory.Build.props`만 올립니다. 직접 `ISCC`/WiX를 실행할 때 쓰이는
-`UpdateAgent.Agent.iss`, `UpdateAgent.LabManager.iss`, `UpdateAgent.Agent.Installer.wixproj`의
-폴백 버전도 같은 값으로 수동 갱신해야 합니다. `build-inno.ps1`/`build-msi.ps1`이 불일치를 검사해
-빌드를 중단합니다.
+`github-push.ps1`은 `Directory.Build.props`와 아래 세 파일의 폴백 버전을 **함께** 올립니다.
+직접 `ISCC`/WiX를 실행하는 경우에도 네 값이 같아야 하며, `build-inno.ps1`/`build-msi.ps1`이
+불일치를 검사해 빌드를 중단합니다.
 
-버전은 `Major.Minor.Build` 형식의 숫자 3자리만 사용합니다(예: `0.1.27`).
+| 폴백 버전 위치 | 필드 |
+|---|---|
+| `installer\InnoSetup\UpdateAgent.Agent.iss` | `#define AppVersion` |
+| `installer\InnoSetup\UpdateAgent.LabManager.iss` | `#define AppVersion` |
+| `installer\UpdateAgent.Agent.Installer\UpdateAgent.Agent.Installer.wixproj` | `ProductVersion` |
+
+버전은 `Major.Minor.Build` 형식의 숫자 3자리만 사용합니다(예: `0.1.31`).
 `0.1.0-beta` 같은 접두/접미사는 릴리스 파일 이름과 Inno `VersionInfoVersion`을 깨뜨리므로 사용하지 않습니다.
 
 ## 2. 릴리스 흐름
@@ -67,15 +72,20 @@ LabManager는 30분마다(강제 확인 시 즉시) GitHub Releases API를 조�
 - GitHub 인증: `gh auth login` 또는 Git Credential Manager
 - 첫 설치용 토큰을 설치 exe에 넣으려면 저장소 Settings → Secrets and variables → Actions에
   `UPDATEAGENT_AGENT_TOKEN`, `UPDATEAGENT_LABMANAGER_ADMIN_TOKEN`,
-  `UPDATEAGENT_LABMANAGER_AGENT_TOKEN`을 등록합니다. LabManager 두 값은 반드시 함께 등록합니다.
-  등록하지 않으면 내장 토큰이 들어가지 않으므로 배포 시 외부 토큰 파일을 지정해야 합니다.
+  `UPDATEAGENT_LABMANAGER_AGENT_TOKEN`을 등록합니다.
+  - LabManager 두 값(`ADMIN`, `AGENT`)은 **반드시 함께** 등록합니다. LabManager Inno 첫 설치에는
+    외부 토큰 파일 옵션이 없으므로, 값이 없으면 설치가 중단됩니다.
+  - `UPDATEAGENT_AGENT_TOKEN`과 `UPDATEAGENT_LABMANAGER_AGENT_TOKEN`은 **같은 값**이어야 합니다.
+    워크플로는 일치 여부를 자동 검증하지 않으므로 등록 후 직접 확인하세요.
+  - 시크릿을 등록하지 않으면 Agent는 배포 시 외부 `AgentTokenFile`을 지정할 수 있지만,
+    LabManager는 게시(publish) 후 `configure-labmanager.ps1`로 설정하거나 시크릿을 넣어 다시 빌드해야 합니다.
 - 저장소 원격(`origin`)은 스크립트가 없으면 자동 추가합니다.
   `https://github.com/ahbiyout-all/WinAutoUpdate.git`
 
 ### 사용법
 
 ```powershell
-# 패치 버전 올림: 0.1.26 -> 0.1.27
+# 패치 버전 올림: 0.1.30 -> 0.1.31
 .\scripts\github-push.ps1 -Bump patch -Message "Fix firewall rule cleanup"
 
 # 마이너/메이저
@@ -102,23 +112,20 @@ scripts\github-push.bat -Bump patch
 
 1. `git config user.name/user.email`을 저장소 로컬에 설정
    (`AhBiYout`, GitHub noreply 이메일 주소).
-2. `Directory.Build.props`의 버전을 올리고 파일을 갱신.
+2. `Directory.Build.props`와 Inno 2개·WiX 1개의 폴백 버전을 함께 올리고 파일을 갱신.
 3. `dotnet build UpdateAgent.sln -c Release`와 xUnit 테스트 실행.
 4. 커밋 대상 파일에서 비밀값/개인 이메일/로컬 절대 경로를 검사.
 5. `git add -A` 후 커밋(`Release v<version>`).
 6. `v<version>` 태그 생성.
 7. `origin`이 없으면 추가하고 현재 브랜치와 태그를 push.
 
-> 버전을 올린 뒤 아래 fallback 버전도 같은 값으로 갱신해야 합니다. CI가 불일치하면 릴리스 전에 중단합니다.
->
-> - `installer\InnoSetup\UpdateAgent.Agent.iss` — `#define AppVersion`
-> - `installer\InnoSetup\UpdateAgent.LabManager.iss` — `#define AppVersion`
-> - `installer\UpdateAgent.Agent.Installer\UpdateAgent.Agent.Installer.wixproj` — `ProductVersion`
->
+> 위 폴백 버전은 `github-push.ps1`이 자동으로 갱신합니다. 스크립트 없이 직접 올릴 때는
+> 네 파일을 모두 같은 값으로 바꿔야 하며, CI가 불일치를 검사합니다.
 > Inno `.iss` 파일은 반드시 UTF-8 BOM을 유지하세요.
 
 > `github-push.ps1`과 `github-push.bat`은 **저장소에 올라가지 않도록**
-> `.gitignore`에서 제외되어 있습니다. 릴리스 스크립트는 로컬에만 둡니다.
+> `.gitignore`에서 제외되어 있습니다. 새로 복제한 환경에는 없으므로 로컬에 직접 준비해야 합니다.
+> 저장소에 포함된 `scripts\publish.ps1`, `build-inno.ps1`, `build-msi.ps1`로 수동 릴리스도 가능합니다.
 
 ### DryRun
 
@@ -139,6 +146,9 @@ scripts\github-push.bat -Bump patch
 수동 실행에서는 버전을 입력받지 않습니다. 버전을 바꾸려면 `Directory.Build.props`를 수정하고
 커밋한 뒤 실행하세요. 태그 버전과 소스 버전이 다르면 워크플로가 중단됩니다.
 이미 같은 태그의 릴리스가 있으면 설치 파일을 덮어쓰고 릴리스 노트를 갱신합니다.
+수동 실행은 워크플로에서 태그를 따로 push하지 않고 `gh release create --target <커밋>`으로
+태그를 생성하므로, 같은 워크플로가 태그 이벤트로 중복 실행되지 않습니다.
+릴리스 노트의 '주요 변경 사항'은 이전 태그 이후 커밋 제목에서 자동 생성됩니다.
 
 ### 러너 구성
 
@@ -169,17 +179,19 @@ UpdateAgent.Agent-<버전>-x64.msi        (대안)
 | Agent | `UpdateAgent.Agent-Setup-<버전>-x64.exe` | `UpdateAgent.Agent-<버전>-x64.msi` |
 | LabManager | `UpdateAgent.LabManager-Setup-<버전>-x64.exe` | 없음 (현재 Inno만) |
 
-`GitHubReleaseChecker`의 자산 선택 순서:
+`GitHubReleaseChecker`는 제품 접두사(`UpdateAgent.Agent-` / `UpdateAgent.LabManager-`)가 붙은
+자산만 후보로 사용하고, 그 안에서 다음 순서로 선택합니다.
 
 1. 이름에 `Setup`이 포함된 `.exe` (Inno Setup)
 2. `.msi`
-3. 첫 번째 자산
+3. 해당 제품의 첫 번째 자산
 
-따라서 릴리스에 여러 파일이 있어도 Inno Setup 설치 파일이 자동 선택됩니다.
+다른 제품의 설치 파일은 절대 다운로드 링크로 제안하지 않습니다. 제품 자산이 없으면
+다운로드 버튼 없이 릴리스 페이지만 안내합니다.
 
 ## 6. 태그와 릴리스 규칙
 
-- 태그 형식: `v<Major.Minor.Build>` (예: `v0.1.27`)
+- 태그 형식: `v<Major.Minor.Build>` (예: `v0.1.31`)
 - 태그와 `Directory.Build.props` 버전은 **반드시 같아야** 합니다.
 - 같은 버전으로 다시 릴리스하지 않습니다. 수정은 Build 번호를 올립니다.
 - 릴리스 노트에는 최소한 아래를 포함합니다.
@@ -244,7 +256,8 @@ UpdateAgent.Agent-<버전>-x64.msi        (대안)
 - [ ] `dotnet test` 전체 통과
 - [ ] `scripts\build-inno.ps1`로 두 설치 파일 생성
 - [ ] `scripts\build-msi.ps1`로 MSI 생성(필요 시)
-- [ ] `artifacts\inno\build-info.json`의 `containsSecrets`가 `false`
+- [ ] `artifacts\inno\build-info.json`의 `containsSecrets`가 의도와 일치하는가
+      (시크릿 미설정 시 `false`, 위 3개 시크릿을 설정한 파일럿 빌드는 `true`이며 expected secrets 3개만 포함)
 - [ ] 릴리스 자산이 설치 파일만인가
 - [ ] SHA-256을 릴리스 노트에 기록했는가
 - [ ] 관리자 권한 VM/실 PC에서 설치·업그레이드·제거 확인

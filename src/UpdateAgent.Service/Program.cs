@@ -50,6 +50,8 @@ try
 
     builder.Services.Configure<AgentOptions>(
         builder.Configuration.GetSection(AgentOptions.SectionName));
+    // 원격 관리가 켜져 있는데 기본/샘플 토큰이면 시작을 중단한다(토큰은 명령줄에 넣지 않는다).
+    builder.Services.AddSingleton<IValidateOptions<AgentOptions>, AgentOptionsValidator>();
 
     builder.Services.AddWindowsService(options =>
     {

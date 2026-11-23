@@ -199,8 +199,8 @@ AgentTokenFile=agent-token.txt
   기본 URL(`http://labmanager:5080`)과 내장 토큰을 쓰고, **기존 설치**에서는 `agent.json`을 그대로
   유지합니다. 다른 DNS 이름/IP를 쓰는 실습실은 반드시 INI나 명령줄로 지정하세요.
 - **키별로 명령줄 값이 우선**합니다. 예를 들어 `/LabManagerUrl`만 명령줄로 주고 토큰 파일은 INI에서
-  읽을 수도 있습니다. 두 값 중 하나라도 명령줄에 있으면 토큰 파일이 없을 때 업그레이드 예외를
-  적용하지 않고 설치가 중단됩니다.
+  읽을 수도 있습니다. 업그레이드에서 토큰 파일을 지정하지 않으면 기존 `agent.json`의 토큰을 유지하고
+  요청된 URL만 반영합니다(내장 토큰은 사용하지 않습니다).
 - 업그레이드 시 토큰 파일을 삭제한 뒤 같은 INI로 다시 설치하면, **기존 설치가 감지되고** 기존
   `agent.json`이 유효할 때만 설정을 유지합니다. 설치 이력이 없거나 `agent.json`이 손상되었으면
   토큰 파일 누락으로 설치가 중단됩니다.
@@ -224,7 +224,7 @@ AgentTokenFile=agent-token.txt
 |---|---|---|---|
 | Agent | 첫 설치 | 없음 | `http://labmanager:5080` + 내장 `agent-token.txt` 첫 줄(v0.1.30 이상) |
 | Agent | 첫 설치 | 있음(`/AgentTokenFile` 또는 INI) | 외부 토큰 우선 |
-| Agent | 업데이트 | 없음 | 내장 토큰 무시, 기존 `agent.json` 유지 |
+| Agent | 업데이트 | 없음 | 내장 토큰 무시, 기존 토큰 유지 + 요청된 URL 반영 |
 | Agent | 업데이트 | 있음 | 외부 토큰으로 교체 |
 | LabManager | 첫 설치 | 해당 없음 | 내장 두 줄(1행 AdminToken, 2행 AgentToken)을 `appsettings.json`에 반영 |
 | LabManager | 업데이트 | 해당 없음 | 내장 토큰 무시, 기존 `appsettings.json` 유지 |
@@ -243,7 +243,8 @@ AgentTokenFile=agent-token.txt
 PC를 변경하지 않고 설치가 중단됩니다(`/VERYSILENT`에서는 오류 창이 표시되지 않으므로
 `%TEMP%\Setup Log <날짜>.txt`를 확인하세요).
 
-- INI 또는 명령줄 값이 없거나 한쪽만 있음, INI가 BOM 포함/잘못된 형식
+- 업그레이드에서 유효한 기존 설정이 없는데 INI/명령줄 값이 없거나 한쪽만 있음,
+  첫 설치에서 INI가 BOM 포함/잘못된 형식(명령줄 키가 있어도 중단)
 - `LabManagerUrl`이 절대 `http`/`https` URL이 아님
 - 토큰 파일이 없거나 비었거나 샘플/기본 토큰임(첫 설치에서 내장 토큰도 동일하게 검사)
 - `agent.json` 생성/ACL 제한 실패, 방화벽 규칙 등록 실패

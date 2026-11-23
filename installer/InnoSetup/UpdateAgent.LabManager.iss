@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.30"
+  #define AppVersion "0.1.31"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -118,6 +118,7 @@ var
   LabManagerConfigRestoreNeeded: Boolean;
   FirewallPort: String;
   LaunchSkippedForDefaultTokens: Boolean;
+  RunHiddenStarted: Boolean;
   StepNoticePage: TOutputProgressWizardPage;
 
 const
@@ -135,11 +136,18 @@ begin
   StepNoticePage := CreateOutputProgressPage('UpdateAgent LabManager 설치', '단계 안내');
 end;
 
+function BoolText(const Value: Boolean): String;
+begin
+  if Value then Result := 'true' else Result := 'false';
+end;
+
 function RunHidden(const FileName, Params: String): Integer;
 var
   Code: Integer;
 begin
-  Exec(FileName, Params, '', SW_HIDE, ewWaitUntilTerminated, Code);
+  { Exec가 실패하면 Code는 0으로 남으므로 별도로 성공 여부를 기록한다. }
+  RunHiddenStarted := Exec(FileName, Params, '', SW_HIDE, ewWaitUntilTerminated, Code);
+  if not RunHiddenStarted then Code := -1;
   Result := Code;
 end;
 
@@ -300,6 +308,44 @@ begin
       (Copy(UpperToken, Length(UpperToken) - 20, 21) = '-REPLACE-BEFORE-PILOT');
 end;
 
+{ 레지스트리 흔적이 남아 있어도 실제 설정이 없거나 샘플 토큰이면 첫 설치로 취급한다.
+  이 경우에만 내장 토큰을 사용하고, 실제 토큰이 없으면 무인 설치도 중단한다. }
+function HasUsableLabManagerConfig: Boolean;
+var
+  Lines: TStringList;
+  I: Integer;
+  LowerLine: String;
+  HasAdmin, HasAgent: Boolean;
+begin
+  Result := False;
+  if LabManagerConfigFile = '' then
+    LabManagerConfigFile := ExpandConstant('{app}\appsettings.json');
+  if not FileExists(LabManagerConfigFile) then Exit;
+
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(LabManagerConfigFile);
+    HasAdmin := False;
+    HasAgent := False;
+    for I := 0 to Lines.Count - 1 do
+    begin
+      LowerLine := Lowercase(Trim(Lines.Strings[I]));
+      if (Pos('"admintoken"', LowerLine) > 0) or
+         (Pos('"agenttoken"', LowerLine) > 0) then
+      begin
+        if (Pos('change-me-', LowerLine) > 0) or
+           ((Pos('sample-', LowerLine) > 0) and (Pos('-replace-before-pilot', LowerLine) > 0)) then
+          Exit;
+        if Pos('"admintoken"', LowerLine) > 0 then HasAdmin := True;
+        if Pos('"agenttoken"', LowerLine) > 0 then HasAgent := True;
+      end;
+    end;
+    Result := HasAdmin and HasAgent;
+  finally
+    Lines.Free;
+  end;
+end;
+
 function NormalizeTokenLine(const Value: String): String;
 var
   S: String;
@@ -407,10 +453,10 @@ var
 begin
   Result := '';
 
-  { 이 시점에는 app 상수가 초기화되어 있다. 레지스트리만 남은 재이미징 PC에서도
-    기존 appsettings.json이 있으면 업데이트로 취급해 내장 토큰을 건너뛴다. }
-  FirstInstall := (OldInnoUninstall = '') and
-    (not FileExists(ExpandConstant('{app}\appsettings.json')));
+  { 이 시점에는 app 상수가 초기화되어 있다. 첫 설치 여부는 레지스트리가 아니라
+    사용 가능한 appsettings.json(실제 토큰 두 개) 존재 여부로 판단한다.
+    레지스트리만 남은 재이미징 PC에서도 설정이 없으면 첫 설치로 취급해 fail closed한다. }
+  FirstInstall := not HasUsableLabManagerConfig;
 
   { 어떤 것도 지우기 전에 내장 토큰을 검증한다. 업데이트에서는 이 함수가 아무 것도 하지 않는다. }
   Result := ValidateBundledLabManagerTokens;
@@ -582,7 +628,7 @@ begin
     ' -Enabled True -Profile Domain,Private -Group ' + PsLiteral(FirewallGroup) +
     ' -Description ''UpdateAgent LabManager (versioned rule)'' -ErrorAction Stop | Out-Null';
 
-  if not SaveStringsToUTF8File(ScriptPath, Lines, False) then
+  if not SaveStringsToUTF8File(ScriptPath, Lines, True) then
   begin
     Log('Could not create the firewall setup script: ' + ScriptPath);
     Result := False;
@@ -592,9 +638,10 @@ begin
   PowerShellExe := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
   Code := RunHidden(PowerShellExe,
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ScriptPath + '"');
-  Result := Code = 0;
+  Result := RunHiddenStarted and (Code = 0);
   if not Result then
-    Log('Failed to configure LabManager firewall rules (code ' + IntToStr(Code) + ')');
+    Log('Failed to configure LabManager firewall rules (started=' +
+      BoolText(RunHiddenStarted) + ', code ' + IntToStr(Code) + ')');
 end;
 
 procedure RemoveFirewallRules;
@@ -607,7 +654,7 @@ begin
   Lines[0] := '$ErrorActionPreference = ''SilentlyContinue''';
   Lines[1] := 'Get-NetFirewallRule -Group ' + PsLiteral(FirewallGroup) +
     ' | Remove-NetFirewallRule -ErrorAction SilentlyContinue';
-  if not SaveStringsToUTF8File(ScriptPath, Lines, False) then Exit;
+  if not SaveStringsToUTF8File(ScriptPath, Lines, True) then Exit;
   PowerShellExe := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
   RunHidden(PowerShellExe,
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ScriptPath + '"');

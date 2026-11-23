@@ -114,7 +114,24 @@ public sealed class AdminTokenStoreTests : IDisposable
         Assert.True(store.HasRuntimeOverride);
     }
 
-    private AdminTokenStore CreateStore(string configuredToken, bool allowDefaultTokens = false)
+    // 실제 배포 경로(icacls ACL 제한)에서도 재시작 후 override를 읽을 수 있어야 한다.
+    // 현재 사용자 SID가 ACL에서 빠지면 UAC 필터 토큰으로 읽지 못해 이 테스트가 실패한다.
+    [Fact]
+    public async Task SetTokenAsync_WithAclRestriction_PersistsAcrossRestart()
+    {
+        var store = CreateStore(UpdateAgentConstants.SampleAdminToken, restrictAcl: true);
+
+        await store.SetTokenAsync("acl-restricted-admin-secret");
+
+        var restarted = CreateStore(UpdateAgentConstants.SampleAdminToken, restrictAcl: true);
+        Assert.Equal("acl-restricted-admin-secret", restarted.CurrentToken);
+        Assert.True(restarted.HasRuntimeOverride);
+    }
+
+    private AdminTokenStore CreateStore(
+        string configuredToken,
+        bool allowDefaultTokens = false,
+        bool restrictAcl = false)
     {
         var options = new LabManagerOptions
         {
@@ -123,7 +140,8 @@ public sealed class AdminTokenStoreTests : IDisposable
             AllowDefaultTokens = allowDefaultTokens,
         };
         var monitor = new TestOptionsMonitor(options);
-        return new AdminTokenStore(monitor, _overridePath, NullLogger<AdminTokenStore>.Instance);
+        return new AdminTokenStore(
+            monitor, _overridePath, NullLogger<AdminTokenStore>.Instance, restrictAcl);
     }
 
     public void Dispose()
