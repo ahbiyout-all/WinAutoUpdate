@@ -5,6 +5,46 @@
 
 ---
 
+## 2026-11-23 — 파일럿 1차 설치 문제 대응 (v0.1.30)
+
+### 1. 관리자 토큰 오류
+
+교사 PC 첫 설치 후 대시보드에서 `관리자 토큰이 올바르지 않습니다.`가 표시됐습니다.
+서버에 설치된 `appsettings.json`의 `LabManager:AdminToken`으로 `/api/admin/token`을 호출하면
+`200`이 반환되고, `LabManager:AgentToken`으로 호출하면 `401`이 반환됐습니다.
+즉 설치·토큰 반영은 정상이고 대시보드에 **에이전트 토큰**을 입력한 것이 원인입니다.
+내장 토큰 파일은 1행이 AdminToken, 2행이 AgentToken이며 서버에도 같은 순서로 반영됩니다.
+코드 변경 없이 `LabManager:AdminToken` 값을 입력하면 해결됩니다.
+
+### 2. Agent 설치 시 LabManagerUrl 누락
+
+학생 PC 설치 exe를 아무 인자 없이 실행하면 아래 오류로 중단됐습니다.
+
+```text
+LabManagerUrl이 없습니다. agent-install.ini 또는 /LabManagerUrl=http://labmanager:5080 을 지정하세요.
+```
+
+ v0.1.30부터 **첫 설치**에서 설정 파일·명령줄이 모두 없으면 `http://labmanager:5080`을 기본값으로
+사용합니다. 외부 INI/명령줄 값은 항상 우선하고, BOM이 깨진 INI가 있으면 기본값으로 덮지 않고
+기존 오류를 유지합니다. 업그레이드는 여전히 기존 `agent.json`을 유지합니다.
+`docs/INSTALLER.md`, `docs/PILOT.md`에 기본값과 우선순위를 반영했습니다.
+
+### 검증 및 산출물
+
+- 로컬 Inno 컴파일 성공, 테스트 183개 통과, `.iss` UTF-8 BOM 유지.
+- CI run `45164346126` 성공, 첫 설치 토큰 내장 메시지와 `containsSecrets` 검증 확인.
+
+| 파일 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.30-x64.exe` | `41f3192fa4d4e00ffde9653c37ea41f0be5f9b2228f57274a5a8671393aa8bda` |
+| `UpdateAgent.LabManager-Setup-0.1.30-x64.exe` | `19c6cec3aa84fb7f978d3d79b20243e6fd3d97326dd09c7d72eaca91cf14ecf9` |
+| `UpdateAgent.Agent-0.1.30-x64.msi` | `7bc4b38f33cf14d0d7bfb49bad427dddb7d5fe3bda13da771acbe90637d25d0e` |
+
+- 릴리스: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.30
+- 워크플로: https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/45164346126
+
+---
+
 ## 2026-11-23 — LabManager 설치 관리자 초기화 오류 수정 (v0.1.29)
 
 ### 증상
