@@ -109,6 +109,14 @@ scripts\github-push.bat -Bump patch
 6. `v<version>` 태그 생성.
 7. `origin`이 없으면 추가하고 현재 브랜치와 태그를 push.
 
+> 버전을 올린 뒤 아래 fallback 버전도 같은 값으로 갱신해야 합니다. CI가 불일치하면 릴리스 전에 중단합니다.
+>
+> - `installer\InnoSetup\UpdateAgent.Agent.iss` — `#define AppVersion`
+> - `installer\InnoSetup\UpdateAgent.LabManager.iss` — `#define AppVersion`
+> - `installer\UpdateAgent.Agent.Installer\UpdateAgent.Agent.Installer.wixproj` — `ProductVersion`
+>
+> Inno `.iss` 파일은 반드시 UTF-8 BOM을 유지하세요.
+
 > `github-push.ps1`과 `github-push.bat`은 **저장소에 올라가지 않도록**
 > `.gitignore`에서 제외되어 있습니다. 릴리스 스크립트는 로컬에만 둡니다.
 

@@ -5,6 +5,53 @@
 
 ---
 
+## 2026-11-23 — 파일럿 토큰 secret 적용 릴리스 (v0.1.28)
+
+### 배경
+
+v0.1.27까지 공개 자산에는 실제 토큰이 내장되지 않아 첫 설치에서 외부 토큰 파일이 필요했습니다.
+저장소 Actions secret 3개를 등록해 설치 exe에 **첫 설치 전용 토큰**을 내장했습니다.
+
+| Secret | 설정 값 |
+|---|---|
+| `UPDATEAGENT_AGENT_TOKEN` | 학생 PC용 에이전트 토큰 |
+| `UPDATEAGENT_LABMANAGER_AGENT_TOKEN` | 위와 동일한 값 |
+| `UPDATEAGENT_LABMANAGER_ADMIN_TOKEN` | 교사용 관리자 토큰(별도 값) |
+
+`gh secret set`으로 등록하고 `gh secret list`로 이름/갱신 시각을 확인했습니다.
+빌드 로그에 `Embedded first-install ...`가 표시되고 `containsSecrets` 검증을 통과했습니다.
+
+### CI 실패와 수정
+
+| Run | 결과 | 원인/조치 |
+|---|---|---|
+| `45151411468` | 실패 | `.iss` 2개의 fallback `AppVersion`이 `0.1.27`로 남아 있음 → `0.1.28`로 수정(UTF-8 BOM 유지) |
+| `45152050353` | 실패 | WiX `.wixproj` fallback `ProductVersion`이 `0.1.27`로 남아 있음 → `0.1.28`로 수정 |
+| `45154021676` | 성공 | 로컬 Inno/MSI 사전 빌드 통과 후 전체 단계 성공 |
+
+두 실패 모두 릴리스 자산 업로드 전에 발생해 v0.1.28 자산은 생성되지 않았습니다.
+따라서 `v0.1.28` 태그를 수정 커밋 `d2302a2`로 이동(force push)한 뒤 워크플로를 다시 실행했습니다.
+
+### 산출물
+
+| 파일 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.28-x64.exe` | `bd8f93e4fb1fe584f735ae0c72a38aa683965a9599be5beeb7a231f195bdec1b` |
+| `UpdateAgent.LabManager-Setup-0.1.28-x64.exe` | `b09694009ed6ceba0c2a62a5d13722fd622ae09fefc659854fd04fff2c291d5d` |
+| `UpdateAgent.Agent-0.1.28-x64.msi` | `ee67483b80cceb8d9d9579e2d669ebbc405626a107008deec598af56e0f7e517` |
+
+다운로드한 자산의 해시가 릴리스 노트와 일치함을 확인했습니다.
+
+- 릴리스: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.28
+- 성공 워크플로: https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/45154021676
+
+### 후속 과제
+
+릴리스 스크립트가 `Directory.Build.props`만 갱신하므로 `.iss`/`.wixproj`의 fallback 버전은 수동으로 맞춰야 합니다.
+`docs/RELEASE.md`에 해당 절차를 명시했습니다.
+
+---
+
 ## 2026-11-22 — 자아성찰 10회 반복 심층 감사 및 결함 수정 (v0.1.27)
 
 ### 배경
