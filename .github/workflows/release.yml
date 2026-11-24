@@ -70,7 +70,7 @@ jobs:
           }
           else {
             # 수동 실행에서 이미 같은 태그가 다른 커밋을 가리키면 잘못된 릴리스를 막는다.
-            $existingCommit = (& git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>$null).Trim()
+            $existingCommit = (@(& git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>$null) -join '').Trim()
             # rev-parse가 1을 반환하는 것은 '태그 없음'이며 정상 경로다. 단계 전체가 실패하지 않도록 초기화한다.
             $global:LASTEXITCODE = 0
             if (-not [string]::IsNullOrWhiteSpace($existingCommit) -and
@@ -296,7 +296,7 @@ jobs:
 
           # 워크플로에서 태그를 직접 push하면 태그 이벤트가 같은 워크플로를 중복 실행한다.
           # 수동 실행에서는 gh release create가 --target 커밋에 태그를 만들도록 한다.
-          $tagCommit = (& git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>$null).Trim()
+          $tagCommit = (@(& git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>$null) -join '').Trim()
           $global:LASTEXITCODE = 0
           $verifyTag = $false
           if (-not [string]::IsNullOrWhiteSpace($tagCommit)) {
