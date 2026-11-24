@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.36"
+  #define AppVersion "0.1.37"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -466,6 +466,25 @@ begin
   end;
 end;
 
+{ 대소문자를 구분하지 않는 부분 문자열 검색. 원본 텍스트의 인덱스를 그대로 반환하므로
+  값에 유니코드 문자가 있어도 위치가 밀리지 않는다. HasUsableLabManagerConfig가
+  소문자로 키를 찾는 것과 같은 규칙을 써야 교체 경로가 일관된다. }
+function FindTextNoCase(const Text, Pattern: String): Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  if (Pattern = '') or (Length(Text) < Length(Pattern)) then Exit;
+  for I := 1 to Length(Text) - Length(Pattern) + 1 do
+  begin
+    if CompareText(Copy(Text, I, Length(Pattern)), Pattern) = 0 then
+    begin
+      Result := I;
+      Exit;
+    end;
+  end;
+end;
+
 { JSON 문자열 속성을 찾아 값만 교체한다. 첫 설치의 자리표시자 교체와 업데이트의 실제 토큰 교체에 모두 쓴다. }
 function SetJsonStringValueAnywhere(var Text: String; const Key, Value: String): Boolean;
 var
@@ -475,7 +494,7 @@ var
 begin
   Result := False;
   KeyPattern := '"' + Key + '"';
-  P := Pos(KeyPattern, Text);
+  P := FindTextNoCase(Text, KeyPattern);
   if P = 0 then Exit;
 
   ColonPos := P + Length(KeyPattern);
@@ -693,10 +712,18 @@ begin
   { 이전 설치 흔적이 남은 런타임 관리자 토큰이 있으면 내장 토큰이 우선되도록 제거한다.
     삭제에 실패하면 새 내장 토큰이 런타임 재정의에 가려지므로 설치를 중단한다. }
   RuntimeTokenPath := ExpandConstant('{localappdata}\UpdateAgent\LabManager\runtime-admin-token.json');
-  if FileExists(RuntimeTokenPath) and (not DeleteFile(RuntimeTokenPath)) then Exit;
+  if FileExists(RuntimeTokenPath) and (not DeleteFile(RuntimeTokenPath)) then
+  begin
+    Log('Could not remove runtime admin token override during first install: ' + RuntimeTokenPath);
+    Exit;
+  end;
 
   Path := ExpandConstant('{app}\appsettings.json');
-  if not LoadStringsFromFile(Path, Lines) then Exit;
+  if not LoadStringsFromFile(Path, Lines) then
+  begin
+    Log('Could not read appsettings.json during first install: ' + Path);
+    Exit;
+  end;
 
   Text := '';
   for I := 0 to GetArrayLength(Lines) - 1 do
@@ -710,8 +737,12 @@ begin
   SetArrayLength(Lines, 1);
   Lines[0] := Text;
   Result := SaveStringsToUTF8File(Path, Lines, False);
-  if Result then
-    Result := RestrictLabManagerConfigAcl(Path);
+  if not Result then
+  begin
+    Log('Could not write appsettings.json during first install: ' + Path);
+    Exit;
+  end;
+  Result := RestrictLabManagerConfigAcl(Path);
 end;
 
 { 업데이트에서 교체를 선택한 경우에만 실제 토큰 두 개를 설정에 반영한다. }
@@ -731,23 +762,43 @@ begin
 
   { 이전 관리자 토큰의 런타임 재정의가 남아 있으면 새 토큰이 무시된다. }
   RuntimeTokenPath := ExpandConstant('{localappdata}\UpdateAgent\LabManager\runtime-admin-token.json');
-  if FileExists(RuntimeTokenPath) and (not DeleteFile(RuntimeTokenPath)) then Exit;
+  if FileExists(RuntimeTokenPath) and (not DeleteFile(RuntimeTokenPath)) then
+  begin
+    Log('Could not remove runtime admin token override during replacement: ' + RuntimeTokenPath);
+    Exit;
+  end;
 
   Path := ExpandConstant('{app}\appsettings.json');
-  if not LoadStringsFromFile(Path, Lines) then Exit;
+  if not LoadStringsFromFile(Path, Lines) then
+  begin
+    Log('Could not read appsettings.json during token replacement: ' + Path);
+    Exit;
+  end;
 
   Text := '';
   for I := 0 to GetArrayLength(Lines) - 1 do
     Text := Text + Lines[I];
 
-  if (not SetJsonStringValueAnywhere(Text, 'AdminToken', ExternalAdminToken)) or
-     (not SetJsonStringValueAnywhere(Text, 'AgentToken', ExternalAgentToken)) then Exit;
+  if not SetJsonStringValueAnywhere(Text, 'AdminToken', ExternalAdminToken) then
+  begin
+    Log('AdminToken key was not found or is malformed during replacement: ' + Path);
+    Exit;
+  end;
+  if not SetJsonStringValueAnywhere(Text, 'AgentToken', ExternalAgentToken) then
+  begin
+    Log('AgentToken key was not found or is malformed during replacement: ' + Path);
+    Exit;
+  end;
 
   SetArrayLength(Lines, 1);
   Lines[0] := Text;
   Result := SaveStringsToUTF8File(Path, Lines, False);
-  if Result then
-    Result := RestrictLabManagerConfigAcl(Path);
+  if not Result then
+  begin
+    Log('Could not write appsettings.json during token replacement: ' + Path);
+    Exit;
+  end;
+  Result := RestrictLabManagerConfigAcl(Path);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -768,7 +819,7 @@ begin
     (TokenChoicePage <> nil) and TokenChoicePage.Values[1];
 
   { 어떤 것도 지우기 전에 토큰을 검증한다. 첫 설치는 내장 토큰,
-    업데이트의 교체 선택은 외부 토큰 파일만 사용한다. }
+    업데이트의 교체 선택은 /LabManagerTokenFile= 외부 파일을 쓰고, 없으면 내장 토큰을 쓴다. }
   Result := ValidateBundledLabManagerTokens;
   if Result <> '' then Exit;
   Result := ValidateReplacementLabManagerTokens;

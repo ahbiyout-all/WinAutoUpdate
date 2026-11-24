@@ -446,3 +446,4 @@ Invoke-WebRequest "http://127.0.0.1:5080/api/admin/audit" -Headers @{ "X-Admin-T
   브라우저 앱 모드 주소 검증(`v0.1.35`).
 - 2026-11-24: 순수 DLL 5회 반복 감사 — Guard 규칙 보강과 공유 적용, Core UTC/정책/ID 일원화,
   LabManager 체크인 검증·ack·캐시 정리, UI 실패 처리·주소/창 크기 검증, 문서·패키징 보강(`v0.1.36`).
+- 2026-11-24: LabManager 토큰 교체 경로 대소문자 무관 키 검색과 단계별 진단 로그 보강(`v0.1.37`).

@@ -5,6 +5,51 @@
 
 ---
 
+## 2026-11-24 LabManager 토큰 교체 설치 실패 분석 및 v0.1.37
+
+### 배경
+
+v0.1.36 LabManager Setup에서 기존 설치를 업데이트하며 토큰 선택 화면의
+"기존 토큰을 삭제하고 새 토큰 기록"(내장 토큰)을 선택하면
+`Runtime error ... 새 LabManager 토큰을 설정에 반영하지 못해 설치를 중단합니다.`가 발생했습니다.
+
+### 자아성찰 감사 결과
+
+| 회차 | 영역 | 확인 내용 | 조치 |
+|---|---|---|---|
+| ① | 실패 지점 추적 | 오류는 `UpdateAgent.LabManager.iss`의 `ApplyReplacementLabManagerTokens` 반환 `False` | 단계별 로그 추가 |
+| ② | 키 검색 규칙 | `HasUsableLabManagerConfig`는 소문자 변환 후 `"admintoken"`을 찾는데, `SetJsonStringValueAnywhere`는 원본에서 대소문자를 구분해 `"AdminToken"`을 찾음 | `FindTextNoCase` 도입(원본 인덱스 유지) |
+| ③ | 주석 정합성 | `PrepareToInstall` 주석은 "교체는 외부 토큰 파일만 사용"이라 했지만 코드는 없으면 내장 토큰을 사용 | 주석 정정 |
+| ④ | 첫 설치 경로 | 같은 실패 지점에 진단 로그가 없어 원인 추적 불가 | 대칭 로그 추가 |
+| ⑤ | 패키징/버전 | 4개 버전 소스와 문서 예제가 v0.1.36으로 고정 | v0.1.37로 일괄 상향 |
+
+### 수정
+
+- `FindTextNoCase`: `CompareText`로 원본 인덱스를 유지하며 대소문자 무관 검색.
+  토큰 값에 유니코드가 있어도 위치가 밀리지 않음.
+- `SetJsonStringValueAnywhere`: 위 함수를 사용해 `AdminToken`/`AgentToken` 키를 찾음.
+- 토큰 반영 함수 2곳에 단계별 `Log` 추가(런타임 재정의 삭제, 설정 읽기, 키 누락, 쓰기 실패).
+
+### 검증
+
+- `dotnet build UpdateAgent.sln -c Release`: 경고 0, 오류 0.
+- `dotnet test ... -c Release --no-build`: **244개 통과**, 실패 0, 건너뜀 0.
+- `scripts\publish.ps1`, `scripts\build-inno.ps1 -NoPublish`, `scripts\build-msi.ps1`: 성공.
+  Inno Setup 6.7.1에서 `CompareText` 지원 확인.
+- 버전 4개 소스와 문서 예제: `0.1.37` 일치.
+
+로컬 산출물 SHA-256(게시 전 상태, 시크릿 없는 빌드):
+
+| 파일 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.37-x64.exe` | `eb347ef42ec10c8c873885bee6c2703969562ba384203abd49230d77cea8ee04` |
+| `UpdateAgent.LabManager-Setup-0.1.37-x64.exe` | `eb8c2faa0ae8272669b9272546b449235f5f2dc108114e68c905013280ac0aa9` |
+| `UpdateAgent.Agent-0.1.37-x64.msi` | `aefcd7c3343ac220d2f7e12231bfce5db0b72d0e098c1c0700057899612dc9e0` |
+
+로그 확보 및 재현 확인 전이므로 게시 여부는 결정하지 않습니다.
+
+---
+
 ## 2026-11-24 순수 DLL 5회 반복 감사 및 v0.1.36
 
 ### 배경
