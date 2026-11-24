@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.31"
+  #define AppVersion "0.1.32"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -120,6 +120,12 @@ var
   LaunchSkippedForDefaultTokens: Boolean;
   RunHiddenStarted: Boolean;
   StepNoticePage: TOutputProgressWizardPage;
+  TokenChoicePage: TInputOptionWizardPage;
+  HasExistingTokenForChoice: Boolean;
+  ReplaceExistingToken: Boolean;
+  ExternalTokenFile: String;
+  ExternalAdminToken: String;
+  ExternalAgentToken: String;
 
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
@@ -127,6 +133,7 @@ const
   SampleAdminToken = 'sample-admin-token-replace-before-pilot';
   SampleAgentToken = 'sample-agent-token-replace-before-pilot';
   BundledTokenFileName = 'labmanager-token.txt';
+  ExternalTokenSwitch = '/LabManagerTokenFile=';
   NoticeSeconds = {#NoticeDelaySeconds};
 
 function ReplaceAllText(const S, OldPat, NewPat: String): String; forward;
@@ -134,6 +141,25 @@ function ReplaceAllText(const S, OldPat, NewPat: String): String; forward;
 procedure InitializeWizard;
 begin
   StepNoticePage := CreateOutputProgressPage('UpdateAgent LabManager 설치', '단계 안내');
+
+  { 기존 설치가 있을 때만 토큰 처리 방법을 묻는다. 무인 설치에서는 기본값(재사용)을 유지한다. }
+  HasExistingTokenForChoice := OldInnoUninstall <> '';
+  TokenChoicePage := CreateInputOptionPage(wpWelcome,
+    '기존 토큰 처리',
+    '기존 LabManager 토큰을 어떻게 할까요?',
+    '기존 관리자/에이전트 토큰을 그대로 재사용하거나, 새 두 줄 토큰 파일로 교체할 수 있습니다. ' +
+      '교체를 선택하면 /LabManagerTokenFile=<파일>이 필요합니다.',
+    True, False);
+  TokenChoicePage.Add('기존 토큰을 백업해 재사용 (권장)');
+  TokenChoicePage.Add('기존 토큰을 삭제하고 새 토큰 기록');
+  TokenChoicePage.Values[0] := True;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if (TokenChoicePage <> nil) and (PageID = TokenChoicePage.ID) then
+    Result := WizardSilent or (not HasExistingTokenForChoice);
 end;
 
 function BoolText(const Value: Boolean): String;
@@ -356,6 +382,154 @@ begin
   Result := Trim(S);
 end;
 
+function JsonEscape(const Value: String): String;
+var
+  I: Integer;
+  Ch: Char;
+begin
+  Result := '';
+  for I := 1 to Length(Value) do
+  begin
+    Ch := Value[I];
+    if Ch = '\' then
+      Result := Result + '\\'
+    else if Ch = '"' then
+      Result := Result + '\"'
+    else if Ch = #9 then
+      Result := Result + '\t'
+    else if Ch = #10 then
+      Result := Result + '\n'
+    else if Ch = #13 then
+      Result := Result + '\r'
+    else
+      Result := Result + Ch;
+  end;
+end;
+
+{ JSON 문자열 속성을 찾아 값만 교체한다. 첫 설치의 자리표시자 교체와 업데이트의 실제 토큰 교체에 모두 쓴다. }
+function SetJsonStringValueAnywhere(var Text: String; const Key, Value: String): Boolean;
+var
+  P, ColonPos, ValueEnd: Integer;
+  KeyPattern, NewValue: String;
+  Escaped: Boolean;
+begin
+  Result := False;
+  KeyPattern := '"' + Key + '"';
+  P := Pos(KeyPattern, Text);
+  if P = 0 then Exit;
+
+  ColonPos := P + Length(KeyPattern);
+  while (ColonPos <= Length(Text)) and (Text[ColonPos] <> ':') do Inc(ColonPos);
+  if ColonPos > Length(Text) then Exit;
+  Inc(ColonPos);
+  while (ColonPos <= Length(Text)) and
+        (Text[ColonPos] in [' ', #9, #13, #10]) do Inc(ColonPos);
+  if (ColonPos > Length(Text)) or (Text[ColonPos] <> '"') then Exit;
+
+  ValueEnd := ColonPos + 1;
+  Escaped := False;
+  while ValueEnd <= Length(Text) do
+  begin
+    if Escaped then Escaped := False
+    else if Text[ValueEnd] = '\' then Escaped := True
+    else if Text[ValueEnd] = '"' then Break;
+    Inc(ValueEnd);
+  end;
+  if ValueEnd > Length(Text) then Exit;
+
+  NewValue := '"' + JsonEscape(Value) + '"';
+  Text := Copy(Text, 1, ColonPos - 1) + NewValue +
+    Copy(Text, ValueEnd + 1, Length(Text) - ValueEnd);
+  Result := True;
+end;
+
+function CmdParamValue(const Prefix: String): String;
+var
+  I: Integer;
+  Param, UpperPrefix: String;
+begin
+  Result := '';
+  UpperPrefix := Uppercase(Prefix);
+  for I := 1 to ParamCount do
+  begin
+    Param := RemoveQuotes(ParamStr(I));
+    if Pos(UpperPrefix, Uppercase(Param)) = 1 then
+    begin
+      Result := Copy(Param, Length(Prefix) + 1, Length(Param));
+      Exit;
+    end;
+  end;
+end;
+
+{ 상대 경로는 설치 exe가 있는 폴더 기준으로 해석한다. }
+function ResolveInstallTokenFile(const Value: String): String;
+var
+  TokenFile: String;
+begin
+  TokenFile := Trim(RemoveQuotes(Value));
+  if Copy(TokenFile, 1, 2) = '.\' then
+    TokenFile := Copy(TokenFile, 3, Length(TokenFile) - 2);
+  if Copy(TokenFile, 1, 2) = '//' then
+    TokenFile := '\\' + Copy(TokenFile, 3, Length(TokenFile) - 2);
+
+  if (Pos(':', TokenFile) = 2) or (Copy(TokenFile, 1, 2) = '\\') then
+    Result := TokenFile
+  else
+    Result := ExpandConstant('{src}\' + TokenFile);
+end;
+
+{ 업데이트에서 토큰 교체를 선택한 경우에만 외부 두 줄 파일을 읽는다.
+  내장 토큰은 첫 설치 전용이므로 여기서는 절대 사용하지 않는다. }
+function ValidateReplacementLabManagerTokens: String;
+var
+  Lines: TArrayOfString;
+  AdminToken, AgentToken: String;
+begin
+  Result := '';
+  ExternalAdminToken := '';
+  ExternalAgentToken := '';
+  if (not ReplaceExistingToken) or FirstInstall then Exit;
+
+  ExternalTokenFile := Trim(CmdParamValue(ExternalTokenSwitch));
+  if ExternalTokenFile = '' then
+  begin
+    Result := '기존 토큰을 삭제하고 새로 기록하려면 /LabManagerTokenFile=<파일>을 지정하세요. ' +
+      '파일 첫 줄은 AdminToken, 둘째 줄은 AgentToken입니다.';
+    Exit;
+  end;
+  ExternalTokenFile := ResolveInstallTokenFile(ExternalTokenFile);
+  if not FileExists(ExternalTokenFile) then
+  begin
+    Result := '새 LabManager 토큰 파일을 읽을 수 없습니다: ' + ExternalTokenFile;
+    Exit;
+  end;
+  if (not LoadStringsFromFile(ExternalTokenFile, Lines)) or
+     (GetArrayLength(Lines) < 2) then
+  begin
+    Result := '새 LabManager 토큰 파일에는 AdminToken과 AgentToken 두 줄이 필요합니다: ' +
+      ExternalTokenFile;
+    Exit;
+  end;
+
+  AdminToken := NormalizeTokenLine(Lines[0]);
+  AgentToken := NormalizeTokenLine(Lines[1]);
+  if (AdminToken = '') or (AgentToken = '') then
+  begin
+    Result := '새 LabManager 토큰 파일에 빈 값이 있습니다: ' + ExternalTokenFile;
+    Exit;
+  end;
+  if IsPlaceholderToken(AdminToken) or IsPlaceholderToken(AgentToken) then
+  begin
+    Result := '새 LabManager 토큰 파일에 기본/샘플 값이 있습니다. 실제 토큰으로 교체하세요: ' +
+      ExternalTokenFile;
+    Exit;
+  end;
+
+  ExternalAdminToken := AdminToken;
+  ExternalAgentToken := AgentToken;
+  Log('Using external replacement LabManager token file (values hidden).');
+end;
+
 { 업데이트에서는 내장 토큰을 읽지 않는다. 첫 설치에서만 임시 파일을 추출해 검증한다. }
 function ValidateBundledLabManagerTokens: String;
 var
@@ -446,6 +620,40 @@ begin
   Result := SaveStringsToUTF8File(Path, Lines, False);
 end;
 
+{ 업데이트에서 교체를 선택한 경우에만 실제 토큰 두 개를 설정에 반영한다. }
+function ApplyReplacementLabManagerTokens: Boolean;
+var
+  Path, RuntimeTokenPath, Text: String;
+  Lines: TArrayOfString;
+  I: Integer;
+begin
+  Result := False;
+  if FirstInstall or (not ReplaceExistingToken) or
+     (ExternalAdminToken = '') or (ExternalAgentToken = '') then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  { 이전 관리자 토큰의 런타임 재정의가 남아 있으면 새 토큰이 무시된다. }
+  RuntimeTokenPath := ExpandConstant('{localappdata}\UpdateAgent\LabManager\runtime-admin-token.json');
+  if FileExists(RuntimeTokenPath) and (not DeleteFile(RuntimeTokenPath)) then Exit;
+
+  Path := ExpandConstant('{app}\appsettings.json');
+  if not LoadStringsFromFile(Path, Lines) then Exit;
+
+  Text := '';
+  for I := 0 to GetArrayLength(Lines) - 1 do
+    Text := Text + Lines[I];
+
+  if (not SetJsonStringValueAnywhere(Text, 'AdminToken', ExternalAdminToken)) or
+     (not SetJsonStringValueAnywhere(Text, 'AgentToken', ExternalAgentToken)) then Exit;
+
+  SetArrayLength(Lines, 1);
+  Lines[0] := Text;
+  Result := SaveStringsToUTF8File(Path, Lines, False);
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Code: Integer;
@@ -458,8 +666,16 @@ begin
     레지스트리만 남은 재이미징 PC에서도 설정이 없으면 첫 설치로 취급해 fail closed한다. }
   FirstInstall := not HasUsableLabManagerConfig;
 
-  { 어떤 것도 지우기 전에 내장 토큰을 검증한다. 업데이트에서는 이 함수가 아무 것도 하지 않는다. }
+  { 마법사에서 기존 토큰 교체를 선택하면 새 토큰 파일을 요구한다.
+    무인 설치에서는 선택지가 표시되지 않으므로 기본값(기존 토큰 재사용)을 유지한다. }
+  ReplaceExistingToken := (not WizardSilent) and HasExistingTokenForChoice and
+    (TokenChoicePage <> nil) and TokenChoicePage.Values[1];
+
+  { 어떤 것도 지우기 전에 토큰을 검증한다. 첫 설치는 내장 토큰,
+    업데이트의 교체 선택은 외부 토큰 파일만 사용한다. }
   Result := ValidateBundledLabManagerTokens;
+  if Result <> '' then Exit;
+  Result := ValidateReplacementLabManagerTokens;
   if Result <> '' then Exit;
 
   { 언인스톨보다 먼저 모든 실행 중인 앱을 종료한다. 종료 실패 시 설치를 중단한다. }
@@ -752,6 +968,10 @@ begin
       기존 설치를 업데이트하는 경우 이 함수는 아무 것도 바꾸지 않는다. }
     if not ApplyBundledLabManagerTokens then
       RaiseException('첫 설치용 내장 LabManager 토큰을 설정에 반영하지 못해 설치를 중단합니다.');
+
+    { 업데이트에서 교체를 선택한 경우에만 백업에서 복원된 설정의 토큰을 새 값으로 바꾼다. }
+    if not ApplyReplacementLabManagerTokens then
+      RaiseException('새 LabManager 토큰을 설정에 반영하지 못해 설치를 중단합니다.');
 
     if not ApplyFirewallRules then
       RaiseException('LabManager 방화벽 규칙을 등록하지 못해 설치를 중단합니다. ' +

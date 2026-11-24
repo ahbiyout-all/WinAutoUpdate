@@ -27,7 +27,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.31"
+  #define AppVersion "0.1.32"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -132,6 +132,9 @@ var
   RunHiddenStarted: Boolean;
   ServiceRecoveryDisabled: Boolean;
   StepNoticePage: TOutputProgressWizardPage;
+  TokenChoicePage: TInputOptionWizardPage;
+  HasExistingTokenForChoice: Boolean;
+  ReplaceExistingToken: Boolean;
 
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
@@ -144,10 +147,31 @@ const
   DefaultLabManagerUrl = 'http://labmanager:5080';
 
 procedure ValidateAgentConfigRequest; forward;
+function IsValidExistingAgentConfig(const Path: String): Boolean; forward;
 
 procedure InitializeWizard;
 begin
   StepNoticePage := CreateOutputProgressPage('UpdateAgent 설치', '단계 안내');
+
+  { 기존 설치가 있을 때만 토큰 처리 방법을 묻는다. 무인 설치에서는 기본값(재사용)을 유지한다. }
+  HasExistingTokenForChoice :=
+    IsValidExistingAgentConfig(ExpandConstant('{commonappdata}\UpdateAgent\agent.json'));
+  TokenChoicePage := CreateInputOptionPage(wpWelcome,
+    '기존 토큰 처리',
+    '기존 에이전트 토큰을 어떻게 할까요?',
+    '기존 토큰을 그대로 재사용하거나, 새 토큰 파일로 교체할 수 있습니다. ' +
+      '교체를 선택하면 /AgentTokenFile 또는 agent-install.ini의 AgentTokenFile이 필요합니다.',
+    True, False);
+  TokenChoicePage.Add('기존 토큰을 백업해 재사용 (권장)');
+  TokenChoicePage.Add('기존 토큰을 삭제하고 새 토큰 기록');
+  TokenChoicePage.Values[0] := True;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if (TokenChoicePage <> nil) and (PageID = TokenChoicePage.ID) then
+    Result := WizardSilent or (not HasExistingTokenForChoice);
 end;
 
 function BoolText(const Value: Boolean): String;
@@ -873,6 +897,11 @@ begin
   AgentConfigUrl := '';
   AgentConfigToken := '';
 
+  ReplaceExistingToken := False;
+  if (not WizardSilent) and HasExistingTokenForChoice and
+     (TokenChoicePage <> nil) and TokenChoicePage.Values[1] then
+    ReplaceExistingToken := True;
+
   IniPath := ResolveInstallConfigFile;
   if FileExists(IniPath) then
     Log('Loading agent install settings from: ' + IniPath);
@@ -910,7 +939,14 @@ begin
 
     if CanKeepExisting then
     begin
-      Log('No install settings after a previous install; refreshing SessionHelperPath only.');
+      if ReplaceExistingToken then
+      begin
+        AgentConfigWriteFailed := True;
+        AgentConfigError := '기존 토큰을 교체하려면 새 토큰 파일이 필요합니다. ' +
+          '/AgentTokenFile=<파일> 또는 ' + InstallConfigFileName + '의 AgentTokenFile을 지정하세요.';
+        Exit;
+      end;
+      Log('No install settings after a previous install; preserving the backed-up existing token.');
       AgentConfigRequested := True;
       AgentConfigSkipWrite := True;
       Exit;
@@ -944,17 +980,29 @@ begin
 
   { 업데이트에서는 외부 토큰 파일이 명시된 경우에만 설정을 갱신한다.
     내장 토큰은 첫 설치에서만 사용하고, 업데이트에서는 절대 읽지 않는다. }
-  if (not HasExternalToken) and CanKeepExisting then
+  if ReplaceExistingToken and CanKeepExisting and (not HasExternalToken) then
   begin
-    { 업그레이드에서는 내장 토큰을 절대 사용하지 않고 기존 토큰을 유지한다.
+    AgentConfigWriteFailed := True;
+    AgentConfigError := '기존 토큰을 삭제하고 새 토큰을 기록하려면 새 토큰 파일이 필요합니다. ' +
+      '/AgentTokenFile=<파일> 또는 ' + InstallConfigFileName + '의 AgentTokenFile을 지정하세요. ' +
+      '첫 설치용 내장 토큰은 업데이트에 사용되지 않습니다.';
+    Exit;
+  end;
+
+  if (not HasExternalToken) and CanKeepExisting and (not ReplaceExistingToken) then
+  begin
+    { 업그레이드에서는 내장 토큰을 절대 사용하지 않고 기존 토큰을 메모리에 백업해 유지한다.
       INI/명령줄의 URL은 키별 override 규칙에 따라 반드시 반영한다. }
     AgentConfigToken := ReadExistingAgentToken(ExistingConfigPath);
     AgentConfigUrl := Url;
     AgentConfigRequested := True;
     AgentConfigSkipWrite := False;
-    Log('Upgrade without external token: applying requested URL and preserving the existing token.');
+    Log('Upgrade: backed up the existing token in memory and applied the requested URL.');
     Exit;
   end;
+
+  if ReplaceExistingToken and CanKeepExisting then
+    Log('Upgrade: replacing the existing agent token from the explicit external token file.');
 
   if not HasExternalToken then
   begin

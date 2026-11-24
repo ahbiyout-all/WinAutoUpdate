@@ -224,10 +224,24 @@ AgentTokenFile=agent-token.txt
 |---|---|---|---|
 | Agent | 첫 설치 | 없음 | `http://labmanager:5080` + 내장 `agent-token.txt` 첫 줄(v0.1.30 이상) |
 | Agent | 첫 설치 | 있음(`/AgentTokenFile` 또는 INI) | 외부 토큰 우선 |
-| Agent | 업데이트 | 없음 | 내장 토큰 무시, 기존 토큰 유지 + 요청된 URL 반영 |
-| Agent | 업데이트 | 있음 | 외부 토큰으로 교체 |
+| Agent | 업데이트, 재사용 | 없음 | 내장 토큰 무시, 기존 토큰 유지 + 요청된 URL 반영 |
+| Agent | 업데이트, 교체 선택 | `/AgentTokenFile` 또는 INI | 외부 토큰으로 교체(필수) |
 | LabManager | 첫 설치 | 해당 없음 | 내장 두 줄(1행 AdminToken, 2행 AgentToken)을 `appsettings.json`에 반영 |
-| LabManager | 업데이트 | 해당 없음 | 내장 토큰 무시, 기존 `appsettings.json` 유지 |
+| LabManager | 업데이트, 재사용 | 없음 | 내장 토큰 무시, 기존 `appsettings.json` 유지 |
+| LabManager | 업데이트, 교체 선택 | `/LabManagerTokenFile` | 백업에서 복원한 설정의 두 토큰만 교체, 런타임 관리자 토큰 재정의 제거 |
+
+#### 업데이트 시 기존 토큰 처리 선택 (v0.1.32 이상)
+
+기존 설치가 감지되면 설치 마법사에 **기존 토큰 처리** 화면이 나타납니다.
+
+- `기존 토큰을 백업해 재사용 (권장)`: 기본값입니다. 기존 설정을 백업·복원한 뒤 URL과 설치 경로만 갱신합니다.
+- `기존 토큰을 삭제하고 새 토큰 기록`: 외부 토큰 파일이 필수입니다.
+  - Agent: `/AgentTokenFile=<파일>` 또는 `agent-install.ini`의 `AgentTokenFile`
+  - LabManager: `/LabManagerTokenFile=<파일>` (첫 줄 AdminToken, 둘째 줄 AgentToken, 설치 exe 기준 상대 경로 허용)
+
+교체를 선택했는데 토큰 파일이 없거나 비어 있거나 샘플/기본 값이면, 기존 설치를 제거하거나 파일을
+교체하기 전에 설치가 중단됩니다. 첫 설치와 `/VERYSILENT` 무인 설치에서는 이 화면을 건너뛰고
+기존 규칙(첫 설치 전용 내장 토큰, 무인 설치 기존 토큰 재사용)을 적용합니다.
 
 - 내장 토큰이 비어 있거나 `change-me-*`, `sample-*-replace-before-pilot`이면 첫 설치가 중단됩니다.
 - 이전 설치가 감지되면 내장 파일을 꺼내지도 않으므로 업데이트 결과에 영향을 주지 않습니다.
