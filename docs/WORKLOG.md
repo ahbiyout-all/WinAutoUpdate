@@ -58,7 +58,23 @@
 | `UpdateAgent.LabManager-Setup-0.1.36-x64.exe` | `f36453108039d3bb23b6f2c752a2e78b26e71a0e0e4daa9633123be450d1040d` |
 | `UpdateAgent.Agent-0.1.36-x64.msi` | `3376cf87ed909890c39e16b254cef7df5628ba4d89c7a20a0ed384761f6b8f79` |
 
-커밋/태그/릴리스 게시: 사용자 승인 후 진행. 게시 완료 전에는 결과를 기재하지 않습니다.
+### 게시 결과
+
+사용자 승인 후 master에 3개 커밋(v0.1.34·v0.1.35·v0.1.36)을 푸시하고 lightweight 태그
+`v0.1.36`을 커밋 `c04664e`에 만들었습니다. 태그 푸시로 워크플로 `45379783041`이 실행되어
+4분 54초 만에 성공했고, 시크릿 3개가 모두 설정되어 첫 설치 토큰 내장과 `containsSecrets`
+검증을 통과했습니다. 게시 자산은 설치 파일 3개뿐입니다.
+
+| 파일 | SHA-256 (게시 자산) |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.36-x64.exe` | `567970df9cbdcc5c4118161f3d80ebc8602175c7b54c3b04577395f623886f9b` |
+| `UpdateAgent.LabManager-Setup-0.1.36-x64.exe` | `eab4ef179d6d70ebedb2d5f86ae9d0851a9456aa2fba0811e4c0701ddce7fbdf` |
+| `UpdateAgent.Agent-0.1.36-x64.msi` | `2c71194d6c0c9f6421ed81200117b3277c7a3fb4ed2581490e227a8616c00d55` |
+
+게시 자산은 CI에서 `UPDATEAGENT_*` 시크릿을 내장해 빌드되므로 위의 시크릿 없는 로컬 빌드 해시와 다릅니다.
+
+- 릴리스: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.36
+- 성공 워크플로: https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/45379783041
 
 ---
 
