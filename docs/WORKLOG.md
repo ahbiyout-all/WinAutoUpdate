@@ -5,13 +5,13 @@
 
 ---
 
-## 2026-11-23 — 자아성찰 20회 반복 심층 감사 및 결함 수정 (v0.1.31 준비)
+## 2026-11-23~24 — 자아성찰 20회 반복 심층 감사 및 결함 수정 (v0.1.31)
 
 ### 배경
 
 v0.1.30 릴리스와 파일럿 1차 문제 대응 후 설치 관리자, 스크립트/CI, 에이전트 런타임,
 LabManager 런타임, 문서/UI 다섯 영역을 **4회씩 순회해 총 20회** 자아성찰을 수행했습니다.
-발견된 결함은 모두 코드·테스트·문서에 반영했고, 버전은 `0.1.31`로 올렸습니다(게시 전).
+발견된 결함은 모두 코드·테스트·문서에 반영하고 `v0.1.31`로 게시했습니다.
 
 ### 수정 내역 (20회)
 
@@ -43,12 +43,27 @@ LabManager 런타임, 문서/UI 다섯 영역을 **4회씩 순회해 총 20회**
 - `dotnet build UpdateAgent.sln -c Release`: 경고 0 / 오류 0.
 - `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release`: **195개 통과**.
 - PowerShell 파서: 저장소 내 모든 `.ps1` 구문 오류 없음.
-- 로컬 Inno/MSI 사전 빌드 통과, SHA-256 및 `build-info.json`은 로컬 산출물에만 기록.
+- 로컬 Inno/MSI 사전 빌드 통과(검증 후 로컬 산출물 삭제), 게시 자산 해시는 아래 표 참고.
 - `.iss` 2개는 UTF-8 BOM 유지, `agent-install.sample.ini`는 BOM 없음.
 - `git diff --check`: 공백/충돌 표시 없음.
 - 실제 PC 설치, DNS/방화벽 변경, 대시보드 UI 확인은 파일럿 환경에서 별도 검증 필요.
 
-> 릴리스 게시 전 변경입니다. 게시 후 이 절에 자산 해시, 릴리스 링크, workflow run URL을 추가합니다.
+### 게시 결과
+
+첫 수동 실행(`45313411142`)은 태그가 없을 때 `git rev-parse` 출력이 null이어서 `.Trim()`이 실패한 CI 결함으로 중단됐습니다.
+null-safe 조회로 수정해 커밋 `a0aad4b`를 push한 뒤 다시 실행한 `45313687780`이 성공했습니다.
+태그는 `a0aad4b`를 가리키고, 워크플로가 태그를 push하지 않아 태그 이벤트 중복 실행은 없습니다.
+빌드 로그에서 첫 설치 토큰 내장 메시지와 `containsSecrets` 검증을 확인했습니다.
+
+| 파일 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.31-x64.exe` | `6bfe27e8fdf223207798c963831a8fd790c1433bb34d1079646883a97cb64801` |
+| `UpdateAgent.LabManager-Setup-0.1.31-x64.exe` | `b093a4d9357a36bfdc3c50a7e85c7b56819e72a41dd80d0a01ee972b05aeb58c` |
+| `UpdateAgent.Agent-0.1.31-x64.msi` | `38bf3ecd1138a55f9c2a08515cbd3d1f5192631fcbf397ef0a9480b8b3e08c3f` |
+
+- 릴리스: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.31
+- 성공 워크플로: https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/45313687780
+- 실패 워크플로(원인 기록): https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/45313411142
 
 ---
 
