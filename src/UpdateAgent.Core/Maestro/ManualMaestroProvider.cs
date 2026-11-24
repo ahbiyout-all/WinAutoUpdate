@@ -94,7 +94,7 @@ public sealed class ManualMaestroProvider : IRestorationProvider
             var updated = current with
             {
                 ProtectionSuspendedConfirmed = true,
-                ProtectionSuspendedConfirmedAt = DateTimeOffset.Now,
+                ProtectionSuspendedConfirmedAt = UpdateAgent.Guards.UtcClock.Now,
                 ConfirmedBy = confirmedBy,
             };
             all[jobId] = updated;
@@ -125,7 +125,7 @@ public sealed class ManualMaestroProvider : IRestorationProvider
             {
                 StateSavedConfirmed = stateSaved,
                 ProtectionRestoredConfirmed = protectionRestored,
-                ProtectionRestoredConfirmedAt = DateTimeOffset.Now,
+                ProtectionRestoredConfirmedAt = UpdateAgent.Guards.UtcClock.Now,
             };
             all[jobId] = updated;
             await SaveChecklistsAsync(all, cancellationToken);
@@ -151,7 +151,7 @@ public sealed class ManualMaestroProvider : IRestorationProvider
             Nonce = Guid.NewGuid().ToString("N"),
             BootCount = bootCount,
             Phase = phase,
-            WrittenAt = DateTimeOffset.Now,
+            WrittenAt = UpdateAgent.Guards.UtcClock.Now,
         };
 
         var json = UpdateAgentJson.Serialize(marker);

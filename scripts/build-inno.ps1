@@ -324,7 +324,10 @@ Assert-PublishFolder $serviceSource "UpdateAgent.Service.exe"
 Assert-PublishFolder $sessionHelperSource "UpdateAgent.SessionHelper.exe"
 Assert-PublishFolder $agentDesktopSource "UpdateAgent.Agent.Desktop.exe"
 Assert-PublishFolder $cliSource "UpdateAgent.Cli.exe"
+# 공통 Guard DLL은 실행 파일의 게시 폴더에 복사되어야 한다.
+Assert-PublishFolder $serviceSource "UpdateAgent.Guards.dll"
 if (-not $AgentOnly) {
+    Assert-PublishFolder $labManagerSource "UpdateAgent.Guards.dll"
     Assert-PublishFolder $labManagerSource "UpdateAgent.LabManager.exe"
     Assert-PublishFolder $labManagerSource "UpdateAgent.LabManager.Desktop.exe"
 }
@@ -430,6 +433,7 @@ Write-Host "Checking the included file set..." -ForegroundColor Cyan
 if (-not $SkipValidation) {
     Assert-IncludedFileSet -Root $agentStage -Label "Agent" -RequiredFiles @(
         "Service\UpdateAgent.Service.exe",
+        "Service\UpdateAgent.Guards.dll",
         "Service\appsettings.json",
         "SessionHelper\UpdateAgent.SessionHelper.exe",
         "Desktop\UpdateAgent.Agent.Desktop.exe",
@@ -440,6 +444,7 @@ if (-not $SkipValidation) {
         Assert-IncludedFileSet -Root $labManagerStage -Label "LabManager" -RequiredFiles @(
             "UpdateAgent.LabManager.exe",
             "UpdateAgent.LabManager.Desktop.exe",
+            "UpdateAgent.Guards.dll",
             "wwwroot\index.html",
             "appsettings.json",
             $bundledLabManagerTokenName

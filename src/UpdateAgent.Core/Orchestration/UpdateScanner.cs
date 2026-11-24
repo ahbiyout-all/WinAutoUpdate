@@ -11,7 +11,7 @@ public sealed record ScanReport
     public IReadOnlyList<UpdateItemInfo> Selected { get; init; } = [];
     public IReadOnlyList<UpdateItemInfo> Excluded { get; init; } = [];
     public WuaSystemStatus SystemStatus { get; init; } = new();
-    public DateTimeOffset ScannedAt { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset ScannedAt { get; init; } = UpdateAgent.Guards.UtcClock.Now;
 }
 
 /// <summary>정책을 적용한 WUA 검색.</summary>

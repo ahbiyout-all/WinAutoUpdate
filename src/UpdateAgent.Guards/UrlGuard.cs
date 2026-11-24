@@ -52,8 +52,8 @@ public static class UrlGuard
     }
 
     /// <summary>
-    /// 앱 모드 브라우저에 넘길 주소 규칙. 로컬 서버는 HTTP를 허용하고,
-    /// 원격 주소는 HTTPS만 허용한다(임의 사이트/스킴 차단).
+    /// 앱 모드 브라우저에 넘길 주소 규칙. 로컬 서버는 HTTP를 허용하고 원격 주소는 HTTPS만 허용한다.
+    /// 원격 호스트 자체를 제한하지는 않으므로 설정 파일을 쓸 수 있는 사람은 대상을 바꿀 수 있다.
     /// </summary>
     public static bool IsSafeBrowserUrl(string? value)
     {
@@ -74,5 +74,23 @@ public static class UrlGuard
             normalized.Host = "127.0.0.1";
         }
         return normalized.Uri.AbsoluteUri;
+    }
+
+    /// <summary>
+    /// 정규화된 서버 주소의 경로 끝에 상대 경로를 붙인다. 쿼리/조각과 포트는 유지한다.
+    /// 예: https://host/ua/?tenant=1 + monitor.html → https://host/ua/monitor.html?tenant=1
+    /// </summary>
+    public static string? CombineBrowserUrl(string? serverUrl, string? relativePath)
+    {
+        var normalized = NormalizeBrowserUrl(serverUrl);
+        if (normalized is null || string.IsNullOrWhiteSpace(relativePath)) return null;
+        if (!IsHttpUrl(normalized, out var uri) || uri is null) return null;
+
+        var segment = "/" + relativePath.Trim().TrimStart('/');
+        var builder = new UriBuilder(uri)
+        {
+            Path = uri.AbsolutePath.TrimEnd('/') + segment,
+        };
+        return builder.Uri.AbsoluteUri;
     }
 }

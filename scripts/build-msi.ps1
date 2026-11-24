@@ -181,6 +181,8 @@ Assert-PublishFolder $serviceSource "UpdateAgent.Service.exe"
 Assert-PublishFolder $sessionHelperSource "UpdateAgent.SessionHelper.exe"
 Assert-PublishFolder $agentDesktopSource "UpdateAgent.Agent.Desktop.exe"
 Assert-PublishFolder $cliSource "UpdateAgent.Cli.exe"
+# 공통 Guard DLL도 게시 폴더에 있어야 MSI 페이로드에 포함된다.
+Assert-PublishFolder $serviceSource "UpdateAgent.Guards.dll"
 
 if (-not (Test-Path -LiteralPath $payloadAppSettings)) {
     throw "Sanitized appsettings template not found: $payloadAppSettings"

@@ -122,4 +122,63 @@ public sealed class JobStateGuardTests
         Assert.Equal(incoming.UpdatedAt, normalized.ReportedAt);
         Assert.Equal(receivedAt, normalized.UpdatedAt);
     }
+
+    [Fact]
+    public void CanAccept_FutureClientClockIsClampedInsteadOfBlockingLaterReports()
+    {
+        var receivedAt = BaseTime.AddMinutes(5);
+        var stored = new JobSummary
+        {
+            JobId = "job-1",
+            AgentId = "agent-1",
+            State = UpdateJobState.Installing,
+            ReportedAt = BaseTime,
+            UpdatedAt = BaseTime.AddMinutes(1),
+        };
+        var future = new JobSummary
+        {
+            JobId = "job-1",
+            AgentId = "agent-1",
+            State = UpdateJobState.Scanning,
+            ReportedAt = BaseTime.AddDays(365),
+            UpdatedAt = BaseTime.AddDays(365),
+        };
+
+        Assert.True(JobStateGuard.CanAccept(stored, future, "agent-1", receivedAt));
+
+        var normalized = JobStateGuard.Normalize(future, receivedAt);
+        Assert.Equal(receivedAt, normalized.ReportedAt);
+
+        var next = new JobSummary
+        {
+            JobId = "job-1",
+            AgentId = "agent-1",
+            State = UpdateJobState.Installing,
+            ReportedAt = receivedAt.AddSeconds(1),
+            UpdatedAt = receivedAt.AddSeconds(1),
+        };
+        Assert.True(JobStateGuard.CanAccept(
+            normalized with { State = UpdateJobState.Scanning }, next, "agent-1", receivedAt.AddSeconds(2)));
+    }
+
+    [Fact]
+    public void CanAccept_RejectsActiveJobRevertingToPending()
+    {
+        var stored = new JobSummary
+        {
+            JobId = "job-1",
+            AgentId = "agent-1",
+            State = UpdateJobState.Installing,
+            ReportedAt = BaseTime,
+            UpdatedAt = BaseTime,
+        };
+        var incoming = stored with
+        {
+            State = UpdateJobState.Pending,
+            ReportedAt = BaseTime.AddSeconds(1),
+            UpdatedAt = BaseTime.AddSeconds(1),
+        };
+
+        Assert.False(JobStateGuard.CanAccept(stored, incoming, "agent-1", BaseTime.AddSeconds(2)));
+    }
 }

@@ -34,11 +34,8 @@ public sealed class DesktopSettings
     /// <summary>브라우저 앱 모드로 열 실시간 작업 현황 모니터 주소.</summary>
     public string MonitorUrl => BuildUrl("/monitor.html");
 
-    private string BuildUrl(string path)
-    {
-        var address = UrlGuard.NormalizeBrowserUrl(ServerUrl) ?? DefaultServerUrl;
-        return address.TrimEnd('/') + path;
-    }
+    private string BuildUrl(string path) =>
+        UrlGuard.CombineBrowserUrl(ServerUrl, path) ?? DefaultServerUrl;
 
     /// <summary>앱 모드 창 크기.</summary>
     public WindowPlacement Window { get; set; } = new();
@@ -85,7 +82,9 @@ public sealed class DesktopSettings
                 ServerUrl = dto.ServerUrl;
             }
 
-            Window = dto.Window ?? new WindowPlacement();
+            var requested = dto.Window ?? new WindowPlacement();
+            var size = WindowSizeGuard.Normalize(requested.Width, requested.Height);
+            Window = new WindowPlacement { Width = size.Width, Height = size.Height };
         }
         catch
         {

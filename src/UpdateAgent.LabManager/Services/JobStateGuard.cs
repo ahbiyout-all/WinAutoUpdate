@@ -11,6 +11,16 @@ internal static class JobStateGuard
     public static bool AgentIdsMatch(string agentId, string telemetryAgentId) =>
         string.Equals(agentId, telemetryAgentId, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// 학생 PC가 미래 시각을 보고해도 이후 모든 보고가 영구히 거부되지 않도록
+    /// 서버 수신 시각을 상한으로 사용한다.
+    /// </summary>
+    public static DateTimeOffset ReportedAtOf(JobSummary incoming, DateTimeOffset receivedAt)
+    {
+        var reported = incoming.ReportedAt ?? incoming.UpdatedAt;
+        return reported > receivedAt ? receivedAt : reported;
+    }
+
     public static bool CanAccept(
         JobSummary? stored,
         JobSummary incoming,
@@ -28,8 +38,15 @@ internal static class JobStateGuard
         if (!AgentIdsMatch(stored.AgentId, agentId)) return false;
         if (stored.IsTerminal) return false;
 
+        // 진행 중 상태가 대기 상태로 되돌아가는 것도 거부한다.
+        if (stored.State != UpdateJobState.Pending &&
+            incoming.State == UpdateJobState.Pending)
+        {
+            return false;
+        }
+
         // 다른 시계끼리 비교하지 않는다. 보고 시각은 보고 시끼리, 수신 시각은 수신 시끼리 비교한다.
-        var incomingReportedAt = incoming.ReportedAt ?? incoming.UpdatedAt;
+        var incomingReportedAt = ReportedAtOf(incoming, receivedAt);
         var storedReportedAt = stored.ReportedAt ?? stored.UpdatedAt;
         if (incomingReportedAt < storedReportedAt) return false;
         if (receivedAt < stored.UpdatedAt) return false;
@@ -42,11 +59,11 @@ internal static class JobStateGuard
         AgentIdsMatch(summary.JobId, detailSummary.JobId) &&
         summary.State == detailSummary.State;
 
-    /// <summary>서버 수신 시각을 기록하고 에이전트 보고 시각은 ReportedAt에 보관한다.</summary>
+    /// <summary>서버 수신 시각을 기록하고 에이전트 보고 시각은 미래값을 잘라 ReportedAt에 보관한다.</summary>
     public static JobSummary Normalize(JobSummary incoming, DateTimeOffset receivedAt) =>
         incoming with
         {
-            ReportedAt = incoming.ReportedAt ?? incoming.UpdatedAt,
+            ReportedAt = ReportedAtOf(incoming, receivedAt),
             UpdatedAt = receivedAt,
         };
 }

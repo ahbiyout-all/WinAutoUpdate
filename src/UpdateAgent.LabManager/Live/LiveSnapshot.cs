@@ -1,3 +1,4 @@
+using UpdateAgent.Guards;
 using UpdateAgent.LabManager.Services;
 using UpdateAgent.LabManager.Storage;
 using UpdateAgent.Shared.Models;
@@ -54,6 +55,8 @@ public static class LiveSnapshotBuilder
     {
         var agents = await store.GetAgentsAsync(cancellationToken).ConfigureAwait(false);
         var jobs = await store.GetJobsAsync(MaxJobs, cancellationToken).ConfigureAwait(false);
+        // 상위 100건만 보는 jobViews로 활성 작업 수를 세면 누락된다. DB에서 전체 수를 얻는다.
+        var activeJobCount = await store.CountActiveJobsAsync(cancellationToken).ConfigureAwait(false);
 
         var agentViews = agents
             .Select(agent =>
@@ -68,7 +71,7 @@ public static class LiveSnapshotBuilder
                     agent.Online,
                     agent.Agent.MaestroInstalled,
                     agent.Telemetry.RebootPending,
-                    current is not null && !current.IsTerminal,
+                    current is not null && JobStateRules.IsActive(current.State.ToString()),
                     agent.LastSeen);
             })
             .OrderBy(a => a.MachineName, StringComparer.OrdinalIgnoreCase)
@@ -86,7 +89,8 @@ public static class LiveSnapshotBuilder
                 job.Summary.TotalItems,
                 job.Summary.RebootCount,
                 job.Summary.MaxRebootCount,
-                job.Summary.RequiresMaestroAttention && !job.Summary.IsTerminal,
+                job.Summary.RequiresMaestroAttention &&
+                JobStateRules.IsActive(job.Summary.State.ToString()),
                 job.Summary.UpdatedAt,
                 job.Summary.Message))
             .ToList();
@@ -95,13 +99,10 @@ public static class LiveSnapshotBuilder
             UtcTimestamps.Now,
             agentViews.Count,
             agentViews.Count(a => a.Online),
-            agentViews.Count(a => a.State is "Busy" or "Rebooting" or "Paused"),
-            jobViews.Count(j => !IsTerminal(j.State)),
+            agentViews.Count(a => JobStateRules.IsBusy(a.State)),
+            activeJobCount,
             jobViews.Count(j => j.RequiresMaestroAttention),
             agentViews,
             jobViews);
     }
-
-    private static bool IsTerminal(string state) =>
-        state is nameof(UpdateJobState.Completed) or nameof(UpdateJobState.Failed) or nameof(UpdateJobState.Cancelled);
 }

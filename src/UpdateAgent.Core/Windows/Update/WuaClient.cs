@@ -68,7 +68,7 @@ public sealed class WuaClient : IWuaClient, IDisposable
             {
                 Updates = updates,
                 Status = GetSystemStatusCore(),
-                ScannedAt = DateTimeOffset.Now,
+                ScannedAt = UpdateAgent.Guards.UtcClock.Now,
             };
         }
         catch (WuaException)

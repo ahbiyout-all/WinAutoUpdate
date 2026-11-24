@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using UpdateAgent.Guards;
 using UpdateAgent.LabManager.Services;
 using UpdateAgent.Shared.Models;
 using UpdateAgent.Shared.Serialization;
@@ -73,7 +74,8 @@ public sealed class LabStore
         if (onlineThresholdSeconds <= 0)
             throw new ArgumentOutOfRangeException(nameof(onlineThresholdSeconds));
         _onlineThresholdSeconds = onlineThresholdSeconds;
-        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        var directory = Path.GetDirectoryName(databasePath);
+        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = databasePath,
@@ -140,7 +142,8 @@ public sealed class LabStore
                 detail TEXT NOT NULL
             );
 
-            CREATE INDEX IF NOT EXISTS ix_audit_ts ON audit(id DESC);
+            -- 기존 ix_audit_ts는 PK인 id를 다시 인덱싱했다. 시간순 조회용 인덱스를 별도로 추가한다.
+            CREATE INDEX IF NOT EXISTS ix_audit_ts_v2 ON audit(ts DESC);
 
             CREATE TABLE IF NOT EXISTS maestro (
                 job_id TEXT PRIMARY KEY,
@@ -243,6 +246,15 @@ public sealed class LabStore
         var agents = await GetAgentsAsync(cancellationToken);
         return agents.FirstOrDefault(a =>
             string.Equals(a.Agent.AgentId, agentId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public async Task<int> CountAgentsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM agents;";
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt32(result ?? 0);
     }
 
     // ---------- Jobs ----------
@@ -606,10 +618,10 @@ public sealed class LabStore
             VALUES($ts, $actor, $action, $target, $detail);
             """;
         command.Parameters.AddWithValue("$ts", UtcTimestamps.FormatNow());
-        command.Parameters.AddWithValue("$actor", actor);
-        command.Parameters.AddWithValue("$action", action);
-        command.Parameters.AddWithValue("$target", target);
-        command.Parameters.AddWithValue("$detail", detail);
+        command.Parameters.AddWithValue("$actor", TextGuard.Truncate(actor, TextGuard.MaxLabelLength));
+        command.Parameters.AddWithValue("$action", TextGuard.Truncate(action, TextGuard.MaxLabelLength));
+        command.Parameters.AddWithValue("$target", TextGuard.Truncate(target, TextGuard.MaxLabelLength));
+        command.Parameters.AddWithValue("$detail", TextGuard.Truncate(detail, TextGuard.MaxAuditTextLength));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 

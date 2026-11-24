@@ -22,8 +22,8 @@ public sealed record JobSummary
     public string Message { get; init; } = "";
     public PauseReason PauseReason { get; init; }
     public DateTimeOffset? PauseUntil { get; init; }
-    public DateTimeOffset StartedAt { get; init; } = DateTimeOffset.Now;
-    public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset StartedAt { get; init; } = UpdateAgent.Guards.UtcClock.Now;
+    public DateTimeOffset UpdatedAt { get; init; } = UpdateAgent.Guards.UtcClock.Now;
 
     /// <summary>
     /// 에이전트가 보고한 원본 UpdatedAt. 서버 수신 시각으로 UpdatedAt을 덮어쓴 뒤에도
@@ -41,7 +41,7 @@ public sealed record JobSummary
     public bool RequiresMaestroAttention { get; init; }
 
     public bool IsTerminal =>
-        State is UpdateJobState.Completed or UpdateJobState.Failed or UpdateJobState.Cancelled;
+        UpdateAgent.Guards.JobStateRules.IsTerminal(State.ToString());
 
     public string StateLabel => State switch
     {
@@ -79,8 +79,8 @@ public sealed record AgentInfo
     public string? IpAddress { get; init; }
     public IReadOnlyList<string> MacAddresses { get; init; } = [];
     public OsInfo? Os { get; init; }
-    public DateTimeOffset FirstSeen { get; init; } = DateTimeOffset.Now;
-    public DateTimeOffset LastSeen { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset FirstSeen { get; init; } = UpdateAgent.Guards.UtcClock.Now;
+    public DateTimeOffset LastSeen { get; init; } = UpdateAgent.Guards.UtcClock.Now;
     public AgentState State { get; init; } = AgentState.Online;
     public bool MaestroInstalled { get; init; }
     public bool IsLaptop { get; init; }
@@ -92,7 +92,7 @@ public sealed record AgentInfo
 public sealed record AgentTelemetry
 {
     public required string AgentId { get; init; }
-    public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset Timestamp { get; init; } = UpdateAgent.Guards.UtcClock.Now;
     public AgentState State { get; init; } = AgentState.Online;
     public JobSummary? CurrentJob { get; init; }
     public JobDetail? CurrentJobDetail { get; init; }
@@ -116,8 +116,8 @@ public sealed record AgentCommand
     public string PayloadJson { get; init; } = "{}";
     public CommandStatus Status { get; init; } = CommandStatus.Pending;
     public string IssuedBy { get; init; } = "system";
-    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.Now;
-    public DateTimeOffset ExpiresAt { get; init; } = DateTimeOffset.Now.AddHours(24);
+    public DateTimeOffset CreatedAt { get; init; } = UpdateAgent.Guards.UtcClock.Now;
+    public DateTimeOffset ExpiresAt { get; init; } = UpdateAgent.Guards.UtcClock.Now.AddHours(24);
     public string? ResultMessage { get; init; }
     public DateTimeOffset? CompletedAt { get; init; }
 }
@@ -129,7 +129,7 @@ public sealed record CommandResult
     public required string AgentId { get; init; }
     public bool Success { get; init; }
     public string Message { get; init; } = "";
-    public DateTimeOffset CompletedAt { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset CompletedAt { get; init; } = UpdateAgent.Guards.UtcClock.Now;
 }
 
 /// <summary>에이전트 → LabManager 체크인 요청.</summary>
@@ -138,7 +138,7 @@ public sealed record AgentCheckInRequest
     public required AgentInfo Agent { get; init; }
     public required AgentTelemetry Telemetry { get; init; }
     public IReadOnlyList<CommandResult> CommandResults { get; init; } = [];
-    public DateTimeOffset SentAt { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset SentAt { get; init; } = UpdateAgent.Guards.UtcClock.Now;
 }
 
 /// <summary>
@@ -154,7 +154,7 @@ public sealed record CommandResultOutcome
 /// <summary>LabManager → 에이전트 체크인 응답.</summary>
 public sealed record AgentCheckInResponse
 {
-    public DateTimeOffset ServerTime { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset ServerTime { get; init; } = UpdateAgent.Guards.UtcClock.Now;
     public IReadOnlyList<AgentCommand> Commands { get; init; } = [];
     public JobAssignment? Assignment { get; init; }
     public UpdatePolicy? Policy { get; init; }
@@ -181,7 +181,7 @@ public sealed record JobAssignment
     public required string JobId { get; init; }
     public JobAssignmentAction Action { get; init; } = JobAssignmentAction.Start;
     public UpdatePolicy Policy { get; init; } = UpdatePolicy.Default;
-    public DateTimeOffset AssignedAt { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset AssignedAt { get; init; } = UpdateAgent.Guards.UtcClock.Now;
     public string? Note { get; init; }
     public bool MaestroConfirmed { get; init; }
     public string ConfirmedBy { get; init; } = "teacher";

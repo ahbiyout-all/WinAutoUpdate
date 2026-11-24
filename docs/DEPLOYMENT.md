@@ -5,7 +5,8 @@
 학생 PC에는 인바운드 방화벽 규칙이 필요하지 않습니다.
 
 - 개발자: AhBiYout / GitHub: <https://github.com/ahbiyout-all> / 블로그: <https://ahbiyoutvibe.blogspot.com/>
-- 1대 파일럿은 [`PILOT.md`](PILOT.md), 설치 프로그램 옵션은 [`INSTALLER.md`](INSTALLER.md) 참고
+- 1대 파일럿은 [`PILOT.md`](PILOT.md), 설치 프로그램 옵션은 [`INSTALLER.md`](INSTALLER.md),
+  공통 Guard DLL 규칙은 [`PURE-DLL.md`](PURE-DLL.md) 참고
 
 ## 0. 토폴로지
 
@@ -443,3 +444,5 @@ Invoke-WebRequest "http://127.0.0.1:5080/api/admin/audit" -Headers @{ "X-Admin-T
   시크릿 검증과 설치 안전성 보강, 문서 정합성 개선(`v0.1.34`).
 - 2026-11-24: 순수 창작 공통 Guard DLL 도입 — 토큰·URL·UTC 규칙 일원화, 런타임 관리자 토큰 충돌 차단,
   브라우저 앱 모드 주소 검증(`v0.1.35`).
+- 2026-11-24: 순수 DLL 5회 반복 감사 — Guard 규칙 보강과 공유 적용, Core UTC/정책/ID 일원화,
+  LabManager 체크인 검증·ack·캐시 정리, UI 실패 처리·주소/창 크기 검증, 문서·패키징 보강(`v0.1.36`).

@@ -13,7 +13,7 @@ public sealed record MaestroDetectionResult
     /// <summary>Maestro의 Windows Update 기능 상태. API가 없으면 Unknown으로 둔다.</summary>
     public MaestroWuFeatureStatus WuFeatureStatus { get; init; } = MaestroWuFeatureStatus.Unknown;
 
-    public DateTimeOffset DetectedAt { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset DetectedAt { get; init; } = UpdateAgent.Guards.UtcClock.Now;
 
     public static MaestroDetectionResult NotInstalled { get; } = new() { Installed = false };
 }
@@ -90,7 +90,7 @@ public sealed record RestoreMarker
     public required string Nonce { get; init; }
     public int BootCount { get; init; }
     public string Phase { get; init; } = "";
-    public DateTimeOffset WrittenAt { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset WrittenAt { get; init; } = UpdateAgent.Guards.UtcClock.Now;
 }
 
 /// <summary>마커 검증 결과.</summary>
@@ -99,7 +99,7 @@ public sealed record MarkerVerificationResult
     public bool Verified { get; init; }
     public string Message { get; init; } = "";
     public RestoreMarker? Marker { get; init; }
-    public DateTimeOffset CheckedAt { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset CheckedAt { get; init; } = UpdateAgent.Guards.UtcClock.Now;
 
     public static MarkerVerificationResult Ok(RestoreMarker marker) => new()
     {

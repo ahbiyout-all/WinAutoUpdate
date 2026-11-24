@@ -86,6 +86,8 @@ public partial class MainWindow : Window
     private void ShowOverlay()
     {
         _noticeTimer?.Stop();
+        // 이전 안내가 4초 타이머 중간에 남아 있으면 새 오버레이에 그대로 보인다.
+        _viewModel.ClearNotice();
         if (!IsVisible)
         {
             PositionWindow();
@@ -98,9 +100,20 @@ public partial class MainWindow : Window
 
         if (_keyboardBlocker is null)
         {
-            _keyboardBlocker = new KeyboardBlocker();
-            _keyboardBlocker.EmergencyArmed += OnEmergencyArmed;
-            _keyboardBlocker.EmergencyStopTriggered += OnEmergencyStopTriggered;
+            try
+            {
+                _keyboardBlocker = new KeyboardBlocker();
+                _keyboardBlocker.EmergencyArmed += OnEmergencyArmed;
+                _keyboardBlocker.EmergencyStopTriggered += OnEmergencyStopTriggered;
+            }
+            catch (Exception ex)
+            {
+                // 훅 설치 실패는 소프트 입력 잠금이 없다는 뜻이므로 조용히 성공으로 보고하지 않는다.
+                System.Diagnostics.Debug.WriteLine(
+                    $"[UpdateAgent.SessionHelper] 키보드 훅 설치 실패: {ex.GetType().Name}");
+                HideOverlay("입력 잠금을 시작하지 못했습니다. 서비스 로그를 확인하세요.");
+                return;
+            }
         }
         _topmostTimer.Start();
         _cursorTimer.Start();
@@ -272,6 +285,10 @@ internal sealed class KeyboardBlocker : IDisposable
         _proc = HookCallback;
         _hook = NativeMethods.SetWindowsHookEx(WhKeyboardLl, _proc,
             NativeMethods.GetModuleHandle(null), 0);
+        if (_hook == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("저수준 키보드 훅을 설치하지 못했습니다.");
+        }
     }
 
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)

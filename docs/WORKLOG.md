@@ -5,6 +5,63 @@
 
 ---
 
+## 2026-11-24 순수 DLL 5회 반복 감사 및 v0.1.36
+
+### 배경
+
+`UpdateAgent.Guards.dll` 도입(v0.1.35) 이후 기능 중 순수 DLL로 만들면 좋은 기능과
+기존 DLL/라이브러리의 오류·개선점을 5회 반복 감사했습니다. 회차별 영역은
+①Guard DLL 자체 ②Core DLL ③UI DLL ④LabManager DLL ⑤패키징·문서로 나누어
+병렬로 코드 근거를 확인했습니다. 확인된 결함만 수정했고 화장품성 변경은 배제했습니다.
+
+### 회차별 결과
+
+| 회차 | 영역 | P0 | P1 | P2 |
+|---|---|---|---|---|
+| ① | Guard DLL 자체 | 0 | 0 | 5 |
+| ② | Core DLL | 0 | 2 | 3 |
+| ③ | UI DLL | 0 | 1 | 6 |
+| ④ | LabManager DLL | 0 | 5 | 다수 |
+| ⑤ | 패키징·문서 | 0 | 0 | 3(누락 3, 검증기 1, 잔여 산출물 1) |
+
+### 결정
+
+- 하위 호환 버그 수정과 공통 규칙 추가이므로 PATCH 올림(`0.1.35` → `0.1.36`).
+- 새 규칙도 외부 NuGet 의존성·OS 전용 API 없는 순수 C# DLL에만 추가했습니다.
+  ACL/파이프/WUA/WPF/방화벽은 기존 프로젝트에 유지했습니다.
+
+### 주요 변경
+
+| 영역 | 파일 | 내용 |
+|---|---|---|
+| Guard 규칙 보강 | `src/UpdateAgent.Guards/TokenGuard.cs`, `UrlGuard.cs`, `UtcClock.cs` | 앞의 BOM만 제거, 빈 토큰 fail-closed, 비교 시간 문구 정정, URL 경로 결합, 시각 파싱 엄격화 |
+| 신규 순수 규칙 | `VersionGuard.cs`, `TextGuard.cs`, `JobStateRules.cs`, `JobIdGuard.cs`, `ProgressGuard.cs`, `WindowSizeGuard.cs` | 버전/ID/상태/진행률/창 크기 규칙 단일 정의 |
+| Core 일원화 | `UpdateJobRunner.cs`, `SqliteJobStore.cs`, `UpdateScanner.cs` 외 | UTC 저장, `ForExecution` 검색 적용, `WuBusyWaitMinutes` 연결, ID/진행률/상태 규칙 위임 |
+| 공유 DTO | `Shared/Models/*`, `Shared/Updates/*` | 기본 시각 UTC화, 종료 상태/버전 판정 DLL 위임 |
+| LabManager | `AgentCheckInHandler.cs`, `JobStateGuard.cs`, `LabStore.cs`, `LiveSnapshot.cs`, `CheckinGateRegistry.cs`, `UpdateCheckService.cs` | 체크인 검증 순서·ack, 결과/감사 상한, 미래 시각 clamp, 에이전트 수 상한, 활성 작업 전체 집계, 캐시·게이트 정리 |
+| UI | `MainWindow.xaml.cs`, `LabManagerServer.cs`, `DesktopSettings.cs`, `BrowserLauncher.cs` | 훅 설치 실패 보고, stale notice 제거, health URL 통일, 시작 실패 정리, 창 크기 clamp |
+| 패키징·문서 | `build-inno.ps1`, `build-msi.ps1`, `docs/PURE-DLL.md`, `docs/RELEASE.md`, `docs/MSI.md`, `docs/DEPLOYMENT.md` | 필수 DLL 검증, 5회 감사 표·cross-link·버전 예제 갱신 |
+| 테스트 | `GuardsLibraryTests.cs`, `JobStateGuardTests.cs`, `Audit25LabManagerTests.cs` | 신규 규칙와 회귀(내부 BOM, 미래 시각, 대량 배치 ack, 감사 절단) 보강 |
+
+### 검증 (로컬 중앙 빌드 기준)
+
+- `dotnet build UpdateAgent.sln -c Release --nologo`: 경고 0, 오류 0.
+- `dotnet test ... -c Release --nologo`: **244개 통과**, 실패 0, 건너뜀 0(기존 230 + 신규 14).
+- `scripts\publish.ps1`, `scripts\build-inno.ps1 -NoPublish`, `scripts\build-msi.ps1`: 성공.
+- 실 PC 설치/토큰 교체/50대 동시 체크인·감사·SSE 부하 검증: **미실행**(환경 없음).
+
+로컬 산출물 SHA-256(게시 전 상태, 시크릿 없는 빌드):
+
+| 파일 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.36-x64.exe` | `0d36e194a044011bf68e2829dd07eaaaed129775de1023371ac34aace8fe2604` |
+| `UpdateAgent.LabManager-Setup-0.1.36-x64.exe` | `f36453108039d3bb23b6f2c752a2e78b26e71a0e0e4daa9633123be450d1040d` |
+| `UpdateAgent.Agent-0.1.36-x64.msi` | `3376cf87ed909890c39e16b254cef7df5628ba4d89c7a20a0ed384761f6b8f79` |
+
+커밋/태그/릴리스 게시: 사용자 승인 후 진행. 게시 완료 전에는 결과를 기재하지 않습니다.
+
+---
+
 ## 2026-11-24 순수 창작 공통 Guard DLL 도입 및 v0.1.35
 
 ### 배경

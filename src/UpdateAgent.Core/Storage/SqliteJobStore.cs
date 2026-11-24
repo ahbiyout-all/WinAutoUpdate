@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using UpdateAgent.Guards;
 using UpdateAgent.Shared.Models;
 using UpdateAgent.Shared.Serialization;
 
@@ -98,7 +99,7 @@ public sealed class SqliteJobStore : IJobStore
         command.Parameters.AddWithValue("$id", detail.Summary.JobId);
         command.Parameters.AddWithValue("$agent", detail.Summary.AgentId);
         command.Parameters.AddWithValue("$state", (int)detail.Summary.State);
-        command.Parameters.AddWithValue("$updated", detail.Summary.UpdatedAt.ToString("O"));
+        command.Parameters.AddWithValue("$updated", UtcClock.Format(detail.Summary.UpdatedAt));
         command.Parameters.AddWithValue("$json", UpdateAgentJson.Serialize(detail));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -166,7 +167,7 @@ public sealed class SqliteJobStore : IJobStore
             VALUES($job, $ts, $level, $message);
             """;
         command.Parameters.AddWithValue("$job", jobId);
-        command.Parameters.AddWithValue("$ts", DateTimeOffset.Now.ToString("O"));
+        command.Parameters.AddWithValue("$ts", UtcClock.FormatNow());
         command.Parameters.AddWithValue("$level", level);
         command.Parameters.AddWithValue("$message", message);
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -222,7 +223,7 @@ public sealed class SqliteJobStore : IJobStore
             """;
         command.Parameters.AddWithValue("$key", key);
         command.Parameters.AddWithValue("$value", value);
-        command.Parameters.AddWithValue("$ts", DateTimeOffset.Now.ToString("O"));
+        command.Parameters.AddWithValue("$ts", UtcClock.FormatNow());
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 

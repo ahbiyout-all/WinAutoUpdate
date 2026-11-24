@@ -166,13 +166,13 @@ app.MapGet("/api/admin/overview", async (LabStore labStore, CancellationToken ca
 {
     var agents = await labStore.GetAgentsAsync(cancellationToken);
     var jobs = await labStore.GetJobsAsync(200, cancellationToken);
-    var active = jobs.Count(j => !j.Summary.IsTerminal);
+    var active = await labStore.CountActiveJobsAsync(cancellationToken);
 
     return Results.Ok(new OverviewResponse
     {
         AgentCount = agents.Count,
         OnlineCount = agents.Count(a => a.Online),
-        BusyCount = agents.Count(a => a.Telemetry.State is AgentState.Busy or AgentState.Rebooting),
+        BusyCount = agents.Count(a => UpdateAgent.Guards.JobStateRules.IsBusy(a.Telemetry.State.ToString())),
         ActiveJobs = active,
         CompletedJobs = jobs.Count(j => j.Summary.State == UpdateJobState.Completed),
         FailedJobs = jobs.Count(j => j.Summary.State == UpdateJobState.Failed),
@@ -497,7 +497,7 @@ app.MapPost("/api/admin/jobs/start", async (
     var jobIds = new List<string>();
     var errors = new List<string>();
     var warnings = new List<string>();
-    var now = DateTimeOffset.UtcNow;
+    var now = UpdateAgent.Guards.UtcClock.Now;
 
     foreach (var agentId in request.AgentIds.Distinct(StringComparer.OrdinalIgnoreCase))
     {
@@ -527,7 +527,7 @@ app.MapPost("/api/admin/jobs/start", async (
             continue;
         }
 
-        var jobId = $"job-{now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}"[..24];
+        var jobId = UpdateAgent.Guards.JobIdGuard.Create(now, Guid.NewGuid());
 
         await labStore.SaveJobSummaryAsync(new JobSummary
         {

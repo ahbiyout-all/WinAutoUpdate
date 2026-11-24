@@ -30,7 +30,7 @@ public sealed record WuaScanResult
 {
     public IReadOnlyList<WuaUpdate> Updates { get; init; } = [];
     public WuaSystemStatus Status { get; init; } = new();
-    public DateTimeOffset ScannedAt { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset ScannedAt { get; init; } = UpdateAgent.Guards.UtcClock.Now;
 
     public int TotalCount => Updates.Count;
 }

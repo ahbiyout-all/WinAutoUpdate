@@ -33,7 +33,7 @@ public sealed record AppUpdateInfo
 
     public long? AssetSizeBytes { get; init; }
 
-    public DateTimeOffset CheckedAt { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset CheckedAt { get; init; } = UpdateAgent.Guards.UtcClock.Now;
 
     /// <summary>조회 실패 사유. 성공 시 null.</summary>
     public string? Error { get; init; }
@@ -47,6 +47,6 @@ public sealed record AppUpdateInfo
         ReleaseUrl = UpdateAgentConstants.GitHubReleasesUrl,
         RepositoryUrl = UpdateAgentConstants.GitHubRepositoryUrl,
         Error = error,
-        CheckedAt = DateTimeOffset.Now,
+        CheckedAt = UpdateAgent.Guards.UtcClock.Now,
     };
 }

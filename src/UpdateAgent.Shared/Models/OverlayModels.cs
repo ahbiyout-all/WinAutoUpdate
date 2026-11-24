@@ -45,5 +45,5 @@ public sealed record OverlayReply
     public bool Ok { get; init; } = true;
     public string Message { get; init; } = "";
     public int SessionId { get; init; }
-    public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset Timestamp { get; init; } = UpdateAgent.Guards.UtcClock.Now;
 }

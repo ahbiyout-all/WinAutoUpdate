@@ -132,8 +132,60 @@ public sealed class Audit25LabManagerTests
 
             var result = await ProcessAsync(request, store);
 
-            Assert.Equal(BadRequest, result.StatusCode);
-            Assert.Null(result.Response);
+            // 거부된 결과도 ack로 돌려줘야 에이전트 큐가 영구히 막히지 않는다.
+            Assert.Equal(Ok, result.StatusCode);
+            var response = Assert.IsType<AgentCheckInResponse>(result.Response);
+            var outcome = Assert.Single(response.CommandResultOutcomes);
+            Assert.Equal("cmd-foreign", outcome.CommandId);
+            Assert.False(outcome.Accepted);
+            Assert.Contains("자신의 명령 결과", response.Notice);
+        });
+    }
+
+    [Fact]
+    public async Task CheckIn_OversizedResultBatch_IsAcknowledgedWithoutDatabaseWrites()
+    {
+        await WithStoreAsync(async (store, _) =>
+        {
+            var results = Enumerable.Range(0, 101)
+                .Select(i => new CommandResult
+                {
+                    CommandId = $"cmd-{i:D3}",
+                    AgentId = "pc-1",
+                    Message = "완료",
+                    CompletedAt = DateTimeOffset.UtcNow,
+                })
+                .ToList();
+            var request = new AgentCheckInRequest
+            {
+                Agent = new AgentInfo { AgentId = "pc-1", MachineName = "PC-01" },
+                Telemetry = new AgentTelemetry { AgentId = "pc-1" },
+                CommandResults = results,
+            };
+
+            var result = await ProcessAsync(request, store);
+
+            Assert.Equal(Ok, result.StatusCode);
+            var response = Assert.IsType<AgentCheckInResponse>(result.Response);
+            Assert.Equal(results.Count, response.CommandResultOutcomes.Count);
+            Assert.All(response.CommandResultOutcomes, o => Assert.False(o.Accepted));
+            Assert.Contains("배치가 너무 큽니다", response.Notice);
+            var audit = await store.GetAuditAsync(100);
+            Assert.DoesNotContain(audit, a => a.Action == "command-ok");
+        });
+    }
+
+    [Fact]
+    public async Task LabStore_TruncatesClientSuppliedAuditText()
+    {
+        await WithStoreAsync(async (store, _) =>
+        {
+            var longText = new string('x', 2000);
+            await store.AddAuditAsync("agent", "command-fail", "pc-1", longText);
+
+            var audit = await store.GetAuditAsync(10);
+            var row = Assert.Single(audit);
+            Assert.Equal(512, row.Detail.Length);
         });
     }
 
@@ -244,6 +296,27 @@ public sealed class Audit25LabManagerTests
     }
 
     // ---------------- F. 게이트 상한/보존 ----------------
+
+    [Fact]
+    public async Task CheckinGate_TimeoutDoesNotOverReleaseSemaphore()
+    {
+        // 대기 시간이 초과된 요청은 세마포어를 얻지 못했으므로 해제해서는 안 된다.
+        var gates = new CheckinGateRegistry(TimeSpan.FromMilliseconds(50));
+        var first = await gates.TryAcquireAsync("pc-1");
+        Assert.NotNull(first);
+
+        var timedOut = await gates.TryAcquireAsync("pc-1");
+        Assert.Null(timedOut);
+
+        first!.Dispose();
+
+        // 잘못 해제했다면 두 번째 요청이 동시에 들어올 수 있다.
+        var again = await gates.TryAcquireAsync("pc-1");
+        Assert.NotNull(again);
+        var concurrent = await gates.TryAcquireAsync("pc-1");
+        Assert.Null(concurrent);
+        again!.Dispose();
+    }
 
     [Fact]
     public async Task CheckinGates_DoNotExceedCap_UnderConcurrentNewAgents()

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using UpdateAgent.Guards;
 
 namespace UpdateAgent.LabManager.Desktop.Services;
 
@@ -77,24 +78,35 @@ public sealed class LabManagerServer
             return false;
         }
 
-        var deadline = DateTimeOffset.UtcNow + StartupTimeout;
-        while (DateTimeOffset.UtcNow < deadline)
+        try
         {
-            await Task.Delay(300, cancellationToken).ConfigureAwait(false);
-
-            if (await IsHealthyAsync(cancellationToken).ConfigureAwait(false))
+            var deadline = UtcClock.Now + StartupTimeout;
+            while (UtcClock.Now < deadline)
             {
-                return true;
+                await Task.Delay(300, cancellationToken).ConfigureAwait(false);
+
+                if (await IsHealthyAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    return true;
+                }
+
+                if (_process.HasExited)
+                {
+                    LocalServerExited = true;
+                    Stop();
+                    return false;
+                }
             }
 
-            if (_process.HasExited)
-            {
-                LocalServerExited = true;
-                return false;
-            }
+            // 시작에 실패한 프로세스를 남기면 다음 실행에서 포트가 점유된 채로 남는다.
+            Stop();
+            return false;
         }
-
-        return false;
+        catch (OperationCanceledException)
+        {
+            Stop();
+            throw;
+        }
     }
 
     private async Task<bool> IsHealthyAsync(CancellationToken cancellationToken)
@@ -119,16 +131,13 @@ public sealed class LabManagerServer
     /// </summary>
     private Uri BuildHealthUrl()
     {
-        var baseUrl = _settings.ServerUrl.TrimEnd('/') + "/";
-        var uri = new Uri(baseUrl, UriKind.Absolute);
-
-        if (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+        // 브라우저 런처와 같은 규칙을 사용해 잘못된 주소로 HTTP 요청을 보내지 않는다.
+        var url = UrlGuard.CombineBrowserUrl(_settings.ServerUrl, "api/health");
+        if (url is null || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
         {
-            var builder = new UriBuilder(uri) { Host = "127.0.0.1" };
-            baseUrl = builder.Uri.AbsoluteUri.TrimEnd('/') + "/";
+            throw new InvalidOperationException("안전하지 않은 LabManager 주소입니다.");
         }
-
-        return new Uri(new Uri(baseUrl, UriKind.Absolute), "api/health");
+        return uri;
     }
 
     /// <summary>데스크톱이 시작한 서버만 종료한다.</summary>

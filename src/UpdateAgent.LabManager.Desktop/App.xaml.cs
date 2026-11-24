@@ -55,8 +55,8 @@ public partial class App : Application
         if (!opened)
         {
             ShowError(
-                "Microsoft Edge 또는 Google Chrome을 찾을 수 없습니다.\n\n" +
-                "브라우저를 설치한 뒤 다시 실행하세요.");
+                "대시보드 브라우저 창을 열지 못했습니다.\n\n" +
+                "Microsoft Edge 또는 Google Chrome 설치와 실행 권한을 확인한 뒤 다시 실행하세요.");
             Shutdown();
             return;
         }

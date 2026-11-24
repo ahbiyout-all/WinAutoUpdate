@@ -11,9 +11,20 @@ public sealed class CheckinGateRegistry
 {
     private const int MaxAgents = 200;
     private static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan AcquireTimeout = TimeSpan.FromSeconds(10);
 
     private readonly object _sync = new();
     private readonly ConcurrentDictionary<string, Gate> _gates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly TimeSpan _acquireTimeout;
+
+    public CheckinGateRegistry() : this(AcquireTimeout)
+    {
+    }
+
+    internal CheckinGateRegistry(TimeSpan acquireTimeout)
+    {
+        _acquireTimeout = acquireTimeout;
+    }
 
     /// <summary>게이트를 획득한다. 상한에 도달했으면 null(429)을 반환한다.</summary>
     public async Task<GateLease?> TryAcquireAsync(
@@ -36,24 +47,35 @@ public sealed class CheckinGateRegistry
 
         try
         {
-            await gate.Semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            // 같은 PC의 체크인이 길게 붙잡히면 무한 대기하지 않고 429로 돌려준다.
+            if (!await gate.Semaphore.WaitAsync(_acquireTimeout, cancellationToken).ConfigureAwait(false))
+            {
+                // 세마포어를 얻지 못했으므로 해제하면 안 된다. 예약 수만 되돌린다.
+                ReleaseReservation(gate);
+                return null;
+            }
             Volatile.Write(ref gate.LastUsedTicks, DateTimeOffset.UtcNow.UtcTicks);
             return new GateLease(this, gate);
         }
         catch
         {
-            Release(gate);
+            ReleaseReservation(gate);
             throw;
         }
     }
 
-    private void Release(Gate gate)
+    private void ReleaseReservation(Gate gate)
     {
         lock (_sync)
         {
             gate.ActiveCount--;
         }
+    }
+
+    private void Release(Gate gate)
+    {
         gate.Semaphore.Release();
+        ReleaseReservation(gate);
     }
 
     private void RemoveIdleGates(DateTimeOffset now)

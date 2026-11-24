@@ -16,9 +16,15 @@ public static class TokenGuard
     private const string SamplePrefix = "sample-";
     private const string SampleSuffix = "-replace-before-pilot";
 
-    /// <summary>BOM과 바깥 공백을 제거해 모든 호출자가 같은 문자열을 비교하게 한다.</summary>
-    public static string Normalize(string? token) =>
-        (token ?? string.Empty).Replace("\uFEFF", string.Empty, StringComparison.Ordinal).Trim();
+    /// <summary>
+    /// 바깥 공백과 앞의 BOM만 제거한다. 토큰 내부의 U+FEFF는 의미 있는 문자로 유지해
+    /// 서로 다른 토큰이 같게 취급되지 않게 한다.
+    /// </summary>
+    public static string Normalize(string? token)
+    {
+        var value = (token ?? string.Empty).Trim();
+        return value.TrimStart('\uFEFF').Trim();
+    }
 
     /// <summary>공개된 기본값/샘플 토큰인지 판별한다. 파일럿 전에 반드시 교체해야 한다.</summary>
     public static bool IsPlaceholder(string? token)
@@ -39,6 +45,7 @@ public static class TokenGuard
 
     /// <summary>
     /// 해시를 고정 시간으로 비교한다. 빈 토큰은 항상 거부해 빈 값끼리 일치하는 사고를 막는다.
+    /// 해시 계산 자체는 입력 길이에 비례하지만, 최종 비교는 항상 32바이트를 사용한다.
     /// </summary>
     public static bool FixedTimeEquals(string? left, string? right)
     {
@@ -51,7 +58,15 @@ public static class TokenGuard
         return CryptographicOperations.FixedTimeEquals(hashFirst, hashSecond);
     }
 
-    /// <summary>관리자 토큰과 에이전트 토큰이 서로 다른지 확인한다.</summary>
-    public static bool AreDistinct(string? adminToken, string? agentToken) =>
-        !FixedTimeEquals(adminToken, agentToken);
+    /// <summary>
+    /// 관리자 토큰과 에이전트 토큰이 서로 다른지 확인한다.
+    /// 어느 쪽이든 비어 있으면 서로 다르더라도 유효한 설정이 아니므로 false를 반환한다.
+    /// </summary>
+    public static bool AreDistinct(string? adminToken, string? agentToken)
+    {
+        var admin = Normalize(adminToken);
+        var agent = Normalize(agentToken);
+        if (admin.Length == 0 || agent.Length == 0) return false;
+        return !FixedTimeEquals(admin, agent);
+    }
 }

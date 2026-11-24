@@ -14,7 +14,7 @@ public sealed class UpdateCheckService
     private readonly ILogger<UpdateCheckService> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    private AppUpdateInfo? _cached;
+    private volatile AppUpdateInfo? _cached;
 
     public UpdateCheckService(
         IHttpClientFactory httpClientFactory,
@@ -26,15 +26,11 @@ public sealed class UpdateCheckService
 
     public async Task<AppUpdateInfo> GetAsync(bool force, CancellationToken cancellationToken)
     {
-        if (!force && TryGetCached(out var cached))
-        {
-            return cached;
-        }
-
+        // force 요청도 게이트를 통과해야 동시에 여러 번 GitHub를 호출하지 않는다.
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!force && TryGetCached(out cached))
+            if (!force && TryGetCached(out var cached))
             {
                 return cached;
             }

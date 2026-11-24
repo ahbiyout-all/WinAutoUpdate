@@ -1,3 +1,4 @@
+using UpdateAgent.Guards;
 using UpdateAgent.LabManager.Live;
 using UpdateAgent.LabManager.Storage;
 using UpdateAgent.Shared.Models;
@@ -18,7 +19,9 @@ public sealed record CheckInProcessingResult(
 public static class AgentCheckInHandler
 {
     private const int MaxCommandsPerCheckIn = 20;
+    private const int MaxCommandResultsPerCheckIn = 100;
     private const int MaxRejectedAuditRowsPerCheckIn = 20;
+    private const int MaxKnownAgents = 200;
 
     public static async Task<CheckInProcessingResult> ProcessAsync(
         AgentCheckInRequest request,
@@ -30,8 +33,7 @@ public static class AgentCheckInHandler
     {
         // 공유 에이전트 토큰으로 임의 ID를 무한 생성해 DB/메모리를 오염시키지 않는다.
         var agentId = request.Agent.AgentId;
-        if (string.IsNullOrWhiteSpace(agentId) || agentId.Length > 128 ||
-            agentId.Any(c => !char.IsLetterOrDigit(c) && c is not '-' and not '_'))
+        if (!TextGuard.IsSafeIdentifier(agentId))
         {
             await labStore.AddAuditAsync(
                 "agent", "checkin-rejected", request.Agent.MachineName,
@@ -47,31 +49,138 @@ public static class AgentCheckInHandler
                 StatusCodes.Status429TooManyRequests, Error: "동시 체크인 요청이 많습니다.");
         }
 
+        var receivedAt = UtcTimestamps.Now;
+        var summary = request.Telemetry.CurrentJob;
+        var commandResults = request.CommandResults ?? [];
+
         if (!JobStateGuard.AgentIdsMatch(request.Agent.AgentId, request.Telemetry.AgentId))
         {
             await labStore.AddAuditAsync(
-                "agent",
-                "job-state-rejected",
+                "agent", "job-state-rejected",
                 $"{request.Agent.MachineName}/{request.Telemetry.AgentId}",
-                "에이전트 정보와 텔레메트리의 에이전트 ID 불일치",
-                cancellationToken);
+                "에이전트 정보와 텔레메트리의 에이전트 ID 불일치", cancellationToken);
             return new CheckInProcessingResult(
                 StatusCodes.Status400BadRequest, Error: "에이전트 ID가 일치하지 않습니다.");
         }
 
+        if (summary is not null && !TextGuard.IsSafeIdentifier(summary.JobId))
+        {
+            await labStore.AddAuditAsync(
+                "agent", "job-state-rejected",
+                $"{request.Agent.MachineName}/{summary.JobId}",
+                "잘못된 작업 ID 형식", cancellationToken);
+            return new CheckInProcessingResult(
+                StatusCodes.Status400BadRequest, Error: "작업 ID 형식이 올바르지 않습니다.");
+        }
+
+        // 거부 응답에도 모든 결과 ID를 ack로 돌려줘야 에이전트 큐가 영구히 막히지 않는다.
+        if (commandResults.Count > MaxCommandResultsPerCheckIn)
+        {
+            await labStore.AddAuditAsync(
+                "agent", "command-result-batch-rejected", request.Agent.MachineName,
+                $"명령 결과 {commandResults.Count}건이 상한 {MaxCommandResultsPerCheckIn}건을 초과",
+                cancellationToken);
+            return AcknowledgeAll(receivedAt, commandResults, "명령 결과 배치가 너무 큽니다.");
+        }
+
+        var foreignResults = commandResults
+            .Where(r => !string.Equals(r.AgentId, request.Agent.AgentId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (foreignResults.Count > 0)
+        {
+            await labStore.AddAuditAsync(
+                "agent", "command-result-rejected",
+                $"{request.Agent.MachineName}/{foreignResults.Count}",
+                "다른 에이전트의 명령 결과 제출", cancellationToken);
+            return AcknowledgeAll(receivedAt, commandResults, "자신의 명령 결과만 제출할 수 있습니다.");
+        }
+
+        // 검증을 통과한 체크인만 에이전트 정보를 갱신한다.
+        // 유효한 ID를 계속 새로 만들어 DB를 채우는 것도 막는다.
+        if (await labStore.GetAgentAsync(agentId, cancellationToken) is null &&
+            await labStore.CountAgentsAsync(cancellationToken) >= MaxKnownAgents)
+        {
+            await labStore.AddAuditAsync(
+                "agent", "checkin-rejected", request.Agent.MachineName,
+                "등록 가능한 에이전트 수 상한 초과", cancellationToken);
+            return new CheckInProcessingResult(
+                StatusCodes.Status429TooManyRequests, Error: "등록 가능한 PC 수를 초과했습니다.");
+        }
+
         await labStore.UpsertAgentAsync(request.Agent, request.Telemetry, cancellationToken);
 
-        // 상태 검증과 저장에 사용하는 시각은 서버 수신 시각(UTC)이다.
-        var receivedAt = UtcTimestamps.Now;
-        var summary = request.Telemetry.CurrentJob;
+        IReadOnlyList<CommandResultOutcome> outcomes = [];
+        if (commandResults.Count > 0)
+        {
+            var accepted = await labStore.CompleteCommandResultsAsync(
+                request.Agent.AgentId, commandResults, cancellationToken);
+            var resultOutcomes = new List<CommandResultOutcome>(commandResults.Count);
+            var rejectedAuditRows = 0;
+            var rejectedTotal = 0;
+
+            foreach (var result in commandResults)
+            {
+                var isAccepted = accepted.Contains(result.CommandId);
+                resultOutcomes.Add(new CommandResultOutcome
+                {
+                    CommandId = result.CommandId,
+                    Accepted = isAccepted,
+                });
+
+                if (!isAccepted)
+                {
+                    rejectedTotal++;
+                    // 거부 결과가 대량으로 들어와도 감사 테이블을 채우지 않는다.
+                    // ID는 위 outcomes에 모두 남기므로 에이전트 ack에는 영향이 없다.
+                    if (rejectedAuditRows < MaxRejectedAuditRowsPerCheckIn)
+                    {
+                        await labStore.AddAuditAsync(
+                            "agent",
+                            "command-result-rejected",
+                            $"{request.Agent.MachineName}/{result.CommandId}",
+                            "알 수 없거나 이미 완료/만료된 명령 결과",
+                            cancellationToken);
+                        rejectedAuditRows++;
+                    }
+                    continue;
+                }
+
+                await labStore.AddAuditAsync(
+                    "agent",
+                    result.Success ? "command-ok" : "command-fail",
+                    $"{request.Agent.MachineName}/{result.CommandId}",
+                    TextGuard.Truncate(result.Message, TextGuard.MaxAuditTextLength),
+                    cancellationToken);
+            }
+
+            if (rejectedTotal > rejectedAuditRows)
+            {
+                await labStore.AddAuditAsync(
+                    "agent",
+                    "command-result-audit-truncated",
+                    request.Agent.MachineName,
+                    $"거부된 명령 결과 {rejectedTotal}건 중 {rejectedAuditRows}건만 감사 로그에 기록",
+                    cancellationToken);
+            }
+
+            outcomes = resultOutcomes;
+
+            // StartJob 명령이 실패하면 서버 작업이 Pending에 남지 않도록 실패로 정리한다.
+            // 텔레메트리보다 먼저 처리해야 학생이 보낸 상충하는 완료 보고가 실패 상태를 덮지 않는다.
+            foreach (var result in commandResults.Where(r => !r.Success && accepted.Contains(r.CommandId)))
+            {
+                await FailJobForRejectedCommandAsync(
+                    labStore, request.Agent.AgentId, result, receivedAt, cancellationToken);
+            }
+        }
+
         if (summary is not null)
         {
             var previous = await labStore.GetJobAsync(summary.JobId, cancellationToken);
             if (!JobStateGuard.CanAccept(previous?.Summary, summary, request.Agent.AgentId, receivedAt))
             {
                 await labStore.AddAuditAsync(
-                    "agent",
-                    "job-state-rejected",
+                    "agent", "job-state-rejected",
                     $"{request.Agent.MachineName}/{summary.JobId}",
                     $"소유자/종료 상태/시간 순서 검증 실패: {summary.State} ({summary.Phase})",
                     cancellationToken);
@@ -80,8 +189,7 @@ public static class AgentCheckInHandler
                      !JobStateGuard.DetailSummaryMatches(summary, mismatchedDetail.Summary))
             {
                 await labStore.AddAuditAsync(
-                    "agent",
-                    "job-state-rejected",
+                    "agent", "job-state-rejected",
                     $"{request.Agent.MachineName}/{summary.JobId}",
                     $"작업 상세 요약 불일치: {mismatchedDetail.Summary.State}",
                     cancellationToken);
@@ -121,94 +229,11 @@ public static class AgentCheckInHandler
                 if (previous is null || previous.Summary.State != validated.State)
                 {
                     await labStore.AddAuditAsync(
-                        "agent",
-                        "job-state",
+                        "agent", "job-state",
                         $"{request.Agent.MachineName}/{validated.JobId}",
                         $"{previous?.Summary.State.ToString() ?? "없음"} → {validated.State} ({validated.Phase})",
                         cancellationToken);
                 }
-            }
-        }
-
-        var commandResults = request.CommandResults ?? [];
-        IReadOnlyList<CommandResultOutcome> outcomes = [];
-        if (commandResults.Count > 0)
-        {
-            // 공유 토큰 환경에서 다른 에이전트의 명령 결과를 위조해 제출할 수 없도록
-            // 보고된 AgentId가 체크인 주체와 다르면 전체 결과를 거부한다.
-            var foreignResults = commandResults
-                .Where(r => !string.Equals(r.AgentId, request.Agent.AgentId, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            if (foreignResults.Count > 0)
-            {
-                await labStore.AddAuditAsync(
-                    "agent",
-                    "command-result-rejected",
-                    $"{request.Agent.MachineName}/{foreignResults.Count}",
-                    "다른 에이전트의 명령 결과 제출",
-                    cancellationToken);
-                return new CheckInProcessingResult(
-                    StatusCodes.Status400BadRequest, Error: "자신의 명령 결과만 제출할 수 있습니다.");
-            }
-
-            var accepted = await labStore.CompleteCommandResultsAsync(
-                request.Agent.AgentId, commandResults, cancellationToken);
-            var resultOutcomes = new List<CommandResultOutcome>(commandResults.Count);
-            var rejectedAuditRows = 0;
-            var rejectedTotal = 0;
-
-            foreach (var result in commandResults)
-            {
-                var isAccepted = accepted.Contains(result.CommandId);
-                resultOutcomes.Add(new CommandResultOutcome
-                {
-                    CommandId = result.CommandId,
-                    Accepted = isAccepted,
-                });
-
-                if (!isAccepted)
-                {
-                    rejectedTotal++;
-                    // 거부 결과가 대량으로 들어와도 감사 테이블을 채우지 않는다.
-                    // ID는 위 outcomes에 모두 남기므로 에이전트 ack에는 영향이 없다.
-                    if (rejectedAuditRows < MaxRejectedAuditRowsPerCheckIn)
-                    {
-                        await labStore.AddAuditAsync(
-                            "agent",
-                            "command-result-rejected",
-                            $"{request.Agent.MachineName}/{result.CommandId}",
-                            "알 수 없거나 이미 완료/만료된 명령 결과",
-                            cancellationToken);
-                        rejectedAuditRows++;
-                    }
-                    continue;
-                }
-
-                await labStore.AddAuditAsync(
-                    "agent",
-                    result.Success ? "command-ok" : "command-fail",
-                    $"{request.Agent.MachineName}/{result.CommandId}",
-                    result.Message,
-                    cancellationToken);
-            }
-
-            if (rejectedTotal > rejectedAuditRows)
-            {
-                await labStore.AddAuditAsync(
-                    "agent",
-                    "command-result-audit-truncated",
-                    request.Agent.MachineName,
-                    $"거부된 명령 결과 {rejectedTotal}건 중 {rejectedAuditRows}건만 감사 로그에 기록",
-                    cancellationToken);
-            }
-
-            outcomes = resultOutcomes;
-
-            // StartJob 명령이 실패하면 서버 작업이 Pending에 남지 않도록 실패로 정리한다.
-            foreach (var result in commandResults.Where(r => !r.Success && accepted.Contains(r.CommandId)))
-            {
-                await FailJobForRejectedCommandAsync(
-                    labStore, request.Agent.AgentId, result, cancellationToken);
             }
         }
 
@@ -230,7 +255,7 @@ public static class AgentCheckInHandler
             StatusCodes.Status200OK,
             new AgentCheckInResponse
             {
-                ServerTime = UtcTimestamps.Now,
+                ServerTime = receivedAt,
                 Commands = commands,
                 Policy = policy,
                 MaestroManualConfirmationRequired = policy.RequireMaestroManualConfirmation,
@@ -238,10 +263,29 @@ public static class AgentCheckInHandler
             });
     }
 
+    private static CheckInProcessingResult AcknowledgeAll(
+        DateTimeOffset serverTime,
+        IReadOnlyList<CommandResult> results,
+        string notice) =>
+        new(StatusCodes.Status200OK,
+            new AgentCheckInResponse
+            {
+                ServerTime = serverTime,
+                CommandResultOutcomes = results
+                    .Select(r => new CommandResultOutcome
+                    {
+                        CommandId = r.CommandId,
+                        Accepted = false,
+                    })
+                    .ToList(),
+                Notice = notice,
+            });
+
     private static async Task FailJobForRejectedCommandAsync(
         LabStore store,
         string reportingAgentId,
         CommandResult result,
+        DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         var command = await store.GetCommandAsync(result.CommandId, cancellationToken);
@@ -255,13 +299,12 @@ public static class AgentCheckInHandler
         if (job is null || job.Summary.IsTerminal) return;
         if (!string.Equals(job.Summary.AgentId, reportingAgentId, StringComparison.OrdinalIgnoreCase)) return;
 
-        var now = UtcTimestamps.Now;
         var failed = job.Summary with
         {
             State = UpdateJobState.Failed,
             Phase = "시작 실패",
-            Message = result.Message,
-            LastError = result.Message,
+            Message = TextGuard.Truncate(result.Message, TextGuard.MaxAuditTextLength),
+            LastError = TextGuard.Truncate(result.Message, TextGuard.MaxAuditTextLength),
             UpdatedAt = now,
             ReportedAt = now,
             CompletedAt = now,
@@ -272,7 +315,7 @@ public static class AgentCheckInHandler
             "system",
             "job-failed",
             $"{job.MachineName}/{jobId}",
-            $"시작 명령 거부: {result.Message}",
+            $"시작 명령 거부: {TextGuard.Truncate(result.Message, TextGuard.MaxAuditTextLength)}",
             cancellationToken);
     }
 }

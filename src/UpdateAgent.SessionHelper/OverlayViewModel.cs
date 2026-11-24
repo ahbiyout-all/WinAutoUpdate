@@ -130,7 +130,7 @@ public sealed class OverlayViewModel : INotifyPropertyChanged
             _ => summary.Phase,
         };
 
-        var progress = Math.Clamp(summary.ProgressPercent, 0, 100);
+        var progress = UpdateAgent.Guards.ProgressGuard.Display(summary.ProgressPercent);
         PercentText = $"{progress}%";
         ProgressValue = progress;
         KbLabel = string.IsNullOrWhiteSpace(summary.CurrentKb) ? "" : summary.CurrentKb!;

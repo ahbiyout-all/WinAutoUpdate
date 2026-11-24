@@ -124,7 +124,7 @@ public sealed class GitHubReleaseChecker
                     ? null
                     : SanitizeUrl(asset.BrowserDownloadUrl, UpdateAgentConstants.GitHubReleasesUrl),
                 AssetSizeBytes = asset?.Size,
-                CheckedAt = DateTimeOffset.UtcNow,
+                CheckedAt = UpdateAgent.Guards.UtcClock.Now,
             };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -137,43 +137,13 @@ public sealed class GitHubReleaseChecker
         }
     }
 
-    /// <summary>태그/버전 문자열에서 앞의 v와 공백을 제거한다.</summary>
-    public static string NormalizeVersion(string value)
-    {
-        var normalized = (value ?? string.Empty).Trim();
-        if (normalized.StartsWith('v') || normalized.StartsWith('V'))
-        {
-            normalized = normalized[1..];
-        }
-
-        return normalized.Trim();
-    }
+    /// <summary>태그/버전 문자열에서 앞의 v와 공백을 제거한다. 규칙은 Guard DLL에 단일 정의되어 있다.</summary>
+    public static string NormalizeVersion(string value) =>
+        UpdateAgent.Guards.VersionGuard.Normalize(value);
 
     /// <summary>candidate가 current보다 새 버전인지 판단한다.</summary>
-    public static bool IsNewer(string candidate, string current)
-    {
-        if (TryParseVersion(candidate, out var candidateVersion) &&
-            TryParseVersion(current, out var currentVersion))
-        {
-            return candidateVersion > currentVersion;
-        }
-
-        // 숫자 버전으로 해석할 수 없는 태그는 업데이트로 취급하지 않는다.
-        // (예: release-2026, nightly 등이 잘못된 다운로드 팝업을 띄우지 않도록)
-        return false;
-    }
-
-    private static bool TryParseVersion(string value, out Version version)
-    {
-        var normalized = NormalizeVersion(value);
-        var metadata = normalized.IndexOfAny(['-', '+']);
-        if (metadata >= 0)
-        {
-            normalized = normalized[..metadata];
-        }
-
-        return Version.TryParse(normalized, out version!);
-    }
+    public static bool IsNewer(string candidate, string current) =>
+        UpdateAgent.Guards.VersionGuard.IsNewer(candidate, current);
 
     private sealed class GitHubRelease
     {

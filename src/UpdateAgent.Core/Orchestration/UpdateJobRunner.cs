@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using UpdateAgent.Guards;
 using UpdateAgent.Core.Maestro;
 using UpdateAgent.Core.Policy;
 using UpdateAgent.Core.Preflight;
@@ -110,7 +111,9 @@ public sealed class UpdateJobRunner : IAsyncDisposable
     {
         EnsureInitialized();
         var scanner = new UpdateScanner(_wua, _os);
-        return await scanner.ScanAsync(policy.SanitizeFor(_os), cancellationToken);
+        // 검색 결과와 실제 실행이 같은 정책 규칙을 사용해야 한다.
+        // 기능 업데이트 2차 승인 전에는 검색 단계에서도 선택되지 않도록 ForExecution을 적용한다.
+        return await scanner.ScanAsync(policy.ForExecution(_os), cancellationToken);
     }
 
     public async Task<StartJobResult> StartAsync(
@@ -175,7 +178,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             }
 
             var jobId = string.IsNullOrWhiteSpace(jobIdOverride)
-                ? $"job-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}"[..24]
+                ? JobIdGuard.Create(UtcClock.Now, Guid.NewGuid())
                 : jobIdOverride;
             if (policy.RequireMaestroManualConfirmation)
             {
@@ -253,7 +256,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
                     context.LastError = verification.Message;
                     context.Message = verification.Message;
                     context.RequiresMaestroAttention = true;
-                    context.CompletedAt = DateTimeOffset.Now;
+                    context.CompletedAt = UtcClock.Now;
                     await PersistAsync(context, CancellationToken.None);
                     return context.ToSummary();
                 }
@@ -286,7 +289,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         {
             _pauseReason = reason;
             _manualPause = reason == PauseReason.Manual;
-            _pausedSince ??= DateTimeOffset.Now;
+            _pausedSince ??= UtcClock.Now;
 
             if (_activeContext is not null && !_activeContext.IsTerminal)
             {
@@ -431,7 +434,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         context.Message = _forceCancelled
             ? "강제 중단 요청으로 업데이트를 중지했습니다. 설치 중이던 항목은 완료될 수 있습니다."
             : "교사가 작업을 취소했습니다.";
-        context.CompletedAt = DateTimeOffset.Now;
+        context.CompletedAt = UtcClock.Now;
     }
 
     private void StartRunLoop(JobContext context)
@@ -445,7 +448,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         // 교사가 명시적으로 ResumeJob를 보내기 전까지 대기한다.
         var resumePaused = context.State == UpdateJobState.Paused;
         _pauseReason = resumePaused ? context.PauseReason : PauseReason.None;
-        _pausedSince = resumePaused ? context.PauseUntil ?? DateTimeOffset.Now : null;
+        _pausedSince = resumePaused ? context.PauseUntil ?? UtcClock.Now : null;
         _manualPause = resumePaused && context.PauseReason == PauseReason.Manual;
         _runCts = new CancellationTokenSource();
         var token = _runCts.Token;
@@ -583,7 +586,8 @@ public sealed class UpdateJobRunner : IAsyncDisposable
                     }
                     else
                     {
-                        result = await InstallWithBusyRetryAsync(native, cancellationToken);
+                        result = await InstallWithBusyRetryAsync(
+                            native, context.Policy, cancellationToken);
                     }
 
                     if (result.Success)
@@ -654,7 +658,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             context.Phase = "실패";
             context.LastError = ex.Message;
             context.Message = ex.Message;
-            context.CompletedAt = DateTimeOffset.Now;
+            context.CompletedAt = UtcClock.Now;
             context.RequiresMaestroAttention = context.RequiresMaestroAttention || context.RebootCount > 0;
             await PersistSafeAsync(context);
             _logger.LogError(ex, "작업 실패: {JobId}", context.JobId);
@@ -665,7 +669,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             context.Phase = "실패";
             context.LastError = ex.Message;
             context.Message = $"예기치 않은 오류: {ex.Message}";
-            context.CompletedAt = DateTimeOffset.Now;
+            context.CompletedAt = UtcClock.Now;
             await PersistSafeAsync(context);
             _logger.LogError(ex, "작업 중 예외: {JobId}", context.JobId);
         }
@@ -678,9 +682,17 @@ public sealed class UpdateJobRunner : IAsyncDisposable
 
     private async Task<WuaInstallResult> InstallWithBusyRetryAsync(
         WuaUpdate update,
+        UpdatePolicy policy,
         CancellationToken cancellationToken)
     {
-        for (var attempt = 0; attempt < 3; attempt++)
+        // 정책의 WuBusyWaitMinutes가 실제 대기 시간을 결정한다. 무한 대기하지 않도록
+        // 0/음수는 1분으로 보정하고, 마지막 재시도는 남은 시간만 기다린다.
+        var retryDelay = TimeSpan.FromSeconds(30);
+        var maxWait = TimeSpan.FromMinutes(Math.Max(1, policy.WuBusyWaitMinutes));
+        var deadline = UtcClock.Now + maxWait;
+        var attempt = 0;
+
+        while (true)
         {
             var result = await _wua.InstallAsync(update, cancellationToken);
             if (result.Success) return result;
@@ -691,17 +703,24 @@ public sealed class UpdateJobRunner : IAsyncDisposable
 
             if (!busy) return result;
 
+            var remaining = deadline - UtcClock.Now;
+            if (remaining <= TimeSpan.Zero) break;
+
+            var delay = remaining < retryDelay ? remaining : retryDelay;
+            attempt++;
             _logger.LogWarning(
-                "Windows Update가 사용 중입니다. 30초 후 재시도 ({Attempt}/3): {Message}",
-                attempt + 1,
+                "Windows Update가 사용 중입니다. {Delay}초 후 재시도 ({Attempt}): {Message}",
+                (int)delay.TotalSeconds,
+                attempt,
                 result.Message);
-            await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+            await Task.Delay(delay, cancellationToken);
         }
 
         return WuaInstallResult.Failed(
             5,
             0,
-            "Windows Update가 계속 사용 중입니다. Maestro/Windows Update 작업이 끝난 뒤 재개하세요.");
+            $"Windows Update가 {policy.WuBusyWaitMinutes}분 동안 사용 중입니다. " +
+            "Maestro/Windows Update 작업이 끝난 뒤 재개하세요.");
     }
 
     private async Task WaitForResumeAsync(JobContext context, CancellationToken cancellationToken)
@@ -711,7 +730,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         if (!_manualPause && policy.PauseOnUserLogon && _sessions.HasInteractiveUser())
         {
             _pauseReason = PauseReason.UserLoggedOn;
-            _pausedSince ??= DateTimeOffset.Now;
+            _pausedSince ??= UtcClock.Now;
         }
 
         if (!_manualPause && _pauseReason == PauseReason.None)
@@ -760,7 +779,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
 
                 if (policy.MaxPauseHours > 0
                     && _pausedSince.HasValue
-                    && DateTimeOffset.Now - _pausedSince.Value > TimeSpan.FromHours(policy.MaxPauseHours))
+                    && UtcClock.Now - _pausedSince.Value > TimeSpan.FromHours(policy.MaxPauseHours))
                 {
                     _logger.LogWarning(
                         "사용자 로그온 일시중지가 최대 시간({Hours}시간)을 초과하여 작업을 재개합니다.",
@@ -824,7 +843,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         context.State = UpdateJobState.Completed;
         context.Phase = "완료";
         context.Message = BuildCompletionMessage(context);
-        context.CompletedAt = DateTimeOffset.Now;
+        context.CompletedAt = UtcClock.Now;
         context.CurrentKb = null;
         context.PauseReason = PauseReason.None;
         context.RequiresMaestroAttention =
@@ -866,7 +885,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
 
     private void MergeItems(JobContext context, IReadOnlyList<UpdateItemInfo> selected)
     {
-        var now = DateTimeOffset.Now;
+        var now = UtcClock.Now;
         var selectedIds = selected.Select(u => u.UpdateId).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var update in selected)
@@ -936,7 +955,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         {
             State = state,
             CompletedAt = state is UpdateItemState.Installed or UpdateItemState.Failed or UpdateItemState.Skipped
-                ? DateTimeOffset.Now
+                ? UtcClock.Now
                 : context.Items[index].CompletedAt,
         };
     }
@@ -959,7 +978,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             FailureCount = failureCount,
             State = state,
             Error = error,
-            CompletedAt = state == UpdateItemState.Skipped ? DateTimeOffset.Now : null,
+            CompletedAt = state == UpdateItemState.Skipped ? UtcClock.Now : null,
         };
 
         if (state == UpdateItemState.Skipped)
@@ -971,7 +990,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
     private void CheckRuntimeLimit(JobContext context)
     {
         if (context.Policy.MaxRuntimeHours <= 0) return;
-        var elapsed = DateTimeOffset.Now - context.StartedAt;
+        var elapsed = UtcClock.Now - context.StartedAt;
         if (elapsed > TimeSpan.FromHours(context.Policy.MaxRuntimeHours))
         {
             throw new JobFailureException(
@@ -981,7 +1000,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
 
     private async Task PersistAsync(JobContext context, CancellationToken cancellationToken)
     {
-        context.UpdatedAt = DateTimeOffset.Now;
+        context.UpdatedAt = UtcClock.Now;
         var detail = context.ToDetail();
 
         await _persistLock.WaitAsync(CancellationToken.None);
@@ -1085,8 +1104,8 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         public DateTimeOffset? PauseUntil { get; set; }
         public int RebootCount { get; set; }
         public int MaxRebootCount { get; set; } = 5;
-        public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.Now;
-        public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
+        public DateTimeOffset StartedAt { get; set; } = UtcClock.Now;
+        public DateTimeOffset UpdatedAt { get; set; } = UtcClock.Now;
         public DateTimeOffset? CompletedAt { get; set; }
         public string? LastError { get; set; }
         public bool RestoreVerified { get; set; }
@@ -1094,9 +1113,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         public int PassesWithoutProgress { get; set; }
         public MarkerVerificationResult? MarkerVerification { get; set; }
 
-        public bool IsTerminal => State is UpdateJobState.Completed
-            or UpdateJobState.Failed
-            or UpdateJobState.Cancelled;
+        public bool IsTerminal => JobStateRules.IsTerminal(State.ToString());
 
         public int TotalItems => Items.Count;
         public int InstalledItems => Items.Count(i => i.State == UpdateItemState.Installed);
@@ -1105,16 +1122,8 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         public int CompletedItems => Items.Count(i =>
             i.State is UpdateItemState.Installed or UpdateItemState.Skipped or UpdateItemState.Failed);
 
-        public int ProgressPercent
-        {
-            get
-            {
-                if (State == UpdateJobState.Completed) return 100;
-                if (TotalItems == 0) return 0;
-                var percent = (int)Math.Round(CompletedItems * 100d / TotalItems);
-                return Math.Clamp(percent, 0, 99);
-            }
-        }
+        public int ProgressPercent => ProgressGuard.Percent(
+            State == UpdateJobState.Completed, CompletedItems, TotalItems);
 
         public JobSummary ToSummary() => new()
         {

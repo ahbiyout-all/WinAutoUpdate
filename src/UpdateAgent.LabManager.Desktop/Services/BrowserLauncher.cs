@@ -58,8 +58,9 @@ internal static class BrowserLauncher
         {
             UseShellExecute = false,
         };
+        var size = WindowSizeGuard.Normalize(width, height);
         startInfo.ArgumentList.Add($"--app={url}");
-        startInfo.ArgumentList.Add($"--window-size={(int)width},{(int)height}");
+        startInfo.ArgumentList.Add($"--window-size={size.Width},{size.Height}");
         startInfo.ArgumentList.Add($"--user-data-dir={profile}");
         startInfo.ArgumentList.Add("--no-first-run");
         startInfo.ArgumentList.Add("--no-default-browser-check");
