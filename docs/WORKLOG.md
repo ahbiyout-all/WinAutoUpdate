@@ -27,6 +27,20 @@ v0.1.32 파일럿에서 **기존 토큰을 삭제하고 새 토큰 기록**을 �
 - `.\scripts\publish.ps1`, `.\scripts\build-inno.ps1 -NoPublish`: Inno Setup 6 컴파일 성공.
 - 로컬 산출물은 검증 후 삭제했습니다. 실제 선택 화면은 파일럿 환경에서 재확인 필요.
 
+### 게시 결과
+
+수동 실행 `45343905348`이 성공했고, 태그 `v0.1.33`은 커밋 `3a1bfbe`를 가리킵니다.
+빌드 로그에서 첫 설치 토큰 내장과 `containsSecrets` 검증을 확인했습니다.
+
+| 파일 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.33-x64.exe` | `7050ced82c5270e4157c2f446d86b95d3441f6c501ef4c345ec55342b254087a` |
+| `UpdateAgent.LabManager-Setup-0.1.33-x64.exe` | `db3c4748e86056b3a0d4f5bcd6e92f9f161a003953193f1804976e75286bc333` |
+| `UpdateAgent.Agent-0.1.33-x64.msi` | `323f341d1583faa5c86a55409b695c4094823f892392a7f49be1cc8fba1fdcd0` |
+
+- 릴리스: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.33
+- 성공 워크플로: https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/45343905348
+
 ---
 
 ## 2026-11-24 — 업데이트 설치 시 기존 토큰 처리 선택 (v0.1.32)
