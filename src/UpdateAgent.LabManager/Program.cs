@@ -45,16 +45,16 @@ builder.Services.Configure<LabManagerOptions>(
 var startupOptions = builder.Configuration
     .GetSection(LabManagerOptions.SectionName)
     .Get<LabManagerOptions>() ?? new LabManagerOptions();
-var configuredAdminToken = NormalizeConfiguredToken(startupOptions.AdminToken);
-var configuredAgentToken = NormalizeConfiguredToken(startupOptions.AgentToken);
+var configuredAdminToken = UpdateAgent.Guards.TokenGuard.Normalize(startupOptions.AdminToken);
+var configuredAgentToken = UpdateAgent.Guards.TokenGuard.Normalize(startupOptions.AgentToken);
 if (!startupOptions.AllowDefaultTokens)
 {
     var invalidTokens = new List<string>();
     // change-me-* 및 sample-*-replace-before-pilot 모두 공개된 값이므로 시작을 막는다.
-    if (UpdateAgentConstants.IsPlaceholderToken(configuredAdminToken))
+    if (UpdateAgent.Guards.TokenGuard.IsPlaceholder(configuredAdminToken))
         invalidTokens.Add("AdminToken");
 
-    if (UpdateAgentConstants.IsPlaceholderToken(configuredAgentToken))
+    if (UpdateAgent.Guards.TokenGuard.IsPlaceholder(configuredAgentToken))
         invalidTokens.Add("AgentToken");
 
     if (invalidTokens.Count > 0)
@@ -68,7 +68,7 @@ if (!startupOptions.AllowDefaultTokens)
 
 // 관리자와 에이전트가 같은 토큰을 쓰면 학생도 관리자 API를 호출할 수 있다.
 // 값을 출력하지 않고, 학생/서버 빌드 간에 의도적으로 같은 에이전트 토큰은 건드리지 않는다.
-if (string.Equals(configuredAdminToken, configuredAgentToken, StringComparison.Ordinal))
+if (!UpdateAgent.Guards.TokenGuard.AreDistinct(configuredAdminToken, configuredAgentToken))
 {
     throw new InvalidOperationException(
         "관리자 토큰과 에이전트 토큰은 서로 달라야 합니다. " +
@@ -768,9 +768,6 @@ app.Run();
 return;
 
 // ---------------- 헬퍼 ----------------
-
-static string NormalizeConfiguredToken(string? token) =>
-    (token ?? string.Empty).Replace("\uFEFF", string.Empty, StringComparison.Ordinal).Trim();
 
 static AgentCommand NewCommand(string agentId, CommandType type, string payloadJson) => new()
 {

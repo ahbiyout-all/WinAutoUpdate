@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using UpdateAgent.Guards;
 
 namespace UpdateAgent.LabManager.Desktop.Services;
 
@@ -35,15 +36,8 @@ public sealed class DesktopSettings
 
     private string BuildUrl(string path)
     {
-        var address = ServerUrl.TrimEnd('/');
-        if (Uri.TryCreate(address, UriKind.Absolute, out var uri) &&
-            uri.Scheme == Uri.UriSchemeHttp &&
-            uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
-        {
-            address = new UriBuilder(uri) { Host = "127.0.0.1" }.Uri.AbsoluteUri.TrimEnd('/');
-        }
-
-        return address + path;
+        var address = UrlGuard.NormalizeBrowserUrl(ServerUrl) ?? DefaultServerUrl;
+        return address.TrimEnd('/') + path;
     }
 
     /// <summary>앱 모드 창 크기.</summary>
@@ -53,18 +47,8 @@ public sealed class DesktopSettings
     {
         get
         {
-            if (!Uri.TryCreate(ServerUrl, UriKind.Absolute, out var uri))
-            {
-                return false;
-            }
-
-            if (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            return System.Net.IPAddress.TryParse(uri.Host, out var address) &&
-                   System.Net.IPAddress.IsLoopback(address);
+            if (!UrlGuard.IsHttpUrl(ServerUrl, out var uri) || uri is null) return false;
+            return UrlGuard.IsLoopbackHost(uri.Host);
         }
     }
 
@@ -95,7 +79,8 @@ public sealed class DesktopSettings
                 return;
             }
 
-            if (!string.IsNullOrWhiteSpace(dto.ServerUrl))
+            // 잘못된 주소는 앱 모드 창에서 임의 사이트를 여는 경로가 되므로 무시한다.
+            if (UrlGuard.IsSafeBrowserUrl(dto.ServerUrl))
             {
                 ServerUrl = dto.ServerUrl;
             }

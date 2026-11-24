@@ -5,6 +5,64 @@
 
 ---
 
+## 2026-11-24 순수 창작 공통 Guard DLL 도입 및 v0.1.35
+
+### 배경
+
+기존 기능 중 여러 프로젝트가 중복 사용하고 보안에 직접 영향을 주는 규칙을 찾고,
+기존 DLL 산출물의 오류·개선점을 점검했습니다. 그 결과 토큰 규칙·브라우저 URL 규칙·UTC 시각 규칙을
+외부 패키지 의존성 없는 자체 제작 DLL로 분리하는 것이 적합하다고 판단했습니다.
+
+### 결정
+
+- 새 프로젝트 `src/UpdateAgent.Guards`(`net10.0`, `PackageReference` 없음)를 만들고
+  `UpdateAgent.Guards.dll`을 솔루션에 등록했습니다.
+- DLL에는 순수 함수만 둡니다. ACL(`icacls`), 명명 파이프, WUA, WPF 훅, 방화벽은 기존 프로젝트에 유지합니다.
+- 버전 판정: 하위 호환 버그 수정과 내부 공통 기능 추가이므로 PATCH 올림(`0.1.34` → `0.1.35`).
+
+### 주요 변경
+
+| 영역 | 파일 | 내용 |
+|---|---|---|
+| 새 DLL | `src/UpdateAgent.Guards/*` | `TokenGuard`(정규화·기본값·고정 시간 비교), `UrlGuard`(스킴/호스트/브라우저 주소), `UtcClock`(UTC 통일) |
+| 연결 | `UpdateAgent.sln`, 4개 `csproj` | Shared·LabManager·LabManager.Desktop·테스트가 DLL 참조 |
+| 공통 규칙 | `UpdateAgentConstants.cs`, `GitHubReleaseChecker.cs` | 기본 토큰 판별·외부 URL 검증을 DLL에 위임 |
+| LabManager | `Program.cs`, `TokenAuthMiddleware.cs`, `UtcTimestamps.cs` | 시작 검증·고정 시간 비교·UTC 어댑터를 DLL에 위임 |
+| 토큰 저장 | `Auth/AdminTokenStore.cs` | 런타임 override가 에이전트 토큰과 같으면 저장/로드 모두 거부, 최소 길이 적용, 내용 해시로 재기록 감지 |
+| 런처 | `DesktopSettings.cs`, `BrowserLauncher.cs` | 설정 로드와 `--app=` 전달 전 URL 2중 검증 |
+| 문서 | `docs/PURE-DLL.md`, `README.md`, `docs/DEPLOYMENT.md`, `docs/RELEASE.md`, `docs/MSI.md` | 동작 원리·호출부·기존 DLL 점검 결과 기록 및 등록, 버전 예제 갱신 |
+| 테스트 | `tests/UpdateAgent.Tests/GuardsLibraryTests.cs` | 규칙 8건 + 토큰 충돌·짧은 override·동일 크기 재기록·안전하지 않은 URL 회귀 6건 |
+
+### 기존 DLL 점검 결과
+
+- Git 추적 DLL 없음; 로컬 자체 DLL 24개는 모두 당시 `0.1.34`이며 게시/스테이징 중복은 정상.
+  오래된 `bin\Debug` DLL(`0.1.33`, `0.1.14`)는 로컬 잔해로 배포 대상이 아님.
+- P1 1건 수정: 런타임 관리자 토큰을 에이전트 토큰과 같게 하면 학생 토큰으로 관리자 API 호출 가능.
+- P2 3건 수정: 짧은 override 토큰 허용, 같은 크기·수정 시각 재기록 미감지, 대시보드 URL 스킴 미검증.
+- P2 잔여: PowerShell 기본 토큰 목록 중복, `GitHubReleaseChecker` 기본 생성자의 비엄격 호환 모드,
+  공유 DTO의 로컬 시각 기본값, Authenticode 미서명. `docs/PURE-DLL.md`에 기록.
+
+### 검증 (로컬 중앙 빌드 기준)
+
+- `dotnet build UpdateAgent.sln -c Release --nologo`: 경고 0, 오류 0.
+- `dotnet test ... -c Release --nologo`: **230개 통과**, 실패 0, 건너뜀 0(기존 216 + 신규 14).
+- `scripts\publish.ps1`: 5개 게시 폴더 모두 `UpdateAgent.Guards.dll`(8,704B) 포함.
+- `scripts\build-inno.ps1 -NoPublish`: Agent/LabManager 설치 exe 컴파일 성공, `containsSecrets=false`.
+- `scripts\build-msi.ps1`: MSI 빌드·ICE 검증 성공, `containsSecrets=false`.
+- 실 PC 설치/토큰 교체/50대 부하 검증: **미실행**(환경 없음).
+
+로컬 산출물 SHA-256(게시 전 상태, 시크릿 없는 빌드):
+
+| 파일 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.35-x64.exe` | `c7b546189d1de8a4c2d939a7043490d23d52aec268b271e1d945f4f421ddb05e` |
+| `UpdateAgent.LabManager-Setup-0.1.35-x64.exe` | `46519411f0f26d4f02ce69fd49b85286180d9cd9aff9d5ec7eebbe36dee38b9b` |
+| `UpdateAgent.Agent-0.1.35-x64.msi` | `04b220e598c8dda8ecb4812115b02054240d6300551f5de5364f64f0d1121824` |
+
+커밋/태그/릴리스 게시: 사용자 승인 후 진행. 게시 완료 전에는 결과를 기재하지 않습니다.
+
+---
+
 ## 2026-11-24 자아성찰 25회 감사 및 v0.1.34
 
 ### 배경

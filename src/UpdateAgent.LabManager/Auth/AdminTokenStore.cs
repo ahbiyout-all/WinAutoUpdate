@@ -1,6 +1,8 @@
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using UpdateAgent.Guards;
 using UpdateAgent.LabManager.Configuration;
 using UpdateAgent.Shared;
 
@@ -13,8 +15,6 @@ namespace UpdateAgent.LabManager.Auth;
 /// </summary>
 public sealed class AdminTokenStore
 {
-    private const int MinimumTokenLength = 8;
-
     private readonly IOptionsMonitor<LabManagerOptions>? _options;
     private readonly string _overridePath;
     private readonly ILogger<AdminTokenStore> _logger;
@@ -22,9 +22,8 @@ public sealed class AdminTokenStore
     private readonly SemaphoreSlim _writeSync = new(1, 1);
     private readonly bool _restrictAcl;
     private string? _overrideToken;
-    private DateTime _overrideStampUtc;
-    private long _overrideLength;
-    private bool _hasOverrideStamp;
+    private string? _overrideFingerprint;
+    private bool _hasOverrideFingerprint;
 
     /// <summary>프로덕션 생성자. DI가 사용한다.</summary>
     public AdminTokenStore(
@@ -46,7 +45,7 @@ public sealed class AdminTokenStore
         _logger = logger;
         _restrictAcl = restrictAcl;
         _overrideToken = LoadOverrideToken();
-        CaptureOverrideStamp();
+        CaptureFingerprint();
     }
 
     /// <summary>현재 유효한 관리자 토큰. 런타임 override가 있으면 그것을 우선한다.</summary>
@@ -74,7 +73,7 @@ public sealed class AdminTokenStore
     }
 
     /// <summary>현재 토큰이 기본값/샘플이어서 교체가 필요한지.</summary>
-    public bool IsUsingPlaceholder => UpdateAgentConstants.IsPlaceholderToken(CurrentToken);
+    public bool IsUsingPlaceholder => TokenGuard.IsPlaceholder(CurrentToken);
 
     private bool AllowDefaultTokens =>
         _options?.CurrentValue.AllowDefaultTokens == true;
@@ -82,12 +81,16 @@ public sealed class AdminTokenStore
     /// <summary>새 관리자 토큰을 검증하고 저장한다. 저장 후 즉시 인증에 반영된다.</summary>
     public async Task SetTokenAsync(string newToken, CancellationToken cancellationToken = default)
     {
-        var candidate = newToken?.Trim() ?? string.Empty;
-        if (candidate.Length < MinimumTokenLength)
-            throw new ArgumentException($"관리자 토큰은 {MinimumTokenLength}자 이상이어야 합니다.", nameof(newToken));
+        var candidate = TokenGuard.Normalize(newToken);
+        if (candidate.Length < TokenGuard.MinimumLength)
+            throw new ArgumentException($"관리자 토큰은 {TokenGuard.MinimumLength}자 이상이어야 합니다.", nameof(newToken));
 
-        if (!AllowDefaultTokens && UpdateAgentConstants.IsPlaceholderToken(candidate))
+        if (!AllowDefaultTokens && TokenGuard.IsPlaceholder(candidate))
             throw new ArgumentException("기본값/샘플 토큰은 관리자 토큰으로 사용할 수 없습니다.", nameof(newToken));
+
+        // 관리자 토큰이 에이전트 토큰과 같아지면 학생 토큰으로 관리자 API를 호출할 수 있다.
+        if (CollidesWithAgentToken(candidate))
+            throw new ArgumentException("관리자 토큰은 에이전트 토큰과 달라야 합니다.", nameof(newToken));
 
         var directory = Path.GetDirectoryName(_overridePath);
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
@@ -113,7 +116,7 @@ public sealed class AdminTokenStore
             {
                 // 저장 직후 새 값이 즉시 인증에 쓰이도록 메모리와 파일 지문을 함께 갱신한다.
                 _overrideToken = candidate;
-                CaptureOverrideStamp();
+                CaptureFingerprintLocked();
             }
         }
         finally
@@ -168,16 +171,17 @@ public sealed class AdminTokenStore
     }
 
     /// <summary>
-    /// 외부에서 override 파일을 덮어써도 재시작 없이 반영되도록 파일 지문만 확인한다.
-    /// 매 요청마다 파일 전체를 읽지는 않는다.
+    /// 외부에서 override 파일을 덮어써도 재시작 없이 반영되도록 내용 해시를 확인한다.
+    /// 수정 시각/크기만 보면 같은 크기·같은 시각으로 덮어쓴 토큰을 놓칠 수 있다.
     /// </summary>
     private void RefreshOverrideIfChanged()
     {
-        FileInfo info;
+        string? fingerprint;
         try
         {
-            info = new FileInfo(_overridePath);
-            info.Refresh();
+            fingerprint = File.Exists(_overridePath)
+                ? Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(_overridePath)))
+                : null;
         }
         catch (Exception ex)
         {
@@ -187,47 +191,58 @@ public sealed class AdminTokenStore
 
         lock (_sync)
         {
-            if (!info.Exists)
+            if (fingerprint is null)
             {
-                if (_hasOverrideStamp || _overrideToken is not null)
+                if (_hasOverrideFingerprint || _overrideToken is not null)
                 {
-                    _hasOverrideStamp = false;
+                    _hasOverrideFingerprint = false;
+                    _overrideFingerprint = null;
                     _overrideToken = null;
                 }
                 return;
             }
 
-            var stampUtc = info.LastWriteTimeUtc;
-            var length = info.Length;
-            if (_hasOverrideStamp && _overrideStampUtc == stampUtc && _overrideLength == length) return;
+            if (_hasOverrideFingerprint && string.Equals(_overrideFingerprint, fingerprint, StringComparison.Ordinal))
+                return;
 
-            _overrideStampUtc = stampUtc;
-            _overrideLength = length;
-            _hasOverrideStamp = true;
+            _overrideFingerprint = fingerprint;
+            _hasOverrideFingerprint = true;
             _overrideToken = LoadOverrideToken();
         }
     }
 
-    /// <summary>현재 파일의 수정 시각/크기를 기억한다. 호출 시 _sync 잠금을 보유해야 한다.</summary>
-    private void CaptureOverrideStamp()
+    private void CaptureFingerprint()
     {
+        var fingerprint = ComputeFingerprint(out var exists);
+        lock (_sync)
+        {
+            _overrideFingerprint = fingerprint;
+            _hasOverrideFingerprint = exists;
+        }
+    }
+
+    /// <summary>호출 시 _sync 잠금을 보유해야 한다.</summary>
+    private void CaptureFingerprintLocked()
+    {
+        var fingerprint = ComputeFingerprint(out var exists);
+        _overrideFingerprint = fingerprint;
+        _hasOverrideFingerprint = exists;
+    }
+
+    private string? ComputeFingerprint(out bool exists)
+    {
+        exists = false;
         try
         {
-            var info = new FileInfo(_overridePath);
-            info.Refresh();
-            if (!info.Exists)
-            {
-                _hasOverrideStamp = false;
-                return;
-            }
-            _overrideStampUtc = info.LastWriteTimeUtc;
-            _overrideLength = info.Length;
-            _hasOverrideStamp = true;
+            if (!File.Exists(_overridePath)) return null;
+            var fingerprint = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(_overridePath)));
+            exists = true;
+            return fingerprint;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "런타임 관리자 토큰 파일 지문을 기록할 수 없습니다: {Path}", _overridePath);
-            _hasOverrideStamp = false;
+            return null;
         }
     }
 
@@ -238,11 +253,15 @@ public sealed class AdminTokenStore
         {
             var json = File.ReadAllText(_overridePath);
             var file = JsonSerializer.Deserialize<AdminTokenFile>(json);
-            var token = file?.AdminToken?.Trim();
-            if (string.IsNullOrWhiteSpace(token)) return null;
-            if (!AllowDefaultTokens && UpdateAgentConstants.IsPlaceholderToken(token))
+            var token = TokenGuard.Normalize(file?.AdminToken);
+            if (!TokenGuard.IsAcceptable(token, AllowDefaultTokens))
             {
-                _logger.LogWarning("런타임 관리자 토큰 파일에 기본/샘플 토큰이 있어 무시합니다: {Path}", _overridePath);
+                _logger.LogWarning("런타임 관리자 토큰 파일의 값이 사용할 수 없어 무시합니다: {Path}", _overridePath);
+                return null;
+            }
+            if (CollidesWithAgentToken(token))
+            {
+                _logger.LogWarning("런타임 관리자 토큰이 에이전트 토큰과 같아 무시합니다: {Path}", _overridePath);
                 return null;
             }
             return token;
@@ -253,6 +272,9 @@ public sealed class AdminTokenStore
             return null;
         }
     }
+
+    private bool CollidesWithAgentToken(string token) =>
+        TokenGuard.FixedTimeEquals(token, _options?.CurrentValue.AgentToken);
 
     private static string ResolveOverridePath() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

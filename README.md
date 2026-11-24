@@ -33,6 +33,7 @@ Edge를 우선, 없으면 Chrome을 찾아 `--app=http://127.0.0.1:5080/` 창을
 
 | 경로 | 설명 |
 |---|---|
+| `src/UpdateAgent.Guards` | 순수 창작 공통 DLL: 토큰·URL·UTC 안전 규칙(외부 패키지 없음) |
 | `src/UpdateAgent.Shared` | DTO, 정책, 작업 상태, Maestro/오버레이 모델 |
 | `src/UpdateAgent.Core` | WUA 연동, 정책 평가, 사전 점검, SQLite 저장소, 재부팅/재개, Maestro 수동 검증, 오버레이 파이프 |
 | `src/UpdateAgent.Service` | 학생 PC Windows 서비스 (SYSTEM). 체크인/텔레메트리/원격 명령 |
@@ -52,6 +53,7 @@ Edge를 우선, 없으면 Chrome을 찾아 `--app=http://127.0.0.1:5080/` 창을
 | `docs/DEPLOYMENT.md` | 50대 랩 연결·일괄 배포·운영 런북 |
 | `docs/MSI.md` | MSI 패키징 설계·구현 상태·검증 매트릭스 |
 | `docs/AI-WORK-INSTRUCTIONS.md` | AI 에이전트용 범용 작업 지시서·자아성찰 검증 게이트 |
+| `docs/PURE-DLL.md` | 순수 창작 Guard DLL의 동작 원리·호출부 연결·기존 DLL 점검 결과 |
 
 ## 지원 범위
 
@@ -115,6 +117,7 @@ build\agent\<버전>\
 버전/릴리스/자동 업데이트 운영은 [`docs/RELEASE.md`](docs/RELEASE.md),
 작업 이력은 [`docs/WORKLOG.md`](docs/WORKLOG.md)에 있습니다.
 MSI 패키징 설계와 제약은 [`docs/MSI.md`](docs/MSI.md)에 있습니다.
+순수 창작 공통 DLL의 설계와 동작 원리는 [`docs/PURE-DLL.md`](docs/PURE-DLL.md)에 있습니다.
 
 | 스크립트 | 실행 위치 | 설명 |
 |---|---|---|

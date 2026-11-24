@@ -44,15 +44,9 @@ public static class UpdateAgentConstants
     /// <summary>설치 파일에 기본으로 들어가는 샘플 에이전트 토큰.</summary>
     public const string SampleAgentToken = "sample-agent-token-replace-before-pilot";
 
-    /// <summary>기본값/샘플 토큰인지 판별한다. 실제 배포 토큰으로 교체해야 하는 값이다.</summary>
-    public static bool IsPlaceholderToken(string? token)
-    {
-        if (string.IsNullOrWhiteSpace(token)) return true;
-        var value = token.Trim();
-        if (value.StartsWith("change-me-", StringComparison.OrdinalIgnoreCase)) return true;
-        return value.StartsWith("sample-", StringComparison.OrdinalIgnoreCase)
-            && value.EndsWith("-replace-before-pilot", StringComparison.OrdinalIgnoreCase);
-    }
+    /// <summary>기본값/샘플 토큰인지 판별한다. 규칙은 순수 창작 Guard DLL에 단일 정의되어 있다.</summary>
+    public static bool IsPlaceholderToken(string? token) =>
+        UpdateAgent.Guards.TokenGuard.IsPlaceholder(token);
 
     /// <summary>%ProgramData%\UpdateAgent</summary>
     public static string DataDirectory =>

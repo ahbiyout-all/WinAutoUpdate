@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Extensions.Options;
 using UpdateAgent.LabManager.Configuration;
 using UpdateAgent.Shared;
@@ -58,14 +56,7 @@ public sealed class TokenAuthMiddleware
         var provided = values.ToString();
         if (string.IsNullOrEmpty(provided)) return false;
 
-        return FixedTimeEquals(provided, expected);
-    }
-
-    private static bool FixedTimeEquals(string a, string b)
-    {
-        var hashA = SHA256.HashData(Encoding.UTF8.GetBytes(a));
-        var hashB = SHA256.HashData(Encoding.UTF8.GetBytes(b));
-        return CryptographicOperations.FixedTimeEquals(hashA, hashB);
+        return UpdateAgent.Guards.TokenGuard.FixedTimeEquals(provided, expected);
     }
 
     private async Task RejectAsync(HttpContext context, string message)

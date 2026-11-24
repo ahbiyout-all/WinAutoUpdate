@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using Microsoft.Win32;
+using UpdateAgent.Guards;
 
 namespace UpdateAgent.LabManager.Desktop.Services;
 
@@ -14,6 +15,8 @@ internal static class BrowserLauncher
 
     internal static bool OpenDashboard(string url, double width, double height)
     {
+        if (!UrlGuard.IsSafeBrowserUrl(url)) return false;
+
         var browser = FindBrowser();
         if (browser is null)
         {
@@ -45,6 +48,9 @@ internal static class BrowserLauncher
 
     internal static ProcessStartInfo BuildStartInfo(string browser, string url, double width, double height)
     {
+        if (!UrlGuard.IsSafeBrowserUrl(url))
+            throw new ArgumentException("안전하지 않은 대시보드 주소입니다.", nameof(url));
+
         var profile = GetProfilePath();
         Directory.CreateDirectory(profile);
 

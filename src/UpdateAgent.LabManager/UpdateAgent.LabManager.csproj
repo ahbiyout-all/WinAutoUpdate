@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\UpdateAgent.Shared\UpdateAgent.Shared.csproj" />
+    <ProjectReference Include="..\UpdateAgent.Guards\UpdateAgent.Guards.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -15,16 +15,6 @@ public sealed class GitHubReleaseChecker
         NumberHandling = JsonNumberHandling.AllowReadingFromString,
     };
 
-    private static readonly HashSet<string> AllowedGitHubHosts = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "github.com",
-        "www.github.com",
-        "api.github.com",
-        "objects.githubusercontent.com",
-        "githubusercontent.com",
-        "raw.githubusercontent.com",
-    };
-
     private readonly HttpClient _httpClient;
     private readonly bool _strictUrlValidation;
 
@@ -44,18 +34,8 @@ public sealed class GitHubReleaseChecker
     }
 
     /// <summary>http(s) 스킴과 (선택적으로) GitHub 호스트만 허용한다.</summary>
-    public static bool IsAllowedExternalUrl(string? value, bool requireGitHubHost = false)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return false;
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return false;
-        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return !requireGitHubHost || AllowedGitHubHosts.Contains(uri.Host);
-    }
+    public static bool IsAllowedExternalUrl(string? value, bool requireGitHubHost = false) =>
+        UpdateAgent.Guards.UrlGuard.IsAllowedExternalUrl(value, requireGitHubHost);
 
     private string SanitizeUrl(string? value, string fallback)
     {
