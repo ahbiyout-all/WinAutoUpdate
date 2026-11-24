@@ -27,7 +27,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.33"
+  #define AppVersion "0.1.34"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -945,6 +945,16 @@ begin
   ExistingConfigPath := ExpandConstant('{commonappdata}\UpdateAgent\agent.json');
   CanKeepExisting := (not FirstInstall) and IsValidExistingAgentConfig(ExistingConfigPath);
 
+  { 교체를 선택한 업그레이드에서는 외부 토큰 파일이 명시되어 있어도 URL이 비면
+    기존 agent.json의 URL을 유지한다. 명시적 /LabManagerUrl(또는 INI) 값은
+    이미 Url에 반영되어 있으므로 항상 최우선이다. 재사용 경로는 아래 분기를 유지한다. }
+  if (Url = '') and ReplaceExistingToken and CanKeepExisting then
+  begin
+    Url := ReadExistingAgentUrl(ExistingConfigPath);
+    if Url <> '' then
+      Log('Upgrade token replacement: keeping the existing LabManagerUrl.');
+  end;
+
   if (Url = '') and (not HasExternalToken) then
   begin
     { BOM이 있는 INI는 Windows API가 섹션을 찾지 못해 조용히 빈 값이 된다. }
@@ -1208,7 +1218,7 @@ end;
 
 procedure WriteAgentConfigIfRequested;
 var
-  ConfigPath, SessionHelper, ConfigText: String;
+  ConfigPath, SessionHelper, ConfigText, TempPath, BackupPath: String;
   Lines, EmptyLines, ExistingLines: TArrayOfString;
   I: Integer;
 begin
@@ -1268,29 +1278,70 @@ begin
     Lines[5] := '  }' + #13#10 + '}';
   end;
 
-  { 비밀을 쓰기 전에 빈 파일을 만들고 ACL을 먼저 제한해 일반 사용자의 읽기 창을 없앤다. }
-  SetArrayLength(EmptyLines, 0);
-  if not SaveStringsToUTF8File(ConfigPath, EmptyLines, False) then
+  { 원본을 자르지 않는다. 같은 폴더의 임시 파일에 빈 파일 → ACL → 내용 순으로 쓴 뒤에만
+    원본을 백업으로 돌려놓고 임시 파일을 원본 이름으로 바꾼다. 중간에 실패하면
+    임시/백업 파일을 정리하고 기존 agent.json은 그대로 둔 채 설치를 중단한다. }
+  TempPath := ConfigPath + '.updateagent.tmp';
+  BackupPath := ConfigPath + '.updateagent.bak';
+  if FileExists(TempPath) and (not DeleteFile(TempPath)) then
   begin
     AgentConfigWriteFailed := True;
-    AgentConfigError := '에이전트 설정 파일을 만들 수 없습니다: ' + ConfigPath;
+    AgentConfigError := '임시 에이전트 설정 파일을 정리하지 못했습니다: ' + TempPath;
+    Exit;
+  end;
+  if FileExists(BackupPath) and (not DeleteFile(BackupPath)) then
+  begin
+    AgentConfigWriteFailed := True;
+    AgentConfigError := '이전 에이전트 설정 백업을 정리하지 못했습니다: ' + BackupPath;
+    Exit;
+  end;
+
+  SetArrayLength(EmptyLines, 0);
+  if not SaveStringsToUTF8File(TempPath, EmptyLines, False) then
+  begin
+    AgentConfigWriteFailed := True;
+    AgentConfigError := '임시 에이전트 설정 파일을 만들 수 없습니다: ' + TempPath;
     Exit;
   end;
   if RunHidden(ExpandConstant('{sys}\icacls.exe'),
-      '"' + ConfigPath + '" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)"') <> 0 then
+      '"' + TempPath + '" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)"') <> 0 then
   begin
-    DeleteFile(ConfigPath);
+    DeleteFile(TempPath);
     AgentConfigWriteFailed := True;
-    AgentConfigError := '에이전트 설정 파일 권한을 제한하지 못했습니다: ' + ConfigPath;
+    AgentConfigError := '임시 에이전트 설정 파일 권한을 제한하지 못했습니다: ' + TempPath;
     Exit;
   end;
-  if not SaveStringsToUTF8File(ConfigPath, Lines, False) then
+  if not SaveStringsToUTF8File(TempPath, Lines, False) then
   begin
-    DeleteFile(ConfigPath);
+    DeleteFile(TempPath);
     AgentConfigWriteFailed := True;
-    AgentConfigError := '에이전트 설정 파일을 쓸 수 없습니다: ' + ConfigPath;
+    AgentConfigError := '임시 에이전트 설정 파일을 쓸 수 없습니다: ' + TempPath;
     Exit;
   end;
+
+  if FileExists(ConfigPath) then
+  begin
+    if not RenameFile(ConfigPath, BackupPath) then
+    begin
+      DeleteFile(TempPath);
+      AgentConfigWriteFailed := True;
+      AgentConfigError := '기존 에이전트 설정 파일을 백업하지 못했습니다: ' + BackupPath;
+      Exit;
+    end;
+  end;
+
+  if not RenameFile(TempPath, ConfigPath) then
+  begin
+    if FileExists(BackupPath) then
+      RenameFile(BackupPath, ConfigPath);
+    DeleteFile(TempPath);
+    AgentConfigWriteFailed := True;
+    AgentConfigError := '임시 에이전트 설정 파일을 적용하지 못했습니다: ' + ConfigPath;
+    Exit;
+  end;
+
+  if FileExists(BackupPath) then
+    DeleteFile(BackupPath);
 end;
 
 { 서비스가 실제로 RUNNING 상태에 도달했는지 확인한다(최대 30초). }

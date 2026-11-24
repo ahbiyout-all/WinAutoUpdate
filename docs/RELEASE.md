@@ -13,7 +13,7 @@
 버전은 **`Directory.Build.props`의 `<Version>` 하나**만 사용합니다.
 
 ```xml
-<Version>0.1.33</Version>
+<Version>0.1.34</Version>
 ```
 
 이 값이 다음 위치에 그대로 반영됩니다.
@@ -37,7 +37,7 @@
 | `installer\InnoSetup\UpdateAgent.LabManager.iss` | `#define AppVersion` |
 | `installer\UpdateAgent.Agent.Installer\UpdateAgent.Agent.Installer.wixproj` | `ProductVersion` |
 
-버전은 `Major.Minor.Build` 형식의 숫자 3자리만 사용합니다(예: `0.1.33`).
+버전은 `Major.Minor.Build` 형식의 숫자 3자리만 사용합니다(예: `0.1.34`).
 `0.1.0-beta` 같은 접두/접미사는 릴리스 파일 이름과 Inno `VersionInfoVersion`을 깨뜨리므로 사용하지 않습니다.
 
 ## 2. 릴리스 흐름
@@ -76,7 +76,9 @@ LabManager는 30분마다(강제 확인 시 즉시) GitHub Releases API를 조�
   - LabManager 두 값(`ADMIN`, `AGENT`)은 **반드시 함께** 등록합니다. LabManager Inno 첫 설치에는
     외부 토큰 파일 옵션이 없으므로, 값이 없으면 설치가 중단됩니다.
   - `UPDATEAGENT_AGENT_TOKEN`과 `UPDATEAGENT_LABMANAGER_AGENT_TOKEN`은 **같은 값**이어야 합니다.
-    워크플로는 일치 여부를 자동 검증하지 않으므로 등록 후 직접 확인하세요.
+    두 값이 모두 설정되면 워크플로가 일치 여부를 자동 검증하고, 다르면 릴리스를 중단합니다.
+  - LabManager의 `UPDATEAGENT_LABMANAGER_ADMIN_TOKEN`과 `UPDATEAGENT_LABMANAGER_AGENT_TOKEN`은
+    **서로 다른 값**이어야 합니다. 같으면 서버가 시작을 거부하므로 워크플로와 서버가 이를 검증합니다.
   - 시크릿을 등록하지 않으면 Agent는 배포 시 외부 `AgentTokenFile`을 지정할 수 있지만,
     LabManager는 게시(publish) 후 `configure-labmanager.ps1`로 설정하거나 시크릿을 넣어 다시 빌드해야 합니다.
 - 저장소 원격(`origin`)은 스크립트가 없으면 자동 추가합니다.
@@ -85,7 +87,7 @@ LabManager는 30분마다(강제 확인 시 즉시) GitHub Releases API를 조�
 ### 사용법
 
 ```powershell
-# 패치 버전 올림: 0.1.30 -> 0.1.33
+# 패치 버전 올림: 0.1.33 -> 0.1.34
 .\scripts\github-push.ps1 -Bump patch -Message "Fix firewall rule cleanup"
 
 # 마이너/메이저
@@ -130,7 +132,7 @@ scripts\github-push.bat -Bump patch
 ### DryRun
 
 `-DryRun`은 버전 파일을 임시로 갱신한 뒤 원래 내용으로 복원하므로 최종 변경은 없고, 수행할 작업만 출력합니다.
-비밀값 검사와 빌드/테스트는 그대로 실행됩니다.
+비밀값 검사와 빌드/테스트는 그대로 실행되지만, **git config(user.name/user.email)를 포함한 git 설정은 변경하지 않습니다.**
 
 ## 4. GitHub Actions 릴리스
 
@@ -145,10 +147,10 @@ scripts\github-push.bat -Bump patch
 
 수동 실행에서는 버전을 입력받지 않습니다. 버전을 바꾸려면 `Directory.Build.props`를 수정하고
 커밋한 뒤 실행하세요. 태그 버전과 소스 버전이 다르면 워크플로가 중단됩니다.
-이미 같은 태그의 릴리스가 있으면 설치 파일을 덮어쓰고 릴리스 노트를 갱신합니다.
-수동 실행은 워크플로에서 태그를 따로 push하지 않고 `gh release create --target <커밋>`으로
-태그를 생성하므로, 같은 워크플로가 태그 이벤트로 중복 실행되지 않습니다.
-릴리스 노트의 '주요 변경 사항'은 이전 태그 이후 커밋 제목에서 자동 생성됩니다.
+릴리스 존재 여부는 **태그를 직접 조회해** 확인하며, 이미 같은 태그의 릴리스가 있으면 설치 파일을 덮어쓰고
+릴리스 노트를 갱신합니다. 수동 실행은 워크플로에서 태그를 따로 push하지 않고
+`gh release create --target <커밋>`으로 태그를 생성하므로, 같은 워크플로가 태그 이벤트로 중복 실행되지 않습니다.
+릴리스 노트의 '주요 변경 사항'은 **이전 태그를 기준으로** 그 이후 커밋 제목에서 자동 생성됩니다(고정 문구 사용 금지).
 
 ### 러너 구성
 
@@ -191,7 +193,7 @@ UpdateAgent.Agent-<버전>-x64.msi        (대안)
 
 ## 6. 태그와 릴리스 규칙
 
-- 태그 형식: `v<Major.Minor.Build>` (예: `v0.1.33`)
+- 태그 형식: `v<Major.Minor.Build>` (예: `v0.1.34`)
 - 태그와 `Directory.Build.props` 버전은 **반드시 같아야** 합니다.
 - 같은 버전으로 다시 릴리스하지 않습니다. 수정은 Build 번호를 올립니다.
 - 릴리스 노트에는 최소한 아래를 포함합니다.
@@ -258,6 +260,15 @@ UpdateAgent.Agent-<버전>-x64.msi        (대안)
 - [ ] `scripts\build-msi.ps1`로 MSI 생성(필요 시)
 - [ ] `artifacts\inno\build-info.json`의 `containsSecrets`가 의도와 일치하는가
       (시크릿 미설정 시 `false`, 위 3개 시크릿을 설정한 파일럿 빌드는 `true`이며 expected secrets 3개만 포함)
+- [ ] 두 에이전트 토큰 시크릿(`UPDATEAGENT_AGENT_TOKEN`, `UPDATEAGENT_LABMANAGER_AGENT_TOKEN`)이 모두 설정된 경우 값이 같은가
+      (다르면 워크플로가 중단해야 함)
+- [ ] LabManager 관리자/에이전트 토큰이 서로 다른가 (같으면 서버 시작이 거부되어야 함)
+- [ ] 명시한 토큰 파일이 비어 있을 때 환경 변수로 폴백하지 않고 설치/배포가 중단되는가
+- [ ] `-DryRun`이 git config를 포함한 git 설정을 변경하지 않는가
+- [ ] 릴리스 노트가 이전 태그 이후 커밋을 기준으로 생성되었는가 (고정 문구 아님)
+- [ ] 릴리스 존재 확인이 태그 직접 조회로 이루어지는가
+- [ ] 학생용 MSI에 인바운드 방화벽 규칙이 없는가 (교사 LabManager 규칙만 등록)
+- [ ] 체크인/감사 로그 시각이 UTC로 일관되는가 (`completed_at`은 서버 기준)
 - [ ] 릴리스 자산이 설치 파일만인가
 - [ ] SHA-256을 릴리스 노트에 기록했는가
 - [ ] 관리자 권한 VM/실 PC에서 설치·업그레이드·제거 확인

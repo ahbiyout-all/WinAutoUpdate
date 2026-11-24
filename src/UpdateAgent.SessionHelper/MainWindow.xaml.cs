@@ -159,13 +159,17 @@ public partial class MainWindow : Window
                 Action = LocalControlActions.CancelUpdate,
             }).ConfigureAwait(true);
 
+            // 서비스가 준 상세 메시지는 서비스 로그에 남고, 학생 화면에는 고정 문구만 보여준다.
             _viewModel.SetNotice(response.Success
                 ? "긴급 중단 요청이 처리되었습니다."
-                : "중단 요청을 처리하지 못했습니다: " + response.Message);
+                : "중단 요청을 처리하지 못했습니다.");
         }
         catch (Exception ex)
         {
-            _viewModel.SetNotice("중단 요청 전송 실패: " + ex.Message);
+            var errorId = Guid.NewGuid().ToString("N")[..8];
+            System.Diagnostics.Debug.WriteLine(
+                $"[UpdateAgent.SessionHelper] 중단 요청 전송 실패 ({errorId}): {ex}");
+            _viewModel.SetNotice("중단 요청을 전송하지 못했습니다.");
         }
     }
 

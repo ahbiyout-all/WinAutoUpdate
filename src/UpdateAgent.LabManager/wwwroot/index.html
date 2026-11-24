@@ -51,7 +51,7 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th class="check-col"><input type="checkbox" id="select-all" /></th>
+              <th class="check-col"><input type="checkbox" id="select-all" aria-label="모든 PC 선택" /></th>
               <th>PC</th>
               <th>상태</th>
               <th>현재 작업</th>
@@ -104,9 +104,9 @@
   <footer class="app-footer">
     <span class="strong">UpdateAgent</span>
     <span class="muted">Windows Update 자동화 · 개발자 AhBiYout</span>
-    <a href="https://github.com/ahbiyout-all/WinAutoUpdate" target="_blank" rel="noopener">GitHub 저장소</a>
-    <a href="https://github.com/ahbiyout-all/WinAutoUpdate/releases" target="_blank" rel="noopener">릴리스</a>
-    <a href="https://ahbiyoutvibe.blogspot.com/" target="_blank" rel="noopener">공식 블로그</a>
+    <a href="https://github.com/ahbiyout-all/WinAutoUpdate" target="_blank" rel="noopener noreferrer">GitHub 저장소</a>
+    <a href="https://github.com/ahbiyout-all/WinAutoUpdate/releases" target="_blank" rel="noopener noreferrer">릴리스</a>
+    <a href="https://ahbiyoutvibe.blogspot.com/" target="_blank" rel="noopener noreferrer">공식 블로그</a>
   </footer>
 
   <!-- 작업 시작 -->
@@ -279,8 +279,8 @@
       <div class="modal-body">
         <div class="section-label">대시보드 연결</div>
         <p class="muted small">appsettings.json의 <code>LabManager:AdminToken</code> 값과 같아야 합니다.</p>
-        <input type="text" id="token-input" class="text-input" placeholder="관리자 토큰" autocomplete="off" />
-        <p class="muted small">sample-*-replace-before-pilot 값은 배포용 토큰이 아닙니다. 설치 후 반드시 교체하세요.</p>
+        <input type="text" id="token-input" class="text-input" placeholder="관리자 토큰" autocomplete="off" aria-label="관리자 토큰" />
+        <p class="muted small">sample-*-replace-before-pilot 값은 배포용 토큰이 아닙니다. 설치/서버 시작 전에 실제 토큰으로 교체하세요.</p>
         <div id="token-status" class="token-status hidden"></div>
         <div class="modal-foot">
           <button id="token-save" class="btn btn-primary">저장</button>
@@ -288,8 +288,8 @@
 
         <div class="section-label">서버 관리자 토큰 변경</div>
         <p class="muted small">변경하면 서버에 즉시 적용되고 저장된 관리자 토큰도 함께 갱신됩니다. 새 토큰을 안전한 곳에 기록하세요.</p>
-        <input type="text" id="new-token-input" class="text-input" placeholder="새 관리자 토큰 (8자 이상)" autocomplete="off" />
-        <input type="text" id="new-token-confirm" class="text-input" placeholder="새 토큰 확인" autocomplete="off" />
+        <input type="text" id="new-token-input" class="text-input" placeholder="새 관리자 토큰 (8자 이상)" autocomplete="off" aria-label="새 관리자 토큰" />
+        <input type="text" id="new-token-confirm" class="text-input" placeholder="새 토큰 확인" autocomplete="off" aria-label="새 관리자 토큰 확인" />
         <div class="modal-foot">
           <button id="token-change" class="btn btn-primary">서버 토큰 변경</button>
         </div>
@@ -318,16 +318,16 @@
 
         <div class="update-links">
           <span class="muted">GitHub</span>
-          <a id="update-github-link" href="https://github.com/ahbiyout-all/WinAutoUpdate" target="_blank" rel="noopener">저장소</a>
+          <a id="update-github-link" href="https://github.com/ahbiyout-all/WinAutoUpdate" target="_blank" rel="noopener noreferrer">저장소</a>
           <span class="muted">·</span>
-          <a id="update-release-link" href="https://github.com/ahbiyout-all/WinAutoUpdate/releases" target="_blank" rel="noopener">릴리스 페이지</a>
+          <a id="update-release-link" href="https://github.com/ahbiyout-all/WinAutoUpdate/releases" target="_blank" rel="noopener noreferrer">릴리스 페이지</a>
           <span class="muted">·</span>
-          <a href="https://ahbiyoutvibe.blogspot.com/" target="_blank" rel="noopener">공식 블로그</a>
+          <a href="https://ahbiyoutvibe.blogspot.com/" target="_blank" rel="noopener noreferrer">공식 블로그</a>
         </div>
 
         <div class="modal-foot">
           <button id="update-later" class="btn">나중에</button>
-          <a id="update-download" class="btn btn-primary" href="https://github.com/ahbiyout-all/WinAutoUpdate/releases" target="_blank" rel="noopener">업데이트</a>
+          <a id="update-download" class="btn btn-primary" href="https://github.com/ahbiyout-all/WinAutoUpdate/releases" target="_blank" rel="noopener noreferrer">업데이트</a>
         </div>
       </div>
     </div>

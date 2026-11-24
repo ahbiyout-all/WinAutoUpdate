@@ -4,8 +4,9 @@
 > 범위: Phase 0 파일럿 이후, 학생 PC 에이전트를 `install-service.ps1` 대신 MSI로 배포하는 것.
 >
 > **권장 설치 방식은 Inno Setup입니다.** 이 문서의 MSI는 대안으로 유지됩니다.
-> 개별 파일(Unpacked Multi-File) 설치, 무인 설치, 방화벽 사전 등록, 프로그램 추가/제거 등록은
-> [`INSTALLER.md`](INSTALLER.md)를 참고하세요. 두 설치 파일은 같은 AppID/폴더 규칙을 공유하지 않으며,
+> 개별 파일(Unpacked Multi-File) 설치, 무인 설치, 프로그램 추가/제거 등록은
+> [`INSTALLER.md`](INSTALLER.md)를 참고하세요. 학생용 MSI는 **인바운드 방화벽 규칙을 만들지 않습니다**
+> (교사 PC의 LabManager 규칙만 해당 문서에 정리되어 있습니다). 두 설치 파일은 같은 AppID/폴더 규칙을 공유하지 않으며,
 > MSI가 설치된 PC에 Inno Setup을 실행하면 MSI 제품을 자동 제거한 뒤 전환합니다.
 
 ## 1. 목표와 범위
@@ -449,8 +450,8 @@ installer\
 artifacts\
   staging\                    ← build-msi.ps1이 만드는 임시 게시물
   msi\
-    UpdateAgent.Agent-0.1.33-x64.msi
-    UpdateAgent.Agent-0.1.33-x64.msi.sha256
+    UpdateAgent.Agent-0.1.34-x64.msi
+    UpdateAgent.Agent-0.1.34-x64.msi.sha256
     build-info.json
 ```
 
@@ -461,7 +462,7 @@ artifacts\
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
-    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.33</ProductVersion>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.34</ProductVersion>
     <PublishRoot Condition="'$(PublishRoot)' == ''">$(MSBuildThisFileDirectory)..\..\publish</PublishRoot>
     <DefineConstants>ProductVersion=$(ProductVersion);PublishRoot=$(PublishRoot)</DefineConstants>
   </PropertyGroup>
@@ -490,7 +491,7 @@ artifacts\
 
 ```powershell
 .\scripts\publish.ps1
-.\scripts\build-msi.ps1 -ProductVersion 0.1.33
+.\scripts\build-msi.ps1 -ProductVersion 0.1.34
 ```
 
 ```powershell
@@ -499,12 +500,12 @@ dotnet build .\installer\UpdateAgent.Agent.Installer\UpdateAgent.Agent.Installer
   -c Release `
   -t:Rebuild `
   -p:Platform=x64 `
-  -p:ProductVersion=0.1.33 `
+  -p:ProductVersion=0.1.34 `
   -p:PublishRoot="$PWD\artifacts\staging"
 
 # 검증 (저장소 루트에서)
 dotnet tool restore
-dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.33-x64.msi
+dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.34-x64.msi
 ```
 
 ### 8-4. 버전 규칙
@@ -558,7 +559,7 @@ self-contained 게시물이 약 413MB이므로, CAB 압축 후 MSI는 대략 150
 | `-Quiet` | 아니오 | `/qn` 무인 설치. 기본은 최소 UI 표시 |
 | `-LogPath` | 아니오 | msiexec 로그 경로 |
 
-\* 최초 설치에서는 토큰을 `-AgentTokenFile` 또는 `UPDATEAGENT_AGENT_TOKEN` 중 하나로 제공해야 합니다. 업그레이드에서 생략하면 기존 `agent.json` 값을 유지합니다.
+\* 최초 설치에서는 토큰을 `-AgentTokenFile` 또는 `UPDATEAGENT_AGENT_TOKEN` 중 하나로 제공해야 합니다. 업그레이드에서 생략하면 기존 `agent.json` 값을 유지합니다. 명시한 `-AgentTokenFile`이 비어 있으면 환경 변수로 대체하지 않고 설치를 중단합니다(fail-closed).
 
 동작 순서:
 
@@ -587,13 +588,13 @@ $env:UPDATEAGENT_AGENT_TOKEN = Get-Content ".\pilot-agent-token.txt" -Raw
 
 ```powershell
 # 최소 UI (수동 설치)
-msiexec /i ".\UpdateAgent.Agent-0.1.33-x64.msi" /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.34-x64.msi" /norestart /l*v ".\install.log"
 
 # 무인 설치
-msiexec /i ".\UpdateAgent.Agent-0.1.33-x64.msi" /qn /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.34-x64.msi" /qn /norestart /l*v ".\install.log"
 
 # 무인 + CLI
-msiexec /i ".\UpdateAgent.Agent-0.1.33-x64.msi" /qn /norestart ADDLOCAL=CliFeature
+msiexec /i ".\UpdateAgent.Agent-0.1.34-x64.msi" /qn /norestart ADDLOCAL=CliFeature
 ```
 
 - 토큰/URL은 이 명령으로 설정되지 않습니다. 설치 후 래퍼 또는 `configure-agent.ps1`을 실행해야 원격 관리가 활성화됩니다.
@@ -612,7 +613,7 @@ msiexec /i ".\UpdateAgent.Agent-0.1.33-x64.msi" /qn /norestart ADDLOCAL=CliFeatu
 ### 10-4. 제거
 
 ```powershell
-msiexec /x ".\UpdateAgent.Agent-0.1.33-x64.msi" /qn /norestart /l*v ".\uninstall.log"
+msiexec /x ".\UpdateAgent.Agent-0.1.34-x64.msi" /qn /norestart /l*v ".\uninstall.log"
 ```
 
 또는:

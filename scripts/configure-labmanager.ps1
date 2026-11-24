@@ -82,6 +82,17 @@ $AgentToken = Resolve-Secret `
 
 if ([string]::IsNullOrWhiteSpace($AdminToken)) { throw "Admin token is required." }
 if ([string]::IsNullOrWhiteSpace($AgentToken)) { throw "Agent token is required." }
+
+# Role separation: X-Admin-Token and X-Agent-Token must never carry the same value.
+if (-not [string]::IsNullOrWhiteSpace($AdminToken) -and
+    -not [string]::IsNullOrWhiteSpace($AgentToken)) {
+    $normalizedAdminToken = $AdminToken.TrimStart([char]0xFEFF).Trim()
+    $normalizedAgentToken = $AgentToken.TrimStart([char]0xFEFF).Trim()
+    if ($normalizedAdminToken -ceq $normalizedAgentToken) {
+        throw "Admin and agent tokens must be different values."
+    }
+}
+
 function Test-PlaceholderToken {
     param([string]$Value)
     $lower = $Value.ToLowerInvariant()

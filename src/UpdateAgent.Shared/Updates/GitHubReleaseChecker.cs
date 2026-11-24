@@ -15,11 +15,56 @@ public sealed class GitHubReleaseChecker
         NumberHandling = JsonNumberHandling.AllowReadingFromString,
     };
 
-    private readonly HttpClient _httpClient;
+    private static readonly HashSet<string> AllowedGitHubHosts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "github.com",
+        "www.github.com",
+        "api.github.com",
+        "objects.githubusercontent.com",
+        "githubusercontent.com",
+        "raw.githubusercontent.com",
+    };
 
+    private readonly HttpClient _httpClient;
+    private readonly bool _strictUrlValidation;
+
+    /// <summary>기본 호환 생성자. 스킴만 검증한다.</summary>
     public GitHubReleaseChecker(HttpClient httpClient)
+        : this(httpClient, strictUrlValidation: false)
+    {
+    }
+
+    /// <summary>
+    /// 대시보드/서비스처럼 링크를 그대로 여는 호출자는 GitHub 호스트까지 허용한다.
+    /// </summary>
+    public GitHubReleaseChecker(HttpClient httpClient, bool strictUrlValidation)
     {
         _httpClient = httpClient;
+        _strictUrlValidation = strictUrlValidation;
+    }
+
+    /// <summary>http(s) 스킴과 (선택적으로) GitHub 호스트만 허용한다.</summary>
+    public static bool IsAllowedExternalUrl(string? value, bool requireGitHubHost = false)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return false;
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !requireGitHubHost || AllowedGitHubHosts.Contains(uri.Host);
+    }
+
+    private string SanitizeUrl(string? value, string fallback)
+    {
+        if (!IsAllowedExternalUrl(value, requireGitHubHost: _strictUrlValidation)) return fallback;
+        // https를 선호한다. http 링크는 공식 저장소 주소로 되돌린다.
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+               string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            ? fallback
+            : value!;
     }
 
     /// <summary>기본 호출은 에이전트용이다. LabManager는 명시적으로 제품을 지정한다.</summary>
@@ -92,14 +137,14 @@ public sealed class GitHubReleaseChecker
                 ReleaseName = release.Name,
                 ReleaseNotes = release.Body,
                 PublishedAt = release.PublishedAt,
-                ReleaseUrl = string.IsNullOrWhiteSpace(release.HtmlUrl)
-                    ? UpdateAgentConstants.GitHubReleasesUrl
-                    : release.HtmlUrl,
+                ReleaseUrl = SanitizeUrl(release.HtmlUrl, UpdateAgentConstants.GitHubReleasesUrl),
                 RepositoryUrl = UpdateAgentConstants.GitHubRepositoryUrl,
                 AssetName = asset?.Name,
-                AssetUrl = asset?.BrowserDownloadUrl,
+                AssetUrl = asset is null
+                    ? null
+                    : SanitizeUrl(asset.BrowserDownloadUrl, UpdateAgentConstants.GitHubReleasesUrl),
                 AssetSizeBytes = asset?.Size,
-                CheckedAt = DateTimeOffset.Now,
+                CheckedAt = DateTimeOffset.UtcNow,
             };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

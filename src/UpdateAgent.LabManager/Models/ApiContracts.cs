@@ -1,4 +1,5 @@
 using System.Text.Json;
+using UpdateAgent.LabManager.Services;
 using UpdateAgent.Shared.Models;
 
 namespace UpdateAgent.LabManager.Models;
@@ -90,7 +91,7 @@ public sealed record OverviewResponse
     public int ActiveJobs { get; init; }
     public int CompletedJobs { get; init; }
     public int FailedJobs { get; init; }
-    public DateTimeOffset ServerTime { get; init; } = DateTimeOffset.Now;
+    public DateTimeOffset ServerTime { get; init; } = UtcTimestamps.Now;
 }
 
 public sealed record WakeResponse

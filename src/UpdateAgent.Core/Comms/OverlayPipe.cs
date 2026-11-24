@@ -107,15 +107,11 @@ public sealed class OverlayPipeServer : IAsyncDisposable
     {
         try
         {
-            using var reader = new StreamReader(
-                connection.Pipe,
-                new UTF8Encoding(false),
-                detectEncodingFromByteOrderMarks: false,
-                leaveOpen: true);
-
+            // 로컬 제어 파이프와 같은 상한을 적용해 한 줄이 무한정 커지는 것을 막는다.
             while (!cancellationToken.IsCancellationRequested && connection.Pipe.IsConnected)
             {
-                var line = await reader.ReadLineAsync(cancellationToken);
+                var line = await PipeLines.ReadLineAsync(
+                    connection.Pipe, LocalControlPipeServer.MaxRequestBytes, cancellationToken);
                 if (line is null) break;
             }
         }
@@ -243,15 +239,11 @@ public sealed class OverlayPipeClient : IAsyncDisposable
                 await pipe.ConnectAsync(3000, linked.Token);
                 ConnectionChanged?.Invoke(true);
 
-                using var reader = new StreamReader(
-                    pipe,
-                    new UTF8Encoding(false),
-                    detectEncodingFromByteOrderMarks: false,
-                    leaveOpen: true);
-
+                // 서버와 동일한 상한으로 오버레이 메시지 한 줄을 읽는다.
                 while (!linked.IsCancellationRequested && pipe.IsConnected)
                 {
-                    var line = await reader.ReadLineAsync(linked.Token);
+                    var line = await PipeLines.ReadLineAsync(
+                        pipe, LocalControlPipeServer.MaxRequestBytes, linked.Token);
                     if (line is null) break;
 
                     OverlayMessage? message;

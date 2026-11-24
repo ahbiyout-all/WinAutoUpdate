@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
-     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
-     xmlns:firewall="http://wixtoolset.org/schemas/v4/wxs/firewall">
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
   <Package Name="UpdateAgent Agent"
            Manufacturer="AhBiYout"
@@ -88,21 +87,8 @@
                         Start="install"
                         Wait="yes" />
 
-        <!-- 방화벽 규칙을 조용히 등록한다. 기본 이름과 버전이 붙은 이름을 함께 만든다. -->
-        <firewall:FirewallException Id="FirewallRuleDefaultName"
-                                    Name="UpdateAgent Agent"
-                                    File="AgentServiceExe"
-                                    Profile="all"
-                                    Scope="any"
-                                    Grouping="UpdateAgent"
-                                    Description="UpdateAgent Service (all networks)" />
-        <firewall:FirewallException Id="FirewallRuleVersionedName"
-                                    Name="UpdateAgent Agent $(var.ProductVersion)"
-                                    File="AgentServiceExe"
-                                    Profile="all"
-                                    Scope="any"
-                                    Grouping="UpdateAgent"
-                                    Description="UpdateAgent Service (versioned rule)" />
+        <!-- 학생 PC는 인바운드 포트를 열지 않는다. 이전 MSI/Inno 설치가 만든
+             UpdateAgent 인바운드 규칙은 Inno 설치기가 그룹 단위로 정리한다. -->
       </Component>
     </ComponentGroup>
 

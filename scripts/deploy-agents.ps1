@@ -266,16 +266,39 @@ $packages = @()
 foreach ($target in $targets) {
     $safeName = $target.SafeName
     $packageDir = Join-Path $OutputDir $safeName
-    New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
 
-    Copy-Item -LiteralPath $installer.FullName -Destination (Join-Path $packageDir $installer.Name) -Force
+    # Regeneration must never leave a stale token copy or an older setup exe behind.
+    # Verify the target is a direct child of OutputDir before removing anything.
+    $fullPackageDir = [IO.Path]::GetFullPath($packageDir)
+    $packageParent = [IO.Path]::GetDirectoryName($fullPackageDir.TrimEnd([IO.Path]::DirectorySeparatorChar))
+    if (-not [string]::Equals(
+            $packageParent, $OutputDir.TrimEnd([IO.Path]::DirectorySeparatorChar),
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove a package path outside $OutputDir : $fullPackageDir"
+    }
+    if (Test-Path -LiteralPath $fullPackageDir) {
+        if (-not (Test-Path -LiteralPath $fullPackageDir -PathType Container)) {
+            throw "Package path is not a directory: $fullPackageDir"
+        }
+        Remove-Item -LiteralPath $fullPackageDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $fullPackageDir | Out-Null
+
+    Copy-Item -LiteralPath $installer.FullName -Destination (Join-Path $fullPackageDir $installer.Name) -Force
     if (-not $UseEmbeddedToken) {
-        $tokenCopy = Join-Path $packageDir 'agent-token.txt'
+        $tokenCopy = Join-Path $fullPackageDir 'agent-token.txt'
         Copy-Item -LiteralPath $tokenPath -Destination $tokenCopy -Force
         # install-agent.cmd applies the ACL again at install time; restrict the copy now too.
         & icacls.exe $tokenCopy '/inheritance:r' '/grant:r' '*S-1-5-32-544:(F)' '*S-1-5-18:(R)' 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Could not restrict ACL on generated token file: $tokenCopy"
+        }
+    }
+    else {
+        # The package directory was recreated above, so no earlier token copy can remain.
+        $staleTokens = @(Get-ChildItem -LiteralPath $fullPackageDir -Filter 'agent-token.txt' -File -Recurse)
+        if ($staleTokens.Count -gt 0) {
+            throw "Unexpected token file in an embedded-token package: $($staleTokens[0].FullName)"
         }
     }
 
@@ -285,16 +308,16 @@ foreach ($target in $targets) {
         Replace('__TOKEN_BLOCK__', $tokenBlock).
         Replace('__UPGRADE_FLAG__', $upgradeFlag)
     $cmd = [regex]::Replace($cmd, "\r?\n", "`r`n")
-    [IO.File]::WriteAllText((Join-Path $packageDir 'install-agent.cmd'), $cmd, (New-Object System.Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText((Join-Path $fullPackageDir 'install-agent.cmd'), $cmd, (New-Object System.Text.UTF8Encoding($false)))
 
     $ini = [regex]::Replace(
         $iniTemplate.Replace('__URL__', $LabManagerUrl).Replace('__TOKEN_LINE__', $tokenLine),
         "\r?\n", "`r`n")
-    [IO.File]::WriteAllText((Join-Path $packageDir 'agent-install.ini'), $ini, (New-Object System.Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText((Join-Path $fullPackageDir 'agent-install.ini'), $ini, (New-Object System.Text.UTF8Encoding($false)))
 
     $packages += [pscustomobject]@{
         ComputerName = $target.ComputerName
-        PackageDir   = $packageDir
+        PackageDir   = $fullPackageDir
         MAC          = $target.MAC
         IP           = $target.IP
     }

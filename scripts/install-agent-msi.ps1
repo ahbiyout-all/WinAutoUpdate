@@ -24,7 +24,7 @@ $env:UPDATEAGENT_AGENT_TOKEN = Get-Content ".\agent-token.txt" -Raw
 
 .EXAMPLE
 .\scripts\install-agent-msi.ps1 `
-  -MsiPath ".\artifacts\msi\UpdateAgent.Agent-0.1.31-x64.msi" `
+  -MsiPath ".\artifacts\msi\UpdateAgent.Agent-<version>-x64.msi" `
   -LabManagerUrl "http://192.168.0.10:5080" `
   -AgentTokenFile ".\pilot-agent-token.txt" `
   -ConfirmMaestro -Quiet
@@ -313,49 +313,6 @@ if (-not (Test-Path -LiteralPath $MsiPath)) {
     throw "MSI not found: $MsiPath"
 }
 
-# MSI MajorUpgrade cannot remove an existing Inno installation, so silently remove it first.
-$installedProducts = @(Get-InstalledAgent)
-$innoProducts = @($installedProducts | Where-Object { $_.InstallerType -eq 'Inno' })
-$msiProducts = @($installedProducts | Where-Object { $_.InstallerType -ne 'Inno' })
-
-if ($innoProducts.Count -gt 0) {
-    Write-Host ""
-    Write-Host "An existing Inno Setup installation was found. Removing it before MSI install:" -ForegroundColor Yellow
-    foreach ($product in $innoProducts) {
-        Write-Host ("  {0} {1} ({2})" -f $product.DisplayName, $product.DisplayVersion, $product.ProductCode)
-    }
-    Remove-InstalledAgent -Products $innoProducts
-    Write-Host ""
-}
-
-# The same MSI product can be handled by MajorUpgrade, so do not prompt with -Quiet/-Force.
-if ($msiProducts.Count -gt 0) {
-    Write-Host ""
-    Write-Host "An existing UpdateAgent Agent MSI was found:" -ForegroundColor Yellow
-    foreach ($product in $msiProducts) {
-        Write-Host ("  {0} {1} ({2})" -f $product.DisplayName, $product.DisplayVersion, $product.ProductCode)
-    }
-    Write-Host ""
-
-    if ($Quiet -or $Force) {
-        Write-Host "Upgrading the existing installation without prompting (-Quiet/-Force)."
-    }
-    else {
-        Write-Host "  [1] Overwrite / upgrade (recommended)"
-        Write-Host "  [2] Remove the existing version first, then install"
-        Write-Host "  [3] Cancel"
-        $choice = (Read-Host "Choose 1, 2 or 3").Trim()
-
-        switch ($choice) {
-            "1" { Write-Host "Upgrading the existing installation." }
-            "2" { Remove-InstalledAgent -Products $msiProducts }
-            "3" { throw "Installation cancelled by the user." }
-            default { throw "Invalid choice. Installation cancelled." }
-        }
-    }
-    Write-Host ""
-}
-
 $DataRoot = [IO.Path]::GetFullPath($DataRoot)
 $configPath = Join-Path $DataRoot "agent.json"
 $serviceDirectory = Join-Path $env:ProgramFiles "UpdateAgent\Service"
@@ -430,6 +387,51 @@ if ($lowerToken.StartsWith('change-me-') -or
     throw "Placeholder agent tokens are not allowed. Supply a real token file or UPDATEAGENT_AGENT_TOKEN."
 }
 $resolvedToken = $normalizedToken
+
+# All inputs are now validated: only after this point may an existing installation
+# be removed. Config/legacy tokens were read above so an uninstall cannot lose them.
+# MSI MajorUpgrade cannot remove an existing Inno installation, so silently remove it first.
+$installedProducts = @(Get-InstalledAgent)
+$innoProducts = @($installedProducts | Where-Object { $_.InstallerType -eq 'Inno' })
+$msiProducts = @($installedProducts | Where-Object { $_.InstallerType -ne 'Inno' })
+
+if ($innoProducts.Count -gt 0) {
+    Write-Host ""
+    Write-Host "An existing Inno Setup installation was found. Removing it before MSI install:" -ForegroundColor Yellow
+    foreach ($product in $innoProducts) {
+        Write-Host ("  {0} {1} ({2})" -f $product.DisplayName, $product.DisplayVersion, $product.ProductCode)
+    }
+    Remove-InstalledAgent -Products $innoProducts
+    Write-Host ""
+}
+
+# The same MSI product can be handled by MajorUpgrade, so do not prompt with -Quiet/-Force.
+if ($msiProducts.Count -gt 0) {
+    Write-Host ""
+    Write-Host "An existing UpdateAgent Agent MSI was found:" -ForegroundColor Yellow
+    foreach ($product in $msiProducts) {
+        Write-Host ("  {0} {1} ({2})" -f $product.DisplayName, $product.DisplayVersion, $product.ProductCode)
+    }
+    Write-Host ""
+
+    if ($Quiet -or $Force) {
+        Write-Host "Upgrading the existing installation without prompting (-Quiet/-Force)."
+    }
+    else {
+        Write-Host "  [1] Overwrite / upgrade (recommended)"
+        Write-Host "  [2] Remove the existing version first, then install"
+        Write-Host "  [3] Cancel"
+        $choice = (Read-Host "Choose 1, 2 or 3").Trim()
+
+        switch ($choice) {
+            "1" { Write-Host "Upgrading the existing installation." }
+            "2" { Remove-InstalledAgent -Products $msiProducts }
+            "3" { throw "Installation cancelled by the user." }
+            default { throw "Invalid choice. Installation cancelled." }
+        }
+    }
+    Write-Host ""
+}
 
 $msiArguments = @("/i", "`"$MsiPath`"", "/norestart")
 if ($Quiet) {

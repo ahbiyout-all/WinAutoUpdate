@@ -1038,6 +1038,36 @@ function formatDate(value) {
   return date.toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
 
+const REPOSITORY_URL = 'https://github.com/ahbiyout-all/WinAutoUpdate';
+const RELEASES_URL = 'https://github.com/ahbiyout-all/WinAutoUpdate/releases';
+const SAFE_EXTERNAL_HOSTS = new Set([
+  'github.com',
+  'www.github.com',
+  'api.github.com',
+  'objects.githubusercontent.com',
+  'githubusercontent.com',
+  'raw.githubusercontent.com',
+]);
+
+// 서버가 정규화해도 브라우저에서 한 번 더 검사한다. http/https + GitHub 호스트만 허용한다.
+function safeExternalUrl(value, fallback) {
+  try {
+    const parsed = new URL(value || fallback, window.location.href);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return fallback;
+    if (!SAFE_EXTERNAL_HOSTS.has(parsed.hostname.toLowerCase())) return fallback;
+    if (parsed.protocol === 'http:') return fallback;
+    return parsed.href;
+  } catch {
+    return fallback;
+  }
+}
+
+function setExternalAnchor(anchor, value, fallback) {
+  anchor.href = safeExternalUrl(value, fallback);
+  anchor.target = '_blank';
+  anchor.rel = 'noopener noreferrer';
+}
+
 function applyUpdateInfo(info) {
   if (!info) return;
 
@@ -1065,12 +1095,13 @@ function applyUpdateInfo(info) {
   }
   $('#update-meta').textContent = meta.join(' · ');
 
-  $('#update-github-link').href = info.repositoryUrl || 'https://github.com/ahbiyout-all/WinAutoUpdate';
-  $('#update-release-link').href = info.releaseUrl || 'https://github.com/ahbiyout-all/WinAutoUpdate/releases';
+  setExternalAnchor($('#update-github-link'), info.repositoryUrl, REPOSITORY_URL);
+  setExternalAnchor($('#update-release-link'), info.releaseUrl, RELEASES_URL);
 
   const download = $('#update-download');
-  download.href = info.assetUrl || info.releaseUrl || 'https://github.com/ahbiyout-all/WinAutoUpdate/releases';
-  download.textContent = info.assetUrl ? '업데이트 내려받기' : '릴리스 열기';
+  const assetUrl = safeExternalUrl(info.assetUrl, safeExternalUrl(info.releaseUrl, RELEASES_URL));
+  setExternalAnchor(download, assetUrl, RELEASES_URL);
+  download.textContent = assetUrl === RELEASES_URL ? '릴리스 열기' : '업데이트 내려받기';
 
   $('#update-notes').textContent = (info.releaseNotes || '').trim();
 
@@ -1151,7 +1182,7 @@ function setupTokenDialog() {
       status.classList.remove('hidden');
       if (info.isPlaceholder) {
         status.className = 'token-status warning';
-        status.textContent = '현재 기본(샘플) 토큰 사용 중 - 파일럿 전에 반드시 변경하세요.';
+        status.textContent = '현재 기본(샘플) 토큰 사용 중 - 실제 토큰으로 변경해야 서버가 시작됩니다';
       } else {
         status.className = 'token-status ok';
         status.textContent = info.hasRuntimeOverride

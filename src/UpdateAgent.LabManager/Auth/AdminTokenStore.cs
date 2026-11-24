@@ -22,6 +22,9 @@ public sealed class AdminTokenStore
     private readonly SemaphoreSlim _writeSync = new(1, 1);
     private readonly bool _restrictAcl;
     private string? _overrideToken;
+    private DateTime _overrideStampUtc;
+    private long _overrideLength;
+    private bool _hasOverrideStamp;
 
     /// <summary>프로덕션 생성자. DI가 사용한다.</summary>
     public AdminTokenStore(
@@ -43,6 +46,7 @@ public sealed class AdminTokenStore
         _logger = logger;
         _restrictAcl = restrictAcl;
         _overrideToken = LoadOverrideToken();
+        CaptureOverrideStamp();
     }
 
     /// <summary>현재 유효한 관리자 토큰. 런타임 override가 있으면 그것을 우선한다.</summary>
@@ -50,6 +54,7 @@ public sealed class AdminTokenStore
     {
         get
         {
+            RefreshOverrideIfChanged();
             lock (_sync)
             {
                 if (!string.IsNullOrWhiteSpace(_overrideToken)) return _overrideToken!;
@@ -63,6 +68,7 @@ public sealed class AdminTokenStore
     {
         get
         {
+            RefreshOverrideIfChanged();
             lock (_sync) return !string.IsNullOrWhiteSpace(_overrideToken);
         }
     }
@@ -103,7 +109,12 @@ public sealed class AdminTokenStore
                 if (File.Exists(tempPath)) File.Delete(tempPath);
             }
 
-            lock (_sync) _overrideToken = candidate;
+            lock (_sync)
+            {
+                // 저장 직후 새 값이 즉시 인증에 쓰이도록 메모리와 파일 지문을 함께 갱신한다.
+                _overrideToken = candidate;
+                CaptureOverrideStamp();
+            }
         }
         finally
         {
@@ -153,6 +164,70 @@ public sealed class AdminTokenStore
             _logger.LogError(ex, "런타임 관리자 토큰 파일 ACL 제한 실패: {Path}", path);
             throw new InvalidOperationException(
                 "런타임 관리자 토큰 파일 권한을 제한하지 못해 저장을 중단했습니다.", ex);
+        }
+    }
+
+    /// <summary>
+    /// 외부에서 override 파일을 덮어써도 재시작 없이 반영되도록 파일 지문만 확인한다.
+    /// 매 요청마다 파일 전체를 읽지는 않는다.
+    /// </summary>
+    private void RefreshOverrideIfChanged()
+    {
+        FileInfo info;
+        try
+        {
+            info = new FileInfo(_overridePath);
+            info.Refresh();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "런타임 관리자 토큰 파일 상태를 확인할 수 없습니다: {Path}", _overridePath);
+            return;
+        }
+
+        lock (_sync)
+        {
+            if (!info.Exists)
+            {
+                if (_hasOverrideStamp || _overrideToken is not null)
+                {
+                    _hasOverrideStamp = false;
+                    _overrideToken = null;
+                }
+                return;
+            }
+
+            var stampUtc = info.LastWriteTimeUtc;
+            var length = info.Length;
+            if (_hasOverrideStamp && _overrideStampUtc == stampUtc && _overrideLength == length) return;
+
+            _overrideStampUtc = stampUtc;
+            _overrideLength = length;
+            _hasOverrideStamp = true;
+            _overrideToken = LoadOverrideToken();
+        }
+    }
+
+    /// <summary>현재 파일의 수정 시각/크기를 기억한다. 호출 시 _sync 잠금을 보유해야 한다.</summary>
+    private void CaptureOverrideStamp()
+    {
+        try
+        {
+            var info = new FileInfo(_overridePath);
+            info.Refresh();
+            if (!info.Exists)
+            {
+                _hasOverrideStamp = false;
+                return;
+            }
+            _overrideStampUtc = info.LastWriteTimeUtc;
+            _overrideLength = info.Length;
+            _hasOverrideStamp = true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "런타임 관리자 토큰 파일 지문을 기록할 수 없습니다: {Path}", _overridePath);
+            _hasOverrideStamp = false;
         }
     }
 

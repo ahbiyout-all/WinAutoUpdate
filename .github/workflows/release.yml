@@ -155,6 +155,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = $env:RELEASE_VERSION
+          $tag = "v$version"
+          $currentVersion = $null
+          if (-not [version]::TryParse($version, [ref]$currentVersion)) {
+            throw "Cannot parse release version: $version"
+          }
 
           $innoInfo = Get-Content -LiteralPath 'artifacts\inno\build-info.json' -Raw | ConvertFrom-Json
           $msiInfo = Get-Content -LiteralPath 'artifacts\msi\build-info.json' -Raw | ConvertFrom-Json
@@ -167,9 +172,20 @@ jobs:
               throw "$label build-info productVersion '$($info.productVersion)' does not match $version."
             }
           }
-          $expectedSecrets =
-            -not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_AGENT_TOKEN) -or
-            -not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_LABMANAGER_ADMIN_TOKEN)
+          $hasAgentToken = -not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_AGENT_TOKEN)
+          $hasLabAgentToken = -not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_LABMANAGER_AGENT_TOKEN)
+          $hasAdminToken = -not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_LABMANAGER_ADMIN_TOKEN)
+          if ($hasAdminToken -ne $hasLabAgentToken) {
+            throw 'UPDATEAGENT_LABMANAGER_ADMIN_TOKEN and UPDATEAGENT_LABMANAGER_AGENT_TOKEN must be set together or left unset together.'
+          }
+          if ($hasAgentToken -and $hasLabAgentToken) {
+            $normalizedAgentToken = $env:UPDATEAGENT_AGENT_TOKEN.TrimStart([char]0xFEFF).Trim()
+            $normalizedLabAgentToken = $env:UPDATEAGENT_LABMANAGER_AGENT_TOKEN.TrimStart([char]0xFEFF).Trim()
+            if ($normalizedAgentToken -cne $normalizedLabAgentToken) {
+              throw 'Configured agent token values do not match; refusing to publish an inconsistent release.'
+            }
+          }
+          $expectedSecrets = $hasAgentToken -or $hasAdminToken
           if ([bool]$innoInfo.containsSecrets -ne [bool]$expectedSecrets) {
             throw "Inno build-info containsSecrets '$($innoInfo.containsSecrets)' does not match the configured token secrets."
           }
@@ -196,15 +212,35 @@ jobs:
           $lines.Add('## 주요 변경 사항')
           $lines.Add('')
           # 고정 문구는 다음 릴리스에서 거짓 정보가 되므로 이전 태그 이후 커밋 제목을 사용한다.
+          # 태그 이름을 문자열로 비교하지 말고 버전 숫자로 비교해 현재 태그보다 낮은 최신 태그를 고른다.
           $previousTag = ''
-          foreach ($candidate in @(& git tag --list 'v*' --sort=-version:refname)) {
-            if ($candidate -ne $tag) { $previousTag = $candidate; Break }
+          $previousVersion = $null
+          foreach ($candidate in @(& git tag --list 'v*')) {
+            $candidateVersion = $null
+            if ($candidate -match '^v(\d+\.\d+(?:\.\d+){0,2})(?:[-+].*)?$' -and
+                [version]::TryParse($Matches[1], [ref]$candidateVersion) -and
+                $candidateVersion -lt $currentVersion -and
+                ($null -eq $previousVersion -or $candidateVersion -gt $previousVersion)) {
+              $previousVersion = $candidateVersion
+              $previousTag = $candidate
+            }
           }
           $global:LASTEXITCODE = 0
           $changeLines = @()
           if (-not [string]::IsNullOrWhiteSpace($previousTag)) {
-            $changeLines = @(& git log --pretty=format:'- %s' "$previousTag..HEAD" 2>$null)
+            $range = "$previousTag..HEAD"
+            $commitCount = (& git rev-list --count $range 2>$null)
+            $countExit = $LASTEXITCODE
             $global:LASTEXITCODE = 0
+            if ($countExit -ne 0) { throw "Could not count commits in range $range." }
+            if ([int]$commitCount -gt 0) {
+              $changeLines = @(& git log --pretty=format:'- %s' $range 2>$null)
+              $logExit = $LASTEXITCODE
+              $global:LASTEXITCODE = 0
+              if ($logExit -ne 0 -or $changeLines.Count -eq 0) {
+                throw "Could not read commit subjects in range $range."
+              }
+            }
           }
           if ($changeLines.Count -eq 0) {
             $lines.Add('- 변경 내역은 저장소의 docs/WORKLOG.md에서 해당 버전 항목을 확인하세요.')
@@ -228,7 +264,7 @@ jobs:
           $lines.Add(('.\UpdateAgent.Agent-Setup-{0}-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -f $version))
           $lines.Add('```')
           $lines.Add('- 토큰 값은 INI에 쓰지 않고 토큰 파일 첫 줄에만 둡니다. 명령줄 `/LabManagerUrl`, `/AgentTokenFile`은 대안으로 지원합니다.')
-          $lines.Add('- 릴리스 빌드에 `UPDATEAGENT_*` 토큰 secret이 설정되어 있으면 설치 exe에 **첫 설치 전용 토큰**이 포함됩니다. 명시적 외부 토큰 파일이 있으면 그것이 우선하고, 업데이트에서는 내장 토큰을 절대 사용하지 않습니다.')
+          $lines.Add('- 릴리스 빌드에 `UPDATEAGENT_*` 토큰 secret이 설정되어 있으면 설치 exe에 **첫 설치 전용 토큰**이 포함됩니다. 명시적 외부 토큰 파일이 있으면 그것이 우선하고, 외부 토큰 파일 없이 기존 설치를 교체(업그레이드)할 때는 릴리스에 내장된 토큰이 사용되며, 기존 구성을 재사용하는 업그레이드에서는 기존 토큰이 유지됩니다.')
           $lines.Add('- 내장 토큰은 설치 파일에서 추출할 수 있으므로 파일럿용으로 취급하고, 설치 직후 관리자 토큰을 교체하세요.')
           $lines.Add('- 전체 안내: https://github.com/ahbiyout-all/WinAutoUpdate/blob/master/docs/INSTALLER.md')
           $lines.Add('')
@@ -306,10 +342,33 @@ jobs:
             $verifyTag = $true
           }
 
-          $releaseTags = @(& gh release list --limit 200 --json tagName |
-            ConvertFrom-Json | ForEach-Object { $_.tagName })
+          # Check this tag's release directly instead of guessing from a limited global list.
+          $releaseView = @(& gh release view $tag --json tagName 2>&1)
+          $releaseViewExit = $LASTEXITCODE
+          $global:LASTEXITCODE = 0
+          $releaseExists = $false
+          if ($releaseViewExit -eq 0) {
+            $releaseInfoText = ($releaseView | Out-String)
+            try {
+              $releaseInfo = $releaseInfoText | ConvertFrom-Json
+            }
+            catch {
+              throw "Could not parse 'gh release view $tag' output: $releaseInfoText"
+            }
+            if ($releaseInfo.tagName -ne $tag) {
+              throw "Unexpected tag from 'gh release view $tag': $($releaseInfo.tagName)"
+            }
+            $releaseExists = $true
+          }
+          else {
+            $releaseErrorText = ($releaseView | Out-String)
+            # A missing release is expected; any other gh error must fail the workflow.
+            if ($releaseErrorText -notmatch 'not found|could not find') {
+              throw "Failed to check release $tag (exit code $releaseViewExit): $releaseErrorText"
+            }
+          }
 
-          if ($releaseTags -contains $tag) {
+          if ($releaseExists) {
             Write-Host "Updating existing release $tag."
 
             # 이전 버전 등 기대하지 않는 자산은 업로드 전에 제거한다.

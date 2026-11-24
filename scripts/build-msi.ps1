@@ -16,7 +16,7 @@ Run from a normal PowerShell prompt. WiX 5.0.2 is restored from NuGet.
 .\scripts\build-msi.ps1
 
 .EXAMPLE
-.\scripts\build-msi.ps1 -ProductVersion 0.1.31 -SkipValidate
+.\scripts\build-msi.ps1 -ProductVersion <version> -SkipValidate
 
 .EXAMPLE
 .\scripts\build-msi.ps1 -Sign -CertificateThumbprint "ABC123..." -TimestampUrl "http://timestamp.digicert.com"
@@ -280,15 +280,22 @@ if (-not (Test-Path -LiteralPath $builtMsi)) {
 if (-not $SkipValidate) {
     Write-Host ""
     Write-Host "Restoring WiX validation tool..." -ForegroundColor Cyan
-    & dotnet tool restore
-    if ($LASTEXITCODE -ne 0) {
-        throw "dotnet tool restore failed (exit code $LASTEXITCODE). Run 'dotnet tool restore' once with network access."
-    }
+    # The tool manifest lives at the repository root, regardless of the caller's location.
+    Push-Location $repoRoot
+    try {
+        & dotnet tool restore
+        if ($LASTEXITCODE -ne 0) {
+            throw "dotnet tool restore failed (exit code $LASTEXITCODE). Run 'dotnet tool restore' once with network access."
+        }
 
-    Write-Host "Validating MSI (ICE60 suppressed: neutral-language .NET hosts)..." -ForegroundColor Cyan
-    & dotnet wix msi validate -sice ICE60 $builtMsi
-    if ($LASTEXITCODE -ne 0) {
-        throw "MSI validation failed (exit code $LASTEXITCODE)."
+        Write-Host "Validating MSI (ICE60 suppressed: neutral-language .NET hosts)..." -ForegroundColor Cyan
+        & dotnet wix msi validate -sice ICE60 $builtMsi
+        if ($LASTEXITCODE -ne 0) {
+            throw "MSI validation failed (exit code $LASTEXITCODE)."
+        }
+    }
+    finally {
+        Pop-Location
     }
 }
 

@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.33"
+  #define AppVersion "0.1.34"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -175,6 +175,66 @@ begin
   RunHiddenStarted := Exec(FileName, Params, '', SW_HIDE, ewWaitUntilTerminated, Code);
   if not RunHiddenStarted then Code := -1;
   Result := Code;
+end;
+
+{ whoami /user /fo csv /nh 출력에서 두 번째 필드(SID)만 추출한다.
+  계정 이름을 하드코딩하지 않고 설치를 실행한 교사 계정을 사용한다. }
+function ParseCurrentUserSid(const Line: String): String;
+var
+  P, StartPos: Integer;
+begin
+  Result := '';
+  { 예: "DOMAIN\teacher","S-1-5-21-1234567890-1234567890-1234567890-1001" }
+  P := Pos('","', Line);
+  if P = 0 then Exit;
+  StartPos := P + 3;
+  P := StartPos;
+  while (P <= Length(Line)) and (Line[P] <> '"') do Inc(P);
+  if P > Length(Line) then Exit;
+  Result := Copy(Line, StartPos, P - StartPos);
+  if Copy(Result, 1, 4) <> 'S-1-' then Result := '';
+end;
+
+function GetCurrentUserSid: String;
+var
+  OutFile, Cmd: String;
+  Lines: TArrayOfString;
+  I: Integer;
+begin
+  Result := '';
+  OutFile := AddBackslash(GetTempDir) + 'UpdateAgent.LabManager.current-sid.txt';
+  DeleteFile(OutFile);
+  Cmd := '/c "' + ExpandConstant('{sys}\whoami.exe') + '" /user /fo csv /nh > "' +
+    OutFile + '" 2>&1';
+  RunHidden(ExpandConstant('{sys}\cmd.exe'), Cmd);
+  if not LoadStringsFromFile(OutFile, Lines) then Exit;
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    Result := ParseCurrentUserSid(Lines[I]);
+    if Result <> '' then Exit;
+  end;
+end;
+
+{ 실제 토큰이 들어 있는 appsettings.json은 Administrators, SYSTEM,
+  설치를 실행한 교사 계정만 읽도록 제한한다. 실패하면 호출자가 설치를 중단한다. }
+function RestrictLabManagerConfigAcl(const Path: String): Boolean;
+var
+  Sid: String;
+begin
+  Result := False;
+  Sid := GetCurrentUserSid;
+  if Sid = '' then
+  begin
+    Log('Could not determine the current teacher account SID for appsettings.json ACL.');
+    Exit;
+  end;
+
+  Log('Restricting LabManager appsettings.json ACL (values hidden): ' + Path);
+  Result := RunHidden(ExpandConstant('{sys}\icacls.exe'),
+    '"' + Path + '" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(F)" "*' +
+    Sid + ':(F)"') = 0;
+  if not Result then
+    Log('Failed to restrict LabManager appsettings.json ACL (values hidden): ' + Path);
 end;
 
 { Non-modal notice with a countdown. The caller's next statement is the step
@@ -523,6 +583,13 @@ begin
     Result := '릴리스 내장 LabManager 토큰에 기본/샘플 값이 있습니다. 실제 토큰으로 다시 빌드하세요.';
     Exit;
   end;
+  { 초기화된 값은 이미 NormalizeTokenLine으로 트리밍되어 있다. 역할 분리를 위해
+    두 토큰이 같으면 토큰 값을 기록하지 않고 일반적인 메시지로 중단한다. }
+  if AdminToken = AgentToken then
+  begin
+    Result := 'AdminToken과 AgentToken이 같습니다. 서로 다른 토큰을 사용하세요.';
+    Exit;
+  end;
 end;
 
 { 업데이트에서 토큰 교체를 선택한 경우: 외부 파일이 있으면 그것을,
@@ -564,6 +631,13 @@ begin
     if IsPlaceholderToken(AdminToken) or IsPlaceholderToken(AgentToken) then
     begin
       Result := '새 LabManager 토큰 파일에 기본/샘플 값이 있습니다. 실제 토큰으로 교체하세요: ' +
+        ExternalTokenFile;
+      Exit;
+    end;
+    { 트리밍된 두 토큰이 같으면 관리자/에이전트 역할이 구분되지 않는다. }
+    if AdminToken = AgentToken then
+    begin
+      Result := 'AdminToken과 AgentToken이 같습니다. 서로 다른 토큰을 사용하세요: ' +
         ExternalTokenFile;
       Exit;
     end;
@@ -616,10 +690,10 @@ begin
     Exit;
   end;
 
-  { 이전 설치 흔적이 남은 런타임 관리자 토큰이 있으면 내장 토큰이 우선되도록 제거한다. }
+  { 이전 설치 흔적이 남은 런타임 관리자 토큰이 있으면 내장 토큰이 우선되도록 제거한다.
+    삭제에 실패하면 새 내장 토큰이 런타임 재정의에 가려지므로 설치를 중단한다. }
   RuntimeTokenPath := ExpandConstant('{localappdata}\UpdateAgent\LabManager\runtime-admin-token.json');
-  if FileExists(RuntimeTokenPath) then
-    DeleteFile(RuntimeTokenPath);
+  if FileExists(RuntimeTokenPath) and (not DeleteFile(RuntimeTokenPath)) then Exit;
 
   Path := ExpandConstant('{app}\appsettings.json');
   if not LoadStringsFromFile(Path, Lines) then Exit;
@@ -636,6 +710,8 @@ begin
   SetArrayLength(Lines, 1);
   Lines[0] := Text;
   Result := SaveStringsToUTF8File(Path, Lines, False);
+  if Result then
+    Result := RestrictLabManagerConfigAcl(Path);
 end;
 
 { 업데이트에서 교체를 선택한 경우에만 실제 토큰 두 개를 설정에 반영한다. }
@@ -670,6 +746,8 @@ begin
   SetArrayLength(Lines, 1);
   Lines[0] := Text;
   Result := SaveStringsToUTF8File(Path, Lines, False);
+  if Result then
+    Result := RestrictLabManagerConfigAcl(Path);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -978,8 +1056,6 @@ begin
         LabManager가 시작 시 fail-closed로 거부하므로 교사가 실제 토큰을 넣어야 한다. }
       if HasDefaultLabManagerToken then
         Log('appsettings.json still contains placeholder tokens; LabManager will refuse to start until real tokens are configured.');
-      DeleteFile(LabManagerConfigBackup);
-      LabManagerConfigRestoreNeeded := False;
     end;
 
     { 첫 설치에서만 내장 토큰을 appsettings.json에 반영한다.
@@ -991,6 +1067,16 @@ begin
     if not ApplyReplacementLabManagerTokens then
       RaiseException('새 LabManager 토큰을 설정에 반영하지 못해 설치를 중단합니다.');
 
+    { 두 토큰 적용이 모두 성공한 뒤에만 백업을 삭제한다. 토큰 저장이 실패하면
+      복원본을 남겨 두어 이전 단계의 실패에서도 되돌릴 수 있게 한다. }
+    if LabManagerConfigRestoreNeeded then
+    begin
+      if not DeleteFile(LabManagerConfigBackup) then
+        Log('Could not remove the temporary LabManager appsettings.json backup: ' +
+          LabManagerConfigBackup);
+      LabManagerConfigRestoreNeeded := False;
+    end;
+
     if not ApplyFirewallRules then
       RaiseException('LabManager 방화벽 규칙을 등록하지 못해 설치를 중단합니다. ' +
         'Setup 로그와 Windows Defender 방화벽 상태를 확인하세요.');
@@ -999,7 +1085,7 @@ begin
   begin
     if LaunchSkippedForDefaultTokens and not WizardSilent then
       MsgBox(
-        '기본 토큰(change-me-*)이 남아 있어 대시보드를 자동 실행하지 않았습니다.' + #13#10 +
+        '기본/샘플 토큰(change-me-* 또는 sample-*-replace-before-pilot)이 남아 있어 대시보드를 자동 실행하지 않았습니다.' + #13#10 +
         '설치 폴더의 appsettings.json에서 AdminToken과 AgentToken을 변경한 뒤 런처를 실행하세요.',
         mbInformation, MB_OK);
   end;

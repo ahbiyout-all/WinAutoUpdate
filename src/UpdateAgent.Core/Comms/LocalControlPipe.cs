@@ -247,10 +247,12 @@ public sealed class LocalControlPipeClient
         }
         catch (Exception ex)
         {
+            // 원 예외 문자열은 학생 화면에 노출하지 않는다(상세 내용은 진단 로그에만).
+            System.Diagnostics.Debug.WriteLine($"[UpdateAgent.Core] 로컬 제어 연결 실패: {ex}");
             return new LocalControlResponse
             {
                 Success = false,
-                Message = "서비스에 연결할 수 없습니다: " + ex.Message,
+                Message = "서비스에 연결할 수 없습니다.",
             };
         }
         finally

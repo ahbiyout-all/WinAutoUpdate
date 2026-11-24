@@ -1,3 +1,4 @@
+using UpdateAgent.LabManager.Services;
 using UpdateAgent.LabManager.Storage;
 using UpdateAgent.Shared.Models;
 
@@ -91,7 +92,7 @@ public static class LiveSnapshotBuilder
             .ToList();
 
         return new LiveSnapshot(
-            DateTimeOffset.Now,
+            UtcTimestamps.Now,
             agentViews.Count,
             agentViews.Count(a => a.Online),
             agentViews.Count(a => a.State is "Busy" or "Rebooting" or "Paused"),

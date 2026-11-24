@@ -14,7 +14,9 @@ namespace UpdateAgent.Service.Commands;
 public sealed class CommandExecutor
 {
     private const string ProcessedSettingKey = "processed-command-ids";
+    private const string PendingResultsSettingKey = "pending-command-results";
     private const int MaxRememberedCommands = 200;
+    private const int MaxPendingResults = 100;
 
     private readonly UpdateJobRunner _runner;
     private readonly IRebootManager _reboot;
@@ -45,6 +47,12 @@ public sealed class CommandExecutor
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
+        await RestoreProcessedAsync(cancellationToken);
+        await RestorePendingResultsAsync(cancellationToken);
+    }
+
+    private async Task RestoreProcessedAsync(CancellationToken cancellationToken)
+    {
         try
         {
             var json = await _store.GetSettingAsync(ProcessedSettingKey, cancellationToken);
@@ -62,6 +70,27 @@ public sealed class CommandExecutor
         }
     }
 
+    /// <summary>재부팅/서비스 재시작 전에 보내지 못한 결과를 복원한다.</summary>
+    private async Task RestorePendingResultsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var json = await _store.GetSettingAsync(PendingResultsSettingKey, cancellationToken);
+            if (string.IsNullOrWhiteSpace(json)) return;
+
+            var results = UpdateAgentJson.Deserialize<List<CommandResult>>(json) ?? [];
+            foreach (var result in results.Where(r => !string.IsNullOrWhiteSpace(r.CommandId)))
+            {
+                if (_pendingResults.Count >= MaxPendingResults) break;
+                _pendingResults.Add(result);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "대기 중인 명령 결과를 읽지 못했습니다.");
+        }
+    }
+
     public IReadOnlyList<CommandResult> SnapshotResults()
     {
         lock (_pendingResults)
@@ -70,12 +99,24 @@ public sealed class CommandExecutor
         }
     }
 
-    public void AcknowledgeResults(IEnumerable<string> commandIds)
+    /// <summary>서버가 처리한 결과를 큐에서 제거하고 변경 사항을 즉시 저장한다.</summary>
+    public async Task AcknowledgeResultsAsync(
+        IEnumerable<string> commandIds,
+        CancellationToken cancellationToken = default)
     {
         var set = commandIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        lock (_pendingResults)
+        await _gate.WaitAsync(cancellationToken);
+        try
         {
-            _pendingResults.RemoveAll(r => set.Contains(r.CommandId));
+            lock (_pendingResults)
+            {
+                _pendingResults.RemoveAll(r => set.Contains(r.CommandId));
+            }
+            await PersistPendingResultsAsync(cancellationToken);
+        }
+        finally
+        {
+            _gate.Release();
         }
     }
 
@@ -99,13 +140,13 @@ public sealed class CommandExecutor
         {
             if (command.ExpiresAt < DateTimeOffset.Now)
             {
-                AddResult(new CommandResult
+                await AddResultAsync(new CommandResult
                 {
                     CommandId = command.CommandId,
                     AgentId = command.AgentId,
                     Success = false,
                     Message = "명령 유효 시간이 지났습니다.",
-                });
+                }, cancellationToken);
                 RememberCommand(command.CommandId);
                 continue;
             }
@@ -130,7 +171,7 @@ public sealed class CommandExecutor
                 result = Fail(command, $"명령 실행 중 오류: {ex.Message}");
             }
 
-            AddResult(result);
+            await AddResultAsync(result, cancellationToken);
             RememberCommand(command.CommandId);
         }
 
@@ -231,7 +272,9 @@ public sealed class CommandExecutor
             {
                 var policy = Deserialize<UpdatePolicy>(command.PayloadJson) ?? UpdatePolicy.Default;
                 // 캐시에도 기능 업데이트 승인 값을 남기지 않는다(대시보드가 원본 JSON을 읽는다).
-                var sanitized = policy.ForExecution(WindowsOsInfoProvider.GetCurrent());
+                // 서버의 정책 저장 규칙과 동일하게 Maestro 수동 확인을 다시 켠다.
+                var sanitized = policy.ForExecution(WindowsOsInfoProvider.GetCurrent())
+                    with { RequireMaestroManualConfirmation = true };
                 await _store.SetSettingAsync(
                     ServerPolicyProvider.SettingKey, UpdateAgentJson.Serialize(sanitized), cancellationToken);
                 return Ok(command, "정책을 적용했습니다.");
@@ -282,15 +325,53 @@ public sealed class CommandExecutor
         Message = message,
     };
 
-    private void AddResult(CommandResult result)
+    private async Task AddResultAsync(CommandResult result, CancellationToken cancellationToken)
     {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            lock (_pendingResults)
+            {
+                _pendingResults.Add(result);
+                if (_pendingResults.Count > MaxPendingResults)
+                {
+                    _pendingResults.RemoveAt(0);
+                }
+            }
+            await PersistPendingResultsAsync(cancellationToken);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// 저장 실패가 결과 자체를 잃게 하지 않는다. 메모리 큐는 그대로 두고 다음 변경 때 다시 저장한다.
+    /// </summary>
+    private async Task PersistPendingResultsAsync(CancellationToken cancellationToken)
+    {
+        IReadOnlyList<CommandResult> snapshot;
         lock (_pendingResults)
         {
-            _pendingResults.Add(result);
-            if (_pendingResults.Count > 100)
-            {
-                _pendingResults.RemoveAt(0);
-            }
+            snapshot = _pendingResults.ToList();
+        }
+
+        try
+        {
+            await _store.SetSettingAsync(
+                PendingResultsSettingKey,
+                UpdateAgentJson.Serialize(snapshot),
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // 결과 메시지/토큰은 남기지 않는다.
+            _logger.LogDebug(ex, "대기 중인 명령 결과 저장 실패");
         }
     }
 

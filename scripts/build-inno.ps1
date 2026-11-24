@@ -270,7 +270,16 @@ if ([string]::IsNullOrWhiteSpace($ProductVersion)) {
 $ProductVersion = ConvertTo-ThreePartVersion $ProductVersion
 
 $iscc = Find-Iscc -Explicit $IsccPath
-$isccVersionText = (& $iscc /? 2>$null | Select-Object -First 1)
+# iscc /? writes usage to stderr; on Windows PowerShell 5.1 with $ErrorActionPreference
+# set to Stop this becomes a terminating error, so relax it only while probing.
+$previousErrorAction = $ErrorActionPreference
+try {
+    $ErrorActionPreference = 'SilentlyContinue'
+    $isccVersionText = (& $iscc /? 2>&1 | Select-Object -First 1)
+}
+finally {
+    $ErrorActionPreference = $previousErrorAction
+}
 if ($isccVersionText -notmatch 'Inno Setup\s+6') {
     throw "Inno Setup 6 compiler is required (found: $isccVersionText): $iscc"
 }
@@ -376,6 +385,7 @@ if ($removed.Count -gt 0) {
 # 첫 설치 인스톨러는 빈/플레이스홀더 토큰을 만나면 fail-closed로 중단한다.
 # 업데이트 경로는 이 파일을 읽지 않으므로 토큰이 없어도 정상 동작한다.
 $agentTokenFromEnv = $env:UPDATEAGENT_AGENT_TOKEN
+$labAgentTokenFromEnv = $env:UPDATEAGENT_LABMANAGER_AGENT_TOKEN
 $agentTokenLines = @()
 if (-not [string]::IsNullOrWhiteSpace($agentTokenFromEnv)) {
     $agentTokenLines = @(Assert-BundledTokenValue -Value $agentTokenFromEnv -Name 'UPDATEAGENT_AGENT_TOKEN')
@@ -385,7 +395,6 @@ Write-BundledTokenFile -Path (Join-Path $agentStage $bundledAgentTokenName) -Lin
 
 if (-not $AgentOnly) {
     $adminTokenFromEnv = $env:UPDATEAGENT_LABMANAGER_ADMIN_TOKEN
-    $labAgentTokenFromEnv = $env:UPDATEAGENT_LABMANAGER_AGENT_TOKEN
     $hasAdminToken = -not [string]::IsNullOrWhiteSpace($adminTokenFromEnv)
     $hasLabAgentToken = -not [string]::IsNullOrWhiteSpace($labAgentTokenFromEnv)
     if ($hasAdminToken -ne $hasLabAgentToken) {
@@ -399,6 +408,17 @@ if (-not $AgentOnly) {
         Write-Host 'Embedded first-install LabManager token file (values hidden).'
     }
     Write-BundledTokenFile -Path (Join-Path $labManagerStage $bundledLabManagerTokenName) -Lines $labManagerTokenLines
+}
+
+# Both variables name the same student-facing token. A mismatch would ship an
+# installer whose embedded token the LabManager rejects (401). Values stay hidden.
+if (-not [string]::IsNullOrWhiteSpace($agentTokenFromEnv) -and
+    -not [string]::IsNullOrWhiteSpace($labAgentTokenFromEnv)) {
+    $normalizedAgentToken = $agentTokenFromEnv.TrimStart([char]0xFEFF).Trim()
+    $normalizedLabAgentToken = $labAgentTokenFromEnv.TrimStart([char]0xFEFF).Trim()
+    if ($normalizedAgentToken -cne $normalizedLabAgentToken) {
+        throw 'UPDATEAGENT_AGENT_TOKEN and UPDATEAGENT_LABMANAGER_AGENT_TOKEN must match when both are set.'
+    }
 }
 
 # 빌드 메타데이터에 실제 시크릿 내장 여부를 정확히 기록한다.

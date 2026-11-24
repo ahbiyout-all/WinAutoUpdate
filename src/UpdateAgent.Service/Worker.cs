@@ -223,10 +223,21 @@ public sealed class Worker : BackgroundService
                 }
             }
 
-            // 서버가 받은 결과는 큐에서 제거한다.
-            if (request.CommandResults.Count > 0)
+            // 서버가 받은 결과는 큐에서 제거한다. 거부/중복/만료 결과도 서버가 이미
+            // 처리했으므로 함께 제거해야 이후 명령과 정책이 영구히 막히지 않는다.
+            var acknowledgedIds = ResolveAcknowledgedCommandIds(request.CommandResults, response);
+            if (acknowledgedIds.Count > 0)
             {
-                _commands.AcknowledgeResults(request.CommandResults.Select(r => r.CommandId));
+                await _commands.AcknowledgeResultsAsync(acknowledgedIds, cancellationToken);
+            }
+
+            if (response.CommandResultOutcomes.Count > 0)
+            {
+                foreach (var rejected in response.CommandResultOutcomes.Where(o => !o.Accepted))
+                {
+                    // 결과 본문/토큰은 남기지 않고 ID만 기록한다.
+                    _logger.LogDebug("서버가 명령 결과를 거부했습니다: {CommandId}", rejected.CommandId);
+                }
             }
 
             if (response.Commands.Count > 0)
@@ -244,6 +255,25 @@ public sealed class Worker : BackgroundService
         {
             _logger.LogWarning(ex, "체크인 처리 중 오류");
         }
+    }
+
+    /// <summary>
+    /// 체크인 응답에서 큐에서 제거할 결과 ID를 고른다.
+    /// 서버가 결과별 판정을 보내면 수락/거부 여부와 무관하게 그 ID들을 모두 제거한다.
+    /// 이전 서버는 해당 필드가 없으므로 제출한 전체 ID를 제거한다(하위 호환).
+    /// </summary>
+    public static IReadOnlyList<string> ResolveAcknowledgedCommandIds(
+        IReadOnlyList<CommandResult> submittedResults,
+        AgentCheckInResponse response)
+    {
+        var source = response.CommandResultOutcomes.Count > 0
+            ? response.CommandResultOutcomes.Select(o => o.CommandId)
+            : submittedResults.Select(r => r.CommandId);
+
+        return source
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private async Task<AgentCheckInRequest> BuildCheckInAsync(CancellationToken cancellationToken)

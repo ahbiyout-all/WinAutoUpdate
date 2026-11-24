@@ -74,8 +74,9 @@ public sealed class LocalUpdateTrigger
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "학생 수동 업데이트 옵션을 적용하지 못했습니다.");
-            return Fail("수동 업데이트 옵션을 적용하지 못했습니다: " + ex.Message);
+            var errorId = Guid.NewGuid().ToString("N")[..8];
+            _logger.LogError(ex, "학생 수동 업데이트 옵션 적용 실패: {ErrorId}", errorId);
+            return Fail("수동 업데이트 옵션을 적용하지 못했습니다.");
         }
 
         // UI 검증은 우회될 수 있으므로 서비스에서도 최종 정책 기준으로 빈 범위 요청을 거부한다.
@@ -122,8 +123,9 @@ public sealed class LocalUpdateTrigger
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "학생 요청 작업 시작 실패");
-            return Fail("작업을 시작하지 못했습니다: " + ex.Message);
+            var errorId = Guid.NewGuid().ToString("N")[..8];
+            _logger.LogError(ex, "학생 요청 작업 시작 실패: {ErrorId}", errorId);
+            return Fail("작업을 시작하지 못했습니다.");
         }
     }
 
@@ -170,8 +172,9 @@ public sealed class LocalUpdateTrigger
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "오버레이 긴급 중단 처리 실패");
-            return Fail("작업을 중단하지 못했습니다: " + ex.Message);
+            var errorId = Guid.NewGuid().ToString("N")[..8];
+            _logger.LogError(ex, "오버레이 긴급 중단 처리 실패: {ErrorId}", errorId);
+            return Fail("작업을 중단하지 못했습니다.");
         }
     }
 

@@ -173,20 +173,16 @@ $tokenWasRequested =
 
 if ($tokenWasRequested) {
     $resolvedToken = ''
-    # An explicitly supplied file always wins over a stale session/CI environment token.
-    if ($PSBoundParameters.ContainsKey('AgentTokenFile') -and
-        -not [string]::IsNullOrWhiteSpace($AgentTokenFile)) {
-        $resolvedToken = Resolve-Secret -Value "" -File $AgentTokenFile
+    if ($PSBoundParameters.ContainsKey('AgentTokenFile')) {
+        # An explicitly supplied file is authoritative: never fall back to the
+        # environment token or to an interactive prompt, even when it is invalid.
+        if ([string]::IsNullOrWhiteSpace($AgentTokenFile)) {
+            throw 'AgentTokenFile was supplied but is empty. Specify a valid token file.'
+        }
+        $resolvedToken = Resolve-Secret -Value '' -File $AgentTokenFile
     }
-    if ([string]::IsNullOrWhiteSpace($resolvedToken) -and
-        -not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_AGENT_TOKEN)) {
+    elseif (-not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_AGENT_TOKEN)) {
         $resolvedToken = $env:UPDATEAGENT_AGENT_TOKEN
-    }
-    if ([string]::IsNullOrWhiteSpace($resolvedToken) -and -not [string]::IsNullOrWhiteSpace($AgentTokenFile)) {
-        $resolvedToken = Resolve-Secret -Value "" -File $AgentTokenFile
-    }
-    if ([string]::IsNullOrWhiteSpace($resolvedToken)) {
-        $resolvedToken = Resolve-Secret -Value "" -File ""
     }
     $resolvedToken = $resolvedToken.TrimStart([char]0xFEFF).Trim()
     if ([string]::IsNullOrWhiteSpace($resolvedToken)) {

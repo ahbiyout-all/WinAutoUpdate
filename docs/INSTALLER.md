@@ -121,7 +121,8 @@ C:\Program Files\UpdateAgent\LabManager\
    - LabManager: 첫 설치에는 **실제 AdminToken/AgentToken 두 개가 내장되어 있어야 합니다**.
      값이 비어 있거나 `change-me-*`, `sample-*-replace-before-pilot`이면 설치가 중단됩니다(fail-closed).
      공개된 샘플 값으로 서버가 뜨는 일은 없으므로, 토큰 secret을 설정해 빌드한 설치 파일을 사용하세요.
-     업데이트에서는 내장 토큰을 읽지 않고 기존 `appsettings.json`을 그대로 유지합니다.
+     업데이트의 재사용/무인 설치는 내장 토큰을 읽지 않고 기존 `appsettings.json`을 그대로 유지합니다.
+     교체를 선택하면 릴리스 내장 두 줄(또는 명시한 외부 토큰 파일)로 교체합니다.
      바로가기는 **런처**(`UpdateAgent.LabManager.Desktop.exe`)를 가리키며, 런처가 Edge/Chrome 앱 모드 창으로 대시보드를 엽니다.
 
 ## 5. 기존 설치 처리
@@ -150,9 +151,10 @@ C:\Program Files\UpdateAgent\LabManager\
   - Agent: `C:\Program Files\UpdateAgent\Service\appsettings.json`
   - LabManager: `C:\Program Files\UpdateAgent\LabManager\appsettings.json`
   - 설치 과정에서 생성된 기본 `appsettings.json`은 백업본으로 덮어씁니다.
-  - LabManager(v0.1.27 이상): 복원된 설정의 토큰은 절대 바꾸지 않습니다. `change-me-*` 또는
+  - LabManager(v0.1.27 이상): 재사용/무인 업데이트에서는 복원된 설정의 토큰을 바꾸지 않습니다. `change-me-*` 또는
     샘플 토큰(`sample-*-replace-before-pilot`)이 남아 있으면 서버가 시작을 거부하므로
-    대시보드에서 실제 토큰으로 교체해야 합니다(자동 치환 없음).
+    대시보드에서 실제 토큰으로 교체해야 합니다(자동 치환 없음). 교체 선택 시에는 백업본의 두 토큰만
+    새 값으로 바꾸고, 런타임 관리자 토큰 재정의 파일 삭제가 실패하면 설치를 중단합니다(fail-closed).
 - `C:\ProgramData\UpdateAgent\agent.json`은 제거 대상이 아니므로 그대로 유지됩니다.
 - 이전 버전 제거가 **실제로 실패하면** 오류를 표시하고 **새 설치를 중단합니다.** 덮어쓰기로 이어가지 않습니다.
   다만 제거 대상이 이미 없으면(등록 정보만 남음, 제거 프로그램 없음, MSI `1605`) 실패가 아니므로 설치를 계속합니다.
@@ -177,7 +179,9 @@ C:\Program Files\UpdateAgent\LabManager\
 - 토큰 파일은 UTF-8(BOM 허용) 또는 ASCII로 저장하세요. 첫 줄만 읽습니다.
 - `/LabManagerUrl`과 `/AgentTokenFile`은 **키별로** 명령줄 값이 우선하고, 없으면 같은 폴더의
   `agent-install.ini`에서 읽습니다. **첫 설치**에서 둘 다 없으면 `http://labmanager:5080`과
-  내장 토큰을 사용합니다(v0.1.30 이상). **업그레이드**에서는 기존 `agent.json`을 유지합니다.
+  내장 토큰을 사용합니다(v0.1.30 이상). **업그레이드의 재사용/무인 설치**에서는 내장 토큰을 무시하고
+  기존 `agent.json`을 유지합니다. **교체 선택** 시에는 릴리스 내장 토큰(또는 명시한 외부 토큰 파일)으로
+  교체하며, 새 URL을 지정하지 않으면 기존 URL을 유지합니다.
 
 #### 설치 파일과 같은 폴더의 설정 파일 사용 (학생 PC 배포 권장)
 
@@ -196,11 +200,12 @@ AgentTokenFile=agent-token.txt
 - INI는 **UTF-8 BOM 없이** 저장하세요. BOM이 있으면 Windows API가 `[Agent]` 섹션을 읽지 못해
   설치가 중단됩니다. 값 뒤의 `; 주석`은 무시됩니다.
 - 설정 파일이 없으면 명령줄 인자만 사용합니다. 설정 파일도 명령줄 인자도 없으면 **첫 설치**에서는
-  기본 URL(`http://labmanager:5080`)과 내장 토큰을 쓰고, **기존 설치**에서는 `agent.json`을 그대로
-  유지합니다. 다른 DNS 이름/IP를 쓰는 실습실은 반드시 INI나 명령줄로 지정하세요.
+  기본 URL(`http://labmanager:5080`)과 내장 토큰을 쓰고, **기존 설치의 재사용/무인 설치**에서는
+  `agent.json`을 그대로 유지합니다. 다른 DNS 이름/IP를 쓰는 실습실은 반드시 INI나 명령줄로 지정하세요.
 - **키별로 명령줄 값이 우선**합니다. 예를 들어 `/LabManagerUrl`만 명령줄로 주고 토큰 파일은 INI에서
-  읽을 수도 있습니다. 업그레이드에서 토큰 파일을 지정하지 않으면 기존 `agent.json`의 토큰을 유지하고
-  요청된 URL만 반영합니다(내장 토큰은 사용하지 않습니다).
+  읽을 수도 있습니다. 업그레이드의 재사용/무인 설치에서 토큰 파일을 지정하지 않으면 기존 `agent.json`의
+  토큰을 유지하고 요청된 URL만 반영합니다(내장 토큰은 사용하지 않습니다). 교체를 선택하고 토큰 파일이
+  없으면 릴리스 내장 토큰으로 교체하며, 새 URL을 지정하지 않으면 기존 URL을 유지합니다.
 - 업그레이드 시 토큰 파일을 삭제한 뒤 같은 INI로 다시 설치하면, **기존 설치가 감지되고** 기존
   `agent.json`이 유효할 때만 설정을 유지합니다. 설치 이력이 없거나 `agent.json`이 손상되었으면
   토큰 파일 누락으로 설치가 중단됩니다.
@@ -209,48 +214,54 @@ AgentTokenFile=agent-token.txt
   `sample-*-replace-before-pilot` 형식의 토큰은 설치가 중단됩니다.
 - 기존 `agent.json`이 있으면 `LabManagerUrl`, `AgentToken`, `SessionHelperPath`만 갱신하고
   `DryRun`, `PollIntervalSeconds` 등 나머지 설정은 유지합니다.
-- `agent.json`은 빈 파일을 먼저 만들고 ACL을 제한한 뒤 토큰을 기록하므로 일반 사용자가 토큰을
-  읽는 창이 없습니다. ACL 제한 실패도 설치 실패로 처리합니다.
+- `agent.json`은 임시 파일에 토큰을 쓴 뒤 ACL을 적용하고 최종 경로로 **원자적으로 교체**하므로 일반
+  사용자가 토큰을 읽는 창이 없습니다. ACL 제한 실패도 설치 실패로 처리합니다.
 
 `scripts\deploy-agents.ps1`이 PC별 패키지에 이 설정 파일을 자동으로 생성합니다.
 
-#### 첫 설치 전용 내장 토큰 (v0.1.25 이상)
+#### 첫 설치 및 교체용 내장 토큰 (v0.1.25 이상, 교체 선택 v0.1.33 이상)
 
 릴리스 빌드에서 `UPDATEAGENT_AGENT_TOKEN`(학생 PC)과
 `UPDATEAGENT_LABMANAGER_ADMIN_TOKEN`/`UPDATEAGENT_LABMANAGER_AGENT_TOKEN`(교사 PC) secret이
-설정되면 설치 exe 안에 **첫 설치에서만 읽는 토큰 파일**이 들어갑니다. 설치 폴더에는 남기지 않습니다.
+설정되면 설치 exe 안에 **첫 설치와 교체 선택 업데이트에서 읽는 토큰 파일**이 들어갑니다.
+설치 폴더에는 남기지 않습니다.
 
 | 제품 | 상황 | 외부 토큰 지정 | 결과 |
 |---|---|---|---|
 | Agent | 첫 설치 | 없음 | `http://labmanager:5080` + 내장 `agent-token.txt` 첫 줄(v0.1.30 이상) |
 | Agent | 첫 설치 | 있음(`/AgentTokenFile` 또는 INI) | 외부 토큰 우선 |
-| Agent | 업데이트, 재사용 | 없음 | 내장 토큰 무시, 기존 토큰 유지 + 요청된 URL 반영 |
-| Agent | 업데이트, 교체 선택 | 없음 | 릴리스 내장 `agent-token.txt` 첫 줄로 교체, 기존 URL 유지(v0.1.33 이상) |
-| Agent | 업데이트, 교체 선택 | `/AgentTokenFile` 또는 INI | 외부 토큰으로 교체 |
+| Agent | 업데이트, 재사용/무인 | 없음 | 내장 토큰 무시, 기존 토큰 유지 + 요청된 URL 반영 |
+| Agent | 업데이트, 재사용/무인 | `/AgentTokenFile` 또는 INI | 명시한 외부 토큰으로 교체 |
+| Agent | 업데이트, 교체 선택 | 없음 | 릴리스 내장 `agent-token.txt` 첫 줄로 교체, 새 URL이 없으면 기존 URL 유지(v0.1.33 이상) |
+| Agent | 업데이트, 교체 선택 | `/AgentTokenFile` 또는 INI | 외부 토큰으로 교체, 새 URL이 없으면 기존 URL 유지 |
 | LabManager | 첫 설치 | 해당 없음 | 내장 두 줄(1행 AdminToken, 2행 AgentToken)을 `appsettings.json`에 반영 |
-| LabManager | 업데이트, 재사용 | 없음 | 내장 토큰 무시, 기존 `appsettings.json` 유지 |
+| LabManager | 업데이트, 재사용/무인 | 없음 | 내장 토큰 무시, 기존 `appsettings.json` 유지 |
+| LabManager | 업데이트, 재사용/무인 | `/LabManagerTokenFile` | 명시한 외부 두 줄 토큰으로 교체 |
 | LabManager | 업데이트, 교체 선택 | 없음 | 릴리스 내장 두 줄로 교체, 런타임 관리자 토큰 재정의 제거(v0.1.33 이상) |
-| LabManager | 업데이트, 교체 선택 | `/LabManagerTokenFile` | 외부 두 줄 토큰 파일로 교체 |
+| LabManager | 업데이트, 교체 선택 | `/LabManagerTokenFile` | 외부 두 줄 토큰 파일로 교체, 런타임 관리자 토큰 재정의 제거 |
 
 #### 업데이트 시 기존 토큰 처리 선택 (v0.1.32 이상)
 
 기존 설치가 감지되면 설치 마법사에 **기존 토큰 처리** 화면이 나타납니다.
 
-- `기존 토큰을 백업해 재사용 (권장)`: 기본값입니다. 기존 설정을 백업·복원한 뒤 URL과 설치 경로만 갱신합니다.
+- `기존 토큰을 백업해 재사용 (권장)`: 기본값이며 `/VERYSILENT` 무인 설치도 이 규칙을 따릅니다.
+  기존 설정을 백업·복원해 **기존 토큰과 URL을 유지**하고 설치 경로만 갱신합니다. 내장 토큰은 무시합니다.
 - `기존 토큰을 삭제하고 새 토큰 기록`: **릴리스 exe에 내장된 토큰**으로 교체합니다(v0.1.33 이상).
-  명령줄 인자나 파일 선택 없이 진행됩니다. 다른 토큰을 쓰려면 아래 외부 파일을 지정하세요.
+  별도 명령줄 인자나 파일 선택 없이도 진행됩니다. 다른 토큰을 쓰려면 아래 외부 파일을 지정하면
+  그것이 내장 토큰보다 우선합니다. URL을 새로 지정하지 않으면 기존 URL을 유지합니다.
   - Agent: `/AgentTokenFile=<파일>` 또는 `agent-install.ini`의 `AgentTokenFile`
   - LabManager: `/LabManagerTokenFile=<파일>` (첫 줄 AdminToken, 둘째 줄 AgentToken, 설치 exe 기준 상대 경로 허용)
 
 교체용 토큰이 비어 있거나 샘플/기본 값이면, 기존 설치를 제거하거나 파일을 교체하기 **전에**
 설치가 중단됩니다. 대시보드에서 변경한 토큰이 있다면 교체 선택 시 릴리스 빌드 시점의 값으로
 되돌아갑니다. URL이 따로 지정되지 않으면 기존 설정의 URL을 유지합니다(Agent).
-첫 설치와 `/VERYSILENT` 무인 설치에서는 이 화면을 건너뛰고 기존 규칙(첫 설치 전용 내장 토큰,
-무인 설치 기존 토큰 재사용)을 적용합니다.
+첫 설치와 `/VERYSILENT` 무인 설치에서는 이 화면을 건너뛰고 기존 규칙(첫 설치 및 교체용 내장 토큰,
+무인 설치 기존 토큰 재사용)을 적용합니다. 설정 백업본은 토큰 적용이 성공한 뒤에만 삭제합니다.
 
 - 내장 토큰이 비어 있거나 `change-me-*`, `sample-*-replace-before-pilot`이면 첫 설치와 교체 선택
   업데이트가 중단됩니다.
 - 재사용을 선택한 업데이트는 내장 파일을 꺼내지도 않으므로 결과에 영향을 주지 않습니다.
+  단, 명시적으로 지정한 외부 토큰 파일은 재사용 선택에서도 우선합니다.
 - 내장 토큰은 설치 파일에서 추출할 수 있습니다. 파일럿 전용으로 취급하고 설치 직후
   대시보드의 **서버 토큰 변경**으로 관리자 토큰을 교체하세요.
 - secret이 없는 로컬/사설 빌드에서는 내장 파일이 비어 있습니다. 에이전트 첫 설치는 외부 토큰 파일을
@@ -281,9 +292,10 @@ PC를 변경하지 않고 설치가 중단됩니다(`/VERYSILENT`에서는 오�
 ```
 
 릴리스 빌드에는 `UPDATEAGENT_LABMANAGER_ADMIN_TOKEN`과 `UPDATEAGENT_LABMANAGER_AGENT_TOKEN` secret이
-설정되어 있어야 합니다. 두 값이 모두 내장되어 있으면 첫 설치에서 `appsettings.json`에 반영되어 서버가
-바로 시작됩니다. 하나라도 비었거나 샘플/기본 값이면 설치가 중단됩니다. 업데이트에서는 내장 토큰을
-무시하고 기존 설정을 유지합니다.
+설정되어 있어야 하며, 두 값은 **서로 달라야** 합니다. 두 값이 모두 내장되어 있으면 첫 설치에서
+`appsettings.json`에 반영되어 서버가 바로 시작됩니다. 하나라도 비었거나 샘플/기본 값이면 설치가 중단됩니다.
+업데이트의 재사용/무인 설치는 내장 토큰을 무시하고 기존 설정을 유지합니다. 교체를 선택하면 릴리스
+내장 두 줄을 사용하고, `/LabManagerTokenFile`을 지정하면 그것이 우선합니다.
 내장 토큰은 설치 파일에서 추출할 수 있으므로 **파일럿 직후 대시보드의 서버 토큰 변경으로
 관리자 토큰을 교체**하세요. `C:\Program Files\UpdateAgent\LabManager\appsettings.json`의
 `AdminToken`과 `AgentToken`을 모두 실제 값으로 바꿔야 서버가 시작됩니다.
@@ -298,6 +310,8 @@ Program Files의 `appsettings.json`보다 우선하며 재시작 후에도 유�
 브라우저에 저장된 토큰도 새 값으로 갱신되지만, 이전 토큰은 변경 직후부터 거부됩니다.
 에이전트 토큰(`AgentToken`)은 이 화면에서 변경되지 않으므로
 `configure-labmanager.ps1`로 별도 교체해야 합니다.
+`appsettings.json`과 `runtime-admin-token.json`은 관리자/SYSTEM만 접근할 수 있도록 ACL이 제한되며,
+교체 선택 업데이트에서 런타임 재정의 파일을 삭제하지 못하면 설치를 중단합니다(fail-closed).
 
 ### 설치 로그
 

@@ -141,6 +141,16 @@ public sealed record AgentCheckInRequest
     public DateTimeOffset SentAt { get; init; } = DateTimeOffset.Now;
 }
 
+/// <summary>
+/// 서버가 명령 결과를 각각 수락했는지 알려주는 응답 항목.
+/// 거부된 결과도 에이전트 큐에서 제거해야 중복 재전송으로 명령 대기열이 막히지 않는다.
+/// </summary>
+public sealed record CommandResultOutcome
+{
+    public required string CommandId { get; init; }
+    public bool Accepted { get; init; }
+}
+
 /// <summary>LabManager → 에이전트 체크인 응답.</summary>
 public sealed record AgentCheckInResponse
 {
@@ -150,6 +160,12 @@ public sealed record AgentCheckInResponse
     public UpdatePolicy? Policy { get; init; }
     public bool MaestroManualConfirmationRequired { get; init; } = true;
     public string? Notice { get; init; }
+
+    /// <summary>
+    /// 결과 ID별 서버 처리 여부. 이전 서버는 보내지 않으므로 기본값은 빈 목록이다.
+    /// 비어 있으면 제출한 결과 전체를 ack 처리한다.
+    /// </summary>
+    public IReadOnlyList<CommandResultOutcome> CommandResultOutcomes { get; init; } = [];
 }
 
 public enum JobAssignmentAction

@@ -39,7 +39,9 @@ public sealed class UpdateCheckService
                 return cached;
             }
 
-            var checker = new GitHubReleaseChecker(_httpClientFactory.CreateClient("github"));
+            // 대시보드가 링크를 열므로 GitHub 이외의 호스트/스킴은 저장소 상수로 되돌린다.
+            var checker = new GitHubReleaseChecker(
+                _httpClientFactory.CreateClient("github"), strictUrlValidation: true);
             var result = await checker.CheckAsync(UpdateProduct.LabManager, cancellationToken).ConfigureAwait(false);
             // 실패 결과를 10분간 캐시하면 네트워크 복구 후에도 계속 실패가 표시된다.
             _cached = result.CheckSucceeded ? result : null;
@@ -67,7 +69,7 @@ public sealed class UpdateCheckService
 
     private bool TryGetCached(out AppUpdateInfo result)
     {
-        if (_cached is { CheckSucceeded: true } cached && DateTimeOffset.Now - cached.CheckedAt < CacheDuration)
+        if (_cached is { CheckSucceeded: true } cached && UtcTimestamps.Now - cached.CheckedAt < CacheDuration)
         {
             result = cached;
             return true;

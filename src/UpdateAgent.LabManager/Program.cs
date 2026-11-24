@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
@@ -23,9 +22,6 @@ var hostArgs = args
 
 var builder = WebApplication.CreateBuilder(hostArgs);
 
-// 같은 PC의 체크인을 직렬화해 이전 상태 읽기→검증→저장 사이에 최신 상태가 덮어써지지 않게 한다.
-var checkinGates = new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.OrdinalIgnoreCase);
-
 builder.Host.UseSerilog((context, logger) => logger
     .ReadFrom.Configuration(context.Configuration)
     .Enrich.FromLogContext()
@@ -49,16 +45,16 @@ builder.Services.Configure<LabManagerOptions>(
 var startupOptions = builder.Configuration
     .GetSection(LabManagerOptions.SectionName)
     .Get<LabManagerOptions>() ?? new LabManagerOptions();
+var configuredAdminToken = NormalizeConfiguredToken(startupOptions.AdminToken);
+var configuredAgentToken = NormalizeConfiguredToken(startupOptions.AgentToken);
 if (!startupOptions.AllowDefaultTokens)
 {
-    var adminToken = startupOptions.AdminToken?.Trim();
-    var agentToken = startupOptions.AgentToken?.Trim();
     var invalidTokens = new List<string>();
     // change-me-* 및 sample-*-replace-before-pilot 모두 공개된 값이므로 시작을 막는다.
-    if (UpdateAgentConstants.IsPlaceholderToken(adminToken))
+    if (UpdateAgentConstants.IsPlaceholderToken(configuredAdminToken))
         invalidTokens.Add("AdminToken");
 
-    if (UpdateAgentConstants.IsPlaceholderToken(agentToken))
+    if (UpdateAgentConstants.IsPlaceholderToken(configuredAgentToken))
         invalidTokens.Add("AgentToken");
 
     if (invalidTokens.Count > 0)
@@ -68,6 +64,15 @@ if (!startupOptions.AllowDefaultTokens)
             "scripts\\configure-labmanager.ps1을 실행하거나 appsettings.json의 LabManager 토큰을 변경하세요. " +
             "로컬 개발에서만 LabManager:AllowDefaultTokens=true를 사용하세요.");
     }
+}
+
+// 관리자와 에이전트가 같은 토큰을 쓰면 학생도 관리자 API를 호출할 수 있다.
+// 값을 출력하지 않고, 학생/서버 빌드 간에 의도적으로 같은 에이전트 토큰은 건드리지 않는다.
+if (string.Equals(configuredAdminToken, configuredAgentToken, StringComparison.Ordinal))
+{
+    throw new InvalidOperationException(
+        "관리자 토큰과 에이전트 토큰은 서로 달라야 합니다. " +
+        "scripts\\configure-labmanager.ps1을 실행하거나 appsettings.json의 LabManager 토큰을 변경하세요.");
 }
 
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -92,6 +97,7 @@ builder.Services.AddHttpClient("github", client =>
 builder.Services.AddSingleton<UpdateCheckService>();
 builder.Services.AddSingleton<LiveEventBus>();
 builder.Services.AddSingleton<AgentPolicyService>();
+builder.Services.AddSingleton<CheckinGateRegistry>();
 
 // 대시보드에서 변경한 관리자 토큰은 %LOCALAPPDATA%의 override 파일에 저장되며,
 // 미들웨어가 요청마다 최신 값을 읽으므로 재시작 없이 즉시 적용된다.
@@ -117,7 +123,7 @@ app.MapGet("/api/health", () => Results.Ok(new
     status = "ok",
     product = UpdateAgentConstants.ProductName,
     version = UpdateAgentConstants.AgentVersion,
-    serverTime = DateTimeOffset.Now,
+    serverTime = DateTimeOffset.UtcNow,
 }));
 
 // ---------------- 앱 업데이트 확인 ----------------
@@ -138,190 +144,20 @@ app.MapPost("/api/agents/checkin", async (
     LabStore labStore,
     AgentPolicyService agentPolicies,
     LiveEventBus liveEvents,
+    CheckinGateRegistry gates,
     CancellationToken cancellationToken) =>
 {
-    // 공유 에이전트 토큰으로 임의 ID를 무한 생성해 DB/메모리를 오염시키지 않는다.
-    var agentId = request.Agent.AgentId;
-    if (string.IsNullOrWhiteSpace(agentId) || agentId.Length > 128 ||
-        agentId.Any(c => !char.IsLetterOrDigit(c) && c is not '-' and not '_'))
+    var result = await AgentCheckInHandler.ProcessAsync(
+        request, labStore, agentPolicies, liveEvents, gates, cancellationToken);
+
+    // 거부된 명령 결과가 있어도 200 + outcomes로 응답해야 에이전트 큐가 막히지 않는다.
+    // 잘못된 에이전트 ID/텔레메트리 불일치/다른 에이전트 결과는 여전히 400이다.
+    return result.StatusCode switch
     {
-        await labStore.AddAuditAsync(
-            "agent", "checkin-rejected", request.Agent.MachineName,
-            "잘못된 에이전트 ID 형식", cancellationToken);
-        return Results.BadRequest(new { error = "에이전트 ID 형식이 올바르지 않습니다." });
-    }
-    if (!checkinGates.ContainsKey(agentId) && checkinGates.Count >= 200)
-    {
-        return Results.StatusCode(StatusCodes.Status429TooManyRequests);
-    }
-
-    var checkinGate = checkinGates.GetOrAdd(agentId, _ => new SemaphoreSlim(1, 1));
-    await checkinGate.WaitAsync(cancellationToken);
-    try
-    {
-    if (!JobStateGuard.AgentIdsMatch(request.Agent.AgentId, request.Telemetry.AgentId))
-    {
-        await labStore.AddAuditAsync(
-            "agent",
-            "job-state-rejected",
-            $"{request.Agent.MachineName}/{request.Telemetry.AgentId}",
-            "에이전트 정보와 텔레메트리의 에이전트 ID 불일치",
-            cancellationToken);
-        return Results.BadRequest(new { error = "에이전트 ID가 일치하지 않습니다." });
-    }
-
-    await labStore.UpsertAgentAsync(request.Agent, request.Telemetry, cancellationToken);
-
-    // 상태 검증과 저장에 사용하는 시각은 서버 수신 시각이다.
-    var receivedAt = DateTimeOffset.UtcNow;
-    var summary = request.Telemetry.CurrentJob;
-    if (summary is not null)
-    {
-        var previous = await labStore.GetJobAsync(summary.JobId, cancellationToken);
-        if (!JobStateGuard.CanAccept(previous?.Summary, summary, request.Agent.AgentId, receivedAt))
-        {
-            await labStore.AddAuditAsync(
-                "agent",
-                "job-state-rejected",
-                $"{request.Agent.MachineName}/{summary.JobId}",
-                $"소유자/종료 상태/시간 순서 검증 실패: {summary.State} ({summary.Phase})",
-                cancellationToken);
-        }
-        else if (request.Telemetry.CurrentJobDetail is { } mismatchedDetail &&
-                 !JobStateGuard.DetailSummaryMatches(summary, mismatchedDetail.Summary))
-        {
-            await labStore.AddAuditAsync(
-                "agent",
-                "job-state-rejected",
-                $"{request.Agent.MachineName}/{summary.JobId}",
-                $"작업 상세 요약 불일치: {mismatchedDetail.Summary.State}",
-                cancellationToken);
-        }
-        else
-        {
-            var validated = JobStateGuard.Normalize(summary, receivedAt);
-            if (request.Telemetry.CurrentJobDetail is { } detail)
-            {
-                // 상세의 요약은 검증된 요약으로 교체해 별도로 위조된 값이 저장되지 않게 한다.
-                await labStore.SaveJobAsync(
-                    detail with { Summary = validated },
-                    request.Agent.MachineName,
-                    cancellationToken);
-            }
-            else
-            {
-                await labStore.SaveJobSummaryAsync(validated, request.Agent.MachineName, cancellationToken);
-            }
-
-            if (validated.RequiresMaestroAttention &&
-                await labStore.GetChecklistAsync(summary.JobId, cancellationToken) is null)
-            {
-                // 학생용 앱에서 시작한 작업은 체크인으로 처음 발견된다.
-                // 서비스가 학생 확인을 받아 시작한 작업이므로 보호 해제 확인을 기록해
-                // 대시보드에서 재부팅 후 Maestro 단계를 계속 관리할 수 있게 한다.
-                await labStore.SaveChecklistAsync(new MaestroChecklist
-                {
-                    JobId = summary.JobId,
-                    ProtectionSuspendedConfirmed = true,
-                    ProtectionSuspendedConfirmedAt = DateTimeOffset.Now,
-                    ConfirmedBy = "student",
-                    RequiresManualConfirmation = true,
-                }, cancellationToken);
-            }
-
-            if (previous is null || previous.Summary.State != validated.State)
-            {
-                await labStore.AddAuditAsync(
-                    "agent",
-                    "job-state",
-                    $"{request.Agent.MachineName}/{validated.JobId}",
-                    $"{previous?.Summary.State.ToString() ?? "없음"} → {validated.State} ({validated.Phase})",
-                    cancellationToken);
-            }
-        }
-    }
-
-    if (request.CommandResults.Count > 0)
-    {
-        // 공유 토큰 환경에서 다른 에이전트의 명령 결과를 위조해 제출할 수 없도록
-        // 보고된 AgentId가 체크인 주체와 다르면 전체 결과를 거부한다.
-        var foreignResults = request.CommandResults
-            .Where(r => !string.Equals(r.AgentId, request.Agent.AgentId, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        if (foreignResults.Count > 0)
-        {
-            await labStore.AddAuditAsync(
-                "agent",
-                "command-result-rejected",
-                $"{request.Agent.MachineName}/{foreignResults.Count}",
-                "다른 에이전트의 명령 결과 제출",
-                cancellationToken);
-            return Results.BadRequest(new { error = "자신의 명령 결과만 제출할 수 있습니다." });
-        }
-
-        var accepted = await labStore.CompleteCommandResultsAsync(
-            request.Agent.AgentId, request.CommandResults, cancellationToken);
-        foreach (var result in request.CommandResults)
-        {
-            if (!accepted.Contains(result.CommandId))
-            {
-                // 존재하지 않거나 이미 종료/만료된 명령은 감사 로그에 성공으로 남기지 않는다.
-                await labStore.AddAuditAsync(
-                    "agent",
-                    "command-result-rejected",
-                    $"{request.Agent.MachineName}/{result.CommandId}",
-                    "알 수 없거나 이미 완료/만료된 명령 결과",
-                    cancellationToken);
-                continue;
-            }
-
-            await labStore.AddAuditAsync(
-                "agent",
-                result.Success ? "command-ok" : "command-fail",
-                $"{request.Agent.MachineName}/{result.CommandId}",
-                result.Message,
-                cancellationToken);
-        }
-
-        // StartJob 명령이 실패하면 서버 작업이 Pending에 남지 않도록 실패로 정리한다.
-        foreach (var result in request.CommandResults.Where(r => !r.Success && accepted.Contains(r.CommandId)))
-        {
-            await FailJobForRejectedCommandAsync(
-                labStore, request.Agent.AgentId, result, cancellationToken);
-        }
-
-        if (request.CommandResults.Any(r => !accepted.Contains(r.CommandId)))
-        {
-            return Results.BadRequest(new { error = "유효하지 않은 명령 결과가 있어 전체 결과를 거부했습니다." });
-        }
-    }
-
-    var commands = await labStore.TakePendingCommandsAsync(
-        request.Agent.AgentId,
-        20,
-        cancellationToken);
-
-    // PC별 저장 정책이 있으면 그것을, 없으면 서버 기본 정책을 사용한다.
-    // 에이전트가 보고한 OS로 지원되지 않는 옵션을 여기서도 제거한다.
-    var effective = await agentPolicies.GetEffectiveAsync(
-        request.Agent.AgentId, request.Agent.Os, cancellationToken);
-    var policy = effective.Policy;
-
-    // 체크인으로 에이전트/작업 상태가 바뀌었음을 모니터에 알린다.
-    liveEvents.Signal();
-
-    return Results.Ok(new AgentCheckInResponse
-    {
-        ServerTime = DateTimeOffset.Now,
-        Commands = commands,
-        Policy = policy,
-        MaestroManualConfirmationRequired = policy.RequireMaestroManualConfirmation,
-    });
-    }
-    finally
-    {
-        checkinGate.Release();
-    }
+        StatusCodes.Status200OK when result.Response is not null => Results.Ok(result.Response),
+        StatusCodes.Status429TooManyRequests => Results.StatusCode(StatusCodes.Status429TooManyRequests),
+        _ => Results.BadRequest(new { error = result.Error ?? "체크인 요청이 올바르지 않습니다." }),
+    };
 });
 
 // ---------------- 대시보드 ----------------
@@ -347,46 +183,60 @@ app.MapGet("/api/admin/overview", async (LabStore labStore, CancellationToken ca
 
 // EventSource는 사용자 지정 헤더를 보낼 수 없으므로 모니터 페이지에서는
 // fetch 스트림으로 X-Admin-Token을 전달한다. 기존 관리자 인증 경로를 그대로 사용한다.
+// 스트림은 오래 유지되므로 동시 연결 수를 제한해 메모리/DB 커넥션을 보호한다.
+using var liveConnectionGate = new SemaphoreSlim(10, 10);
+
 app.MapGet("/api/admin/live", async (
     HttpContext context,
     LabStore labStore,
     LiveEventBus liveEvents,
     CancellationToken cancellationToken) =>
 {
-    context.Response.ContentType = "text/event-stream";
-    context.Response.Headers.CacheControl = "no-cache";
-    context.Response.Headers.Connection = "keep-alive";
-    context.Response.Headers["X-Accel-Buffering"] = "no";
-
-    await context.Response.WriteAsync(": connected\n\n", cancellationToken);
-    await context.Response.Body.FlushAsync(cancellationToken);
-
-    while (!cancellationToken.IsCancellationRequested)
+    if (!await liveConnectionGate.WaitAsync(TimeSpan.Zero, cancellationToken))
     {
-        // 신호를 먼저 캡처해야 스냅샷을 만드는 동안 온 변경을 놓치지 않는다.
-        var version = liveEvents.Version;
-        var snapshot = await LiveSnapshotBuilder.BuildAsync(labStore, cancellationToken);
-        await context.Response.WriteAsync(
-            $"event: snapshot\ndata: {UpdateAgentJson.Serialize(snapshot)}\n\n",
-            cancellationToken);
+        return Results.StatusCode(StatusCodes.Status429TooManyRequests);
+    }
+    try
+    {
+        context.Response.ContentType = "text/event-stream";
+        context.Response.Headers.CacheControl = "no-cache";
+        context.Response.Headers.Connection = "keep-alive";
+        context.Response.Headers["X-Accel-Buffering"] = "no";
+
+        await context.Response.WriteAsync(": connected\n\n", cancellationToken);
         await context.Response.Body.FlushAsync(cancellationToken);
 
-        // 변경 시 즉시, 없으면 15초마다 한 번 다시 보낸다(오프라인 전환 반영).
-        // 대기 작업 하나를 취소해서 재사용하므로 하트비트마다 대기가 쌓이지 않는다.
-        using var waitTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        waitTimeout.CancelAfter(TimeSpan.FromSeconds(15));
-        try
+        while (!cancellationToken.IsCancellationRequested)
         {
-            await liveEvents.WaitAsync(version, waitTimeout.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            if (cancellationToken.IsCancellationRequested) break;
-            // 타임아웃 = 하트비트. 아래에서 최신 스냅샷을 다시 보낸다.
-        }
-    }
+            // 신호를 먼저 캡처해야 스냅샷을 만드는 동안 온 변경을 놓치지 않는다.
+            var version = liveEvents.Version;
+            var snapshot = await LiveSnapshotBuilder.BuildAsync(labStore, cancellationToken);
+            await context.Response.WriteAsync(
+                $"event: snapshot\ndata: {UpdateAgentJson.Serialize(snapshot)}\n\n",
+                cancellationToken);
+            await context.Response.Body.FlushAsync(cancellationToken);
 
-    return Results.Empty;
+            // 변경 시 즉시, 없으면 15초마다 한 번 다시 보낸다(오프라인 전환 반영).
+            // 대기 작업 하나를 취소해서 재사용하므로 하트비트마다 대기가 쌓이지 않는다.
+            using var waitTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            waitTimeout.CancelAfter(TimeSpan.FromSeconds(15));
+            try
+            {
+                await liveEvents.WaitAsync(version, waitTimeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                if (cancellationToken.IsCancellationRequested) break;
+                // 타임아웃 = 하트비트. 아래에서 최신 스냅샷을 다시 보낸다.
+            }
+        }
+
+        return Results.Empty;
+    }
+    finally
+    {
+        liveConnectionGate.Release();
+    }
 });
 
 app.MapGet("/api/admin/agents", async (LabStore labStore, CancellationToken cancellationToken) =>
@@ -647,7 +497,7 @@ app.MapPost("/api/admin/jobs/start", async (
     var jobIds = new List<string>();
     var errors = new List<string>();
     var warnings = new List<string>();
-    var now = DateTimeOffset.Now;
+    var now = DateTimeOffset.UtcNow;
 
     foreach (var agentId in request.AgentIds.Distinct(StringComparer.OrdinalIgnoreCase))
     {
@@ -781,7 +631,7 @@ app.MapPost("/api/admin/jobs/{jobId}/maestro/protection-suspended", async (
     var updated = checklist with
     {
         ProtectionSuspendedConfirmed = true,
-        ProtectionSuspendedConfirmedAt = DateTimeOffset.Now,
+        ProtectionSuspendedConfirmedAt = DateTimeOffset.UtcNow,
         ConfirmedBy = "teacher",
     };
     await labStore.SaveChecklistAsync(updated, cancellationToken);
@@ -807,7 +657,7 @@ app.MapPost("/api/admin/jobs/{jobId}/maestro/restored", async (
     {
         StateSavedConfirmed = request.StateSaved,
         ProtectionRestoredConfirmed = request.ProtectionRestored,
-        ProtectionRestoredConfirmedAt = DateTimeOffset.Now,
+        ProtectionRestoredConfirmedAt = DateTimeOffset.UtcNow,
     };
     await labStore.SaveChecklistAsync(updated, cancellationToken);
     await labStore.AddAuditAsync(
@@ -879,48 +729,48 @@ app.MapGet("/api/admin/audit", async (
     CancellationToken cancellationToken) =>
     Results.Ok(await labStore.GetAuditAsync(Math.Clamp(limit ?? 100, 1, 500), cancellationToken)));
 
+// 명령(7일)과 감사 로그(30일)를 주기적으로 정리한다. 활성 작업 이력은 보존한다.
+using var retentionCts = CancellationTokenSource.CreateLinkedTokenSource(app.Lifetime.ApplicationStopping);
+_ = Task.Run(async () =>
+{
+    using var timer = new PeriodicTimer(TimeSpan.FromHours(1));
+    while (!retentionCts.IsCancellationRequested)
+    {
+        try
+        {
+            var removed = await store.CleanupRetentionAsync(cancellationToken: retentionCts.Token);
+            if (removed > 0)
+            {
+                app.Logger.LogInformation("오래된 LabManager 데이터 {Count}건을 정리했습니다.", removed);
+            }
+        }
+        catch (OperationCanceledException) when (retentionCts.IsCancellationRequested)
+        {
+            break;
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning(ex, "LabManager 데이터 정리 실패");
+        }
+
+        try
+        {
+            await timer.WaitForNextTickAsync(retentionCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            break;
+        }
+    }
+});
+
 app.Run();
 return;
 
 // ---------------- 헬퍼 ----------------
 
-static async Task FailJobForRejectedCommandAsync(
-    LabStore store,
-    string reportingAgentId,
-    CommandResult result,
-    CancellationToken cancellationToken)
-{
-    var command = await store.GetCommandAsync(result.CommandId, cancellationToken);
-    if (command is null || command.Type != CommandType.StartJob) return;
-    if (!string.Equals(command.AgentId, reportingAgentId, StringComparison.OrdinalIgnoreCase)) return;
-
-    var payload = UpdateAgentJson.Deserialize<StartJobCommandPayload>(command.PayloadJson);
-    if (payload?.JobId is not { Length: > 0 } jobId) return;
-
-    var job = await store.GetJobAsync(jobId, cancellationToken);
-    if (job is null || job.Summary.IsTerminal) return;
-    if (!string.Equals(job.Summary.AgentId, reportingAgentId, StringComparison.OrdinalIgnoreCase)) return;
-
-    var now = DateTimeOffset.Now;
-    var failed = job.Summary with
-    {
-        State = UpdateJobState.Failed,
-        Phase = "시작 실패",
-        Message = result.Message,
-        LastError = result.Message,
-        UpdatedAt = now,
-        ReportedAt = now,
-        CompletedAt = now,
-    };
-
-    await store.SaveJobSummaryAsync(failed, job.MachineName, cancellationToken);
-    await store.AddAuditAsync(
-        "system",
-        "job-failed",
-        $"{job.MachineName}/{jobId}",
-        $"시작 명령 거부: {result.Message}",
-        cancellationToken);
-}
+static string NormalizeConfiguredToken(string? token) =>
+    (token ?? string.Empty).Replace("\uFEFF", string.Empty, StringComparison.Ordinal).Trim();
 
 static AgentCommand NewCommand(string agentId, CommandType type, string payloadJson) => new()
 {
@@ -930,8 +780,8 @@ static AgentCommand NewCommand(string agentId, CommandType type, string payloadJ
     PayloadJson = payloadJson,
     Status = CommandStatus.Pending,
     IssuedBy = "teacher",
-    CreatedAt = DateTimeOffset.Now,
-    ExpiresAt = DateTimeOffset.Now.AddHours(12),
+    CreatedAt = DateTimeOffset.UtcNow,
+    ExpiresAt = DateTimeOffset.UtcNow.AddHours(12),
 };
 
 static async Task<IResult> SendJobCommandAsync(

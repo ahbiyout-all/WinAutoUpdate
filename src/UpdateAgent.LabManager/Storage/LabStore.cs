@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using UpdateAgent.LabManager.Services;
 using UpdateAgent.Shared.Models;
 using UpdateAgent.Shared.Serialization;
 
@@ -34,6 +35,38 @@ public sealed class LabStore
 {
     private readonly int _onlineThresholdSeconds;
     private readonly string _connectionString;
+
+    // JSON으로 저장되는 모델의 시각도 UTC로 맞춘다. TEXT 컬럼과 비교 시 오프셋이 섞이지 않게 한다.
+    private static AgentInfo ToUtc(AgentInfo agent) => agent with
+    {
+        FirstSeen = agent.FirstSeen.ToUniversalTime(),
+        LastSeen = agent.LastSeen.ToUniversalTime(),
+    };
+
+    private static AgentTelemetry ToUtc(AgentTelemetry telemetry) => telemetry with
+    {
+        Timestamp = telemetry.Timestamp.ToUniversalTime(),
+        CurrentJob = telemetry.CurrentJob is { } job ? ToUtc(job) : null,
+        CurrentJobDetail = telemetry.CurrentJobDetail is { } detail ? ToUtc(detail) : null,
+    };
+
+    private static JobSummary ToUtc(JobSummary summary) => summary with
+    {
+        StartedAt = summary.StartedAt.ToUniversalTime(),
+        UpdatedAt = summary.UpdatedAt.ToUniversalTime(),
+        ReportedAt = summary.ReportedAt?.ToUniversalTime(),
+        CompletedAt = summary.CompletedAt?.ToUniversalTime(),
+        PauseUntil = summary.PauseUntil?.ToUniversalTime(),
+    };
+
+    private static JobDetail ToUtc(JobDetail detail) => detail with { Summary = ToUtc(detail.Summary) };
+
+    private static MaestroChecklist ToUtc(MaestroChecklist checklist) => checklist with
+    {
+        ProtectionSuspendedConfirmedAt = checklist.ProtectionSuspendedConfirmedAt?.ToUniversalTime(),
+        ProtectionRestoredConfirmedAt = checklist.ProtectionRestoredConfirmedAt?.ToUniversalTime(),
+        MarkerVerifiedAt = checklist.MarkerVerifiedAt?.ToUniversalTime(),
+    };
 
     public LabStore(string databasePath, int onlineThresholdSeconds = 90)
     {
@@ -146,11 +179,11 @@ public sealed class LabStore
         command.Parameters.AddWithValue("$id", agent.AgentId);
         command.Parameters.AddWithValue("$name", agent.MachineName);
         command.Parameters.AddWithValue("$state", (int)telemetry.State);
-        command.Parameters.AddWithValue("$seen", DateTimeOffset.Now.ToString("O"));
-        command.Parameters.AddWithValue("$info", UpdateAgentJson.Serialize(agent));
+        command.Parameters.AddWithValue("$seen", UtcTimestamps.FormatNow());
+        command.Parameters.AddWithValue("$info", UpdateAgentJson.Serialize(ToUtc(agent)));
         // 사용자 표시 이름은 개인정보이므로 DB에 저장하지 않는다. 레거시 값도 여기서 제거한다.
         command.Parameters.AddWithValue("$telemetry",
-            UpdateAgentJson.Serialize(telemetry with { LoggedOnUsers = [] }));
+            UpdateAgentJson.Serialize(ToUtc(telemetry) with { LoggedOnUsers = [] }));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -186,10 +219,11 @@ public sealed class LabStore
             var info = UpdateAgentJson.Deserialize<AgentInfo>(reader.GetString(0));
             var telemetry = UpdateAgentJson.Deserialize<AgentTelemetry>(reader.GetString(1));
             if (info is null || telemetry is null) continue;
-            if (telemetry.LoggedOnUsers.Count > 0) telemetry = telemetry with { LoggedOnUsers = [] };
+            info = ToUtc(info);
+            telemetry = ToUtc(telemetry) with { LoggedOnUsers = [] };
 
             var lastSeen = DateTimeOffset.TryParse(reader.GetString(2), out var parsed)
-                ? parsed
+                ? parsed.ToUniversalTime()
                 : info.LastSeen;
 
             results.Add(new AgentRecord
@@ -197,7 +231,7 @@ public sealed class LabStore
                 Agent = info,
                 Telemetry = telemetry,
                 LastSeen = lastSeen,
-                Online = DateTimeOffset.Now - lastSeen < TimeSpan.FromSeconds(_onlineThresholdSeconds),
+                Online = UtcTimestamps.Now - lastSeen < TimeSpan.FromSeconds(_onlineThresholdSeconds),
             });
         }
 
@@ -215,7 +249,8 @@ public sealed class LabStore
 
     public async Task SaveJobAsync(JobDetail detail, string machineName, CancellationToken cancellationToken = default)
     {
-        var summary = detail.Summary;
+        var summary = ToUtc(detail.Summary);
+        detail = ToUtc(detail);
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
@@ -236,8 +271,8 @@ public sealed class LabStore
         command.Parameters.AddWithValue("$state", (int)summary.State);
         command.Parameters.AddWithValue("$phase", summary.Phase);
         command.Parameters.AddWithValue("$progress", summary.ProgressPercent);
-        command.Parameters.AddWithValue("$created", summary.StartedAt.ToString("O"));
-        command.Parameters.AddWithValue("$updated", summary.UpdatedAt.ToString("O"));
+        command.Parameters.AddWithValue("$created", UtcTimestamps.Format(summary.StartedAt));
+        command.Parameters.AddWithValue("$updated", UtcTimestamps.Format(summary.UpdatedAt));
         command.Parameters.AddWithValue("$summary", UpdateAgentJson.Serialize(summary));
         command.Parameters.AddWithValue("$detail", UpdateAgentJson.Serialize(detail));
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -248,6 +283,7 @@ public sealed class LabStore
         string machineName,
         CancellationToken cancellationToken = default)
     {
+        summary = ToUtc(summary);
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
@@ -267,8 +303,8 @@ public sealed class LabStore
         command.Parameters.AddWithValue("$state", (int)summary.State);
         command.Parameters.AddWithValue("$phase", summary.Phase);
         command.Parameters.AddWithValue("$progress", summary.ProgressPercent);
-        command.Parameters.AddWithValue("$created", summary.StartedAt.ToString("O"));
-        command.Parameters.AddWithValue("$updated", summary.UpdatedAt.ToString("O"));
+        command.Parameters.AddWithValue("$created", UtcTimestamps.Format(summary.StartedAt));
+        command.Parameters.AddWithValue("$updated", UtcTimestamps.Format(summary.UpdatedAt));
         command.Parameters.AddWithValue("$summary", UpdateAgentJson.Serialize(summary));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -291,10 +327,12 @@ public sealed class LabStore
         {
             var summary = UpdateAgentJson.Deserialize<JobSummary>(reader.GetString(0));
             if (summary is null) continue;
+            summary = ToUtc(summary);
 
             var detail = reader.IsDBNull(1)
                 ? null
                 : UpdateAgentJson.Deserialize<JobDetail>(reader.GetString(1));
+            if (detail is not null) detail = ToUtc(detail);
 
             results.Add(new LabJobRecord
             {
@@ -322,13 +360,17 @@ public sealed class LabStore
 
         var summary = UpdateAgentJson.Deserialize<JobSummary>(reader.GetString(0));
         if (summary is null) return null;
+        summary = ToUtc(summary);
+
+        var detail = reader.IsDBNull(1)
+            ? null
+            : UpdateAgentJson.Deserialize<JobDetail>(reader.GetString(1));
+        if (detail is not null) detail = ToUtc(detail);
 
         return new LabJobRecord
         {
             Summary = summary,
-            Detail = reader.IsDBNull(1)
-                ? null
-                : UpdateAgentJson.Deserialize<JobDetail>(reader.GetString(1)),
+            Detail = detail,
             MachineName = reader.GetString(2),
         };
     }
@@ -365,8 +407,8 @@ public sealed class LabStore
         command2.Parameters.AddWithValue("$status", (int)command.Status);
         command2.Parameters.AddWithValue("$payload", command.PayloadJson);
         command2.Parameters.AddWithValue("$issued", command.IssuedBy);
-        command2.Parameters.AddWithValue("$created", command.CreatedAt.ToString("O"));
-        command2.Parameters.AddWithValue("$expires", command.ExpiresAt.ToString("O"));
+        command2.Parameters.AddWithValue("$created", UtcTimestamps.Format(command.CreatedAt));
+        command2.Parameters.AddWithValue("$expires", UtcTimestamps.Format(command.ExpiresAt));
         await command2.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -375,7 +417,7 @@ public sealed class LabStore
         int max,
         CancellationToken cancellationToken = default)
     {
-        var now = DateTimeOffset.Now.ToString("O");
+        var now = UtcTimestamps.FormatNow();
         var results = new List<AgentCommand>();
 
         await using var connection = await OpenAsync(cancellationToken);
@@ -407,8 +449,8 @@ public sealed class LabStore
                     Status = CommandStatus.Delivered,
                     PayloadJson = reader.GetString(4),
                     IssuedBy = reader.GetString(5),
-                    CreatedAt = DateTimeOffset.Parse(reader.GetString(6)),
-                    ExpiresAt = DateTimeOffset.Parse(reader.GetString(7)),
+                    CreatedAt = UtcTimestamps.Parse(reader.GetString(6)),
+                    ExpiresAt = UtcTimestamps.Parse(reader.GetString(7)),
                 });
             }
         }
@@ -456,13 +498,15 @@ public sealed class LabStore
         agentParam.Value = agentId;
         pendingParam.Value = (int)CommandStatus.Pending;
         deliveredParam.Value = (int)CommandStatus.Delivered;
-        nowParam.Value = DateTimeOffset.UtcNow.ToString("O");
+        // 만료 비교와 완료 시각 모두 서버 UTC 시계만 사용한다. 에이전트 보고 시각은 신뢰하지 않는다.
+        var serverNow = UtcTimestamps.FormatNow();
+        nowParam.Value = serverNow;
+        tsParam.Value = serverNow;
 
         foreach (var result in results)
         {
             statusParam.Value = (int)(result.Success ? CommandStatus.Succeeded : CommandStatus.Failed);
             messageParam.Value = result.Message;
-            tsParam.Value = result.CompletedAt.ToString("O");
             idParam.Value = result.CommandId;
             if (await command.ExecuteNonQueryAsync(cancellationToken) > 0)
             {
@@ -497,10 +541,10 @@ public sealed class LabStore
             Status = (CommandStatus)reader.GetInt32(3),
             PayloadJson = reader.GetString(4),
             IssuedBy = reader.GetString(5),
-            CreatedAt = DateTimeOffset.Parse(reader.GetString(6)),
-            ExpiresAt = DateTimeOffset.Parse(reader.GetString(7)),
+            CreatedAt = UtcTimestamps.Parse(reader.GetString(6)),
+            ExpiresAt = UtcTimestamps.Parse(reader.GetString(7)),
             ResultMessage = reader.IsDBNull(8) ? null : reader.GetString(8),
-            CompletedAt = reader.IsDBNull(9) ? null : DateTimeOffset.Parse(reader.GetString(9)),
+            CompletedAt = reader.IsDBNull(9) ? null : UtcTimestamps.Parse(reader.GetString(9)),
         };
     }
 
@@ -536,10 +580,10 @@ public sealed class LabStore
                 Status = (CommandStatus)reader.GetInt32(3),
                 PayloadJson = reader.GetString(4),
                 IssuedBy = reader.GetString(5),
-                CreatedAt = DateTimeOffset.Parse(reader.GetString(6)),
-                ExpiresAt = DateTimeOffset.Parse(reader.GetString(7)),
+                CreatedAt = UtcTimestamps.Parse(reader.GetString(6)),
+                ExpiresAt = UtcTimestamps.Parse(reader.GetString(7)),
                 ResultMessage = reader.IsDBNull(8) ? null : reader.GetString(8),
-                CompletedAt = reader.IsDBNull(9) ? null : DateTimeOffset.Parse(reader.GetString(9)),
+                CompletedAt = reader.IsDBNull(9) ? null : UtcTimestamps.Parse(reader.GetString(9)),
             });
         }
 
@@ -561,7 +605,7 @@ public sealed class LabStore
             INSERT INTO audit(ts, actor, action, target, detail)
             VALUES($ts, $actor, $action, $target, $detail);
             """;
-        command.Parameters.AddWithValue("$ts", DateTimeOffset.Now.ToString("O"));
+        command.Parameters.AddWithValue("$ts", UtcTimestamps.FormatNow());
         command.Parameters.AddWithValue("$actor", actor);
         command.Parameters.AddWithValue("$action", action);
         command.Parameters.AddWithValue("$target", target);
@@ -588,7 +632,7 @@ public sealed class LabStore
             results.Add(new AuditEntry
             {
                 Id = reader.GetInt64(0),
-                Timestamp = DateTimeOffset.Parse(reader.GetString(1)),
+                Timestamp = UtcTimestamps.Parse(reader.GetString(1)),
                 Actor = reader.GetString(2),
                 Action = reader.GetString(3),
                 Target = reader.GetString(4),
@@ -613,8 +657,8 @@ public sealed class LabStore
                 updated_at = excluded.updated_at;
             """;
         command.Parameters.AddWithValue("$id", checklist.JobId);
-        command.Parameters.AddWithValue("$json", UpdateAgentJson.Serialize(checklist));
-        command.Parameters.AddWithValue("$ts", DateTimeOffset.Now.ToString("O"));
+        command.Parameters.AddWithValue("$json", UpdateAgentJson.Serialize(ToUtc(checklist)));
+        command.Parameters.AddWithValue("$ts", UtcTimestamps.FormatNow());
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -651,7 +695,7 @@ public sealed class LabStore
             """;
         command.Parameters.AddWithValue("$key", key);
         command.Parameters.AddWithValue("$value", value);
-        command.Parameters.AddWithValue("$ts", DateTimeOffset.Now.ToString("O"));
+        command.Parameters.AddWithValue("$ts", UtcTimestamps.FormatNow());
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -680,6 +724,26 @@ public sealed class LabStore
             result[reader.GetString(0)] = reader.GetString(1);
         }
         return result;
+    }
+
+    /// <summary>
+    /// 오래된 명령(7일)과 감사 로그(30일)를 정리한다. 작업/체크리스트/정책은 보존한다.
+    /// 반환값은 삭제된 행 수다.
+    /// </summary>
+    public async Task<int> CleanupRetentionAsync(
+        DateTimeOffset? now = null,
+        CancellationToken cancellationToken = default)
+    {
+        var reference = (now ?? DateTimeOffset.UtcNow).ToUniversalTime();
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE FROM commands WHERE created_at < $commandCutoff;
+            DELETE FROM audit WHERE ts < $auditCutoff;
+            """;
+        command.Parameters.AddWithValue("$commandCutoff", UtcTimestamps.Format(reference.AddDays(-7)));
+        command.Parameters.AddWithValue("$auditCutoff", UtcTimestamps.Format(reference.AddDays(-30)));
+        return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken cancellationToken)
