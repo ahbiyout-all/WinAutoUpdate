@@ -31,6 +31,20 @@
 - `.\scripts\publish.ps1`, `.\scripts\build-inno.ps1 -NoPublish`: Inno Setup 6 컴파일 성공.
 - 비밀값이 없는 로컬 산출물은 검증 후 삭제했습니다. 실제 설치 화면은 파일럿 환경에서 확인 필요.
 
+### 게시 결과
+
+수동 실행 `45339435193`이 성공했고, 태그 `v0.1.32`는 커밋 `c2edea8`을 가리킵니다.
+빌드 로그에서 첫 설치 토큰 내장과 `containsSecrets` 검증을 확인했습니다.
+
+| 파일 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.32-x64.exe` | `51e43ce999187109f1d950f07b57a91bdbb6442daf51e13832a24d4a13830f8d` |
+| `UpdateAgent.LabManager-Setup-0.1.32-x64.exe` | `424adfa0a3dd6958af92eb529d94c82e4e927f8e811cd0daa3b0433df67a993c` |
+| `UpdateAgent.Agent-0.1.32-x64.msi` | `7cb3638b98947e4f18eb64d7fbef50ee73a74d89b7f6eaaccd8946f4c87d8c34` |
+
+- 릴리스: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.32
+- 성공 워크플로: https://github.com/ahbiyout-all/WinAutoUpdate/actions/runs/45339435193
+
 ---
 
 ## 2026-11-23~24 — 자아성찰 20회 반복 심층 감사 및 결함 수정 (v0.1.31)
