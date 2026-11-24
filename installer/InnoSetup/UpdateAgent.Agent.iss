@@ -27,7 +27,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.32"
+  #define AppVersion "0.1.33"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -159,8 +159,8 @@ begin
   TokenChoicePage := CreateInputOptionPage(wpWelcome,
     '기존 토큰 처리',
     '기존 에이전트 토큰을 어떻게 할까요?',
-    '기존 토큰을 그대로 재사용하거나, 새 토큰 파일로 교체할 수 있습니다. ' +
-      '교체를 선택하면 /AgentTokenFile 또는 agent-install.ini의 AgentTokenFile이 필요합니다.',
+    '기존 토큰을 그대로 재사용하거나, 릴리스에 내장된 새 토큰으로 교체할 수 있습니다. ' +
+      '다른 토큰을 쓰려면 /AgentTokenFile 또는 agent-install.ini의 AgentTokenFile을 지정하세요.',
     True, False);
   TokenChoicePage.Add('기존 토큰을 백업해 재사용 (권장)');
   TokenChoicePage.Add('기존 토큰을 삭제하고 새 토큰 기록');
@@ -632,6 +632,27 @@ begin
   Result := GetJsonStringValue(Text, 'AgentToken');
 end;
 
+{ 설정 파일이나 명령줄에 URL이 없을 때 기존 설치의 URL을 유지한다. }
+function ReadExistingAgentUrl(const Path: String): String;
+var
+  Lines: TArrayOfString;
+  Text: String;
+  I: Integer;
+begin
+  Result := '';
+  if not FileExists(Path) then Exit;
+  if not LoadStringsFromFile(Path, Lines) then Exit;
+  Text := '';
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    if (I = 0) and (Length(Lines[0]) > 0) and (Lines[0][1] = #65279) then
+      Text := Copy(Lines[0], 2, Length(Lines[0]) - 1)
+    else
+      Text := Text + Lines[I];
+  end;
+  Result := GetJsonStringValue(Text, 'LabManagerUrl');
+end;
+
 function JsonEscape(const Value: String): String;
 var
   I: Integer;
@@ -941,25 +962,29 @@ begin
     begin
       if ReplaceExistingToken then
       begin
-        AgentConfigWriteFailed := True;
-        AgentConfigError := '기존 토큰을 교체하려면 새 토큰 파일이 필요합니다. ' +
-          '/AgentTokenFile=<파일> 또는 ' + InstallConfigFileName + '의 AgentTokenFile을 지정하세요.';
+        { 교체는 선택했지만 새 설정이 없으면 기존 URL을 유지하고 릴리스 내장 토큰으로 교체한다. }
+        Url := ReadExistingAgentUrl(ExistingConfigPath);
+        Log('Upgrade token replacement without new settings: keeping the existing LabManagerUrl.');
+      end
+      else
+      begin
+        Log('No install settings after a previous install; preserving the backed-up existing token.');
+        AgentConfigRequested := True;
+        AgentConfigSkipWrite := True;
         Exit;
       end;
-      Log('No install settings after a previous install; preserving the backed-up existing token.');
-      AgentConfigRequested := True;
-      AgentConfigSkipWrite := True;
+    end
+    else
+    begin
+      AgentConfigWriteFailed := True;
+      if FirstInstall then
+        AgentConfigError := 'LabManagerUrl이 없습니다. ' + InstallConfigFileName + ' 또는 ' +
+          '/LabManagerUrl=http://labmanager:5080 을 지정하세요.'
+      else
+        AgentConfigError := '기존 설치가 감지되었지만 유효한 agent.json과 설치 설정이 없습니다. ' +
+          InstallConfigFileName + ' 또는 명령줄 인자를 확인하세요.';
       Exit;
     end;
-
-    AgentConfigWriteFailed := True;
-    if FirstInstall then
-      AgentConfigError := 'LabManagerUrl이 없습니다. ' + InstallConfigFileName + ' 또는 ' +
-        '/LabManagerUrl=http://labmanager:5080 을 지정하세요.'
-    else
-      AgentConfigError := '기존 설치가 감지되었지만 유효한 agent.json과 설치 설정이 없습니다. ' +
-        InstallConfigFileName + ' 또는 명령줄 인자를 확인하세요.';
-    Exit;
   end;
 
   if Url = '' then
@@ -981,13 +1006,7 @@ begin
   { 업데이트에서는 외부 토큰 파일이 명시된 경우에만 설정을 갱신한다.
     내장 토큰은 첫 설치에서만 사용하고, 업데이트에서는 절대 읽지 않는다. }
   if ReplaceExistingToken and CanKeepExisting and (not HasExternalToken) then
-  begin
-    AgentConfigWriteFailed := True;
-    AgentConfigError := '기존 토큰을 삭제하고 새 토큰을 기록하려면 새 토큰 파일이 필요합니다. ' +
-      '/AgentTokenFile=<파일> 또는 ' + InstallConfigFileName + '의 AgentTokenFile을 지정하세요. ' +
-      '첫 설치용 내장 토큰은 업데이트에 사용되지 않습니다.';
-    Exit;
-  end;
+    Log('Upgrade: replacing the existing token with the embedded release token.');
 
   if (not HasExternalToken) and CanKeepExisting and (not ReplaceExistingToken) then
   begin
@@ -1001,12 +1020,13 @@ begin
     Exit;
   end;
 
-  if ReplaceExistingToken and CanKeepExisting then
+  if ReplaceExistingToken and CanKeepExisting and HasExternalToken then
     Log('Upgrade: replacing the existing agent token from the explicit external token file.');
 
   if not HasExternalToken then
   begin
-    if not FirstInstall then
+    { 교체를 선택한 업데이트도 여기서 릴리스 내장 토큰 파일을 사용한다. }
+    if (not FirstInstall) and (not (ReplaceExistingToken and CanKeepExisting)) then
     begin
       AgentConfigWriteFailed := True;
       AgentConfigError := '기존 설치가 감지되었지만 agent.json이 유효하지 않습니다. ' +
@@ -1020,12 +1040,15 @@ begin
     if not FileExists(BundledTokenPath) then
     begin
       AgentConfigWriteFailed := True;
-      AgentConfigError := '첫 설치용 내장 에이전트 토큰 파일을 찾을 수 없습니다. ' +
+      AgentConfigError := '릴리스 내장 에이전트 토큰 파일을 찾을 수 없습니다. ' +
         InstallConfigFileName + '에 AgentTokenFile을 지정하세요.';
       Exit;
     end;
     TokenFile := BundledTokenPath;
-    Log('Using embedded first-install agent token (value hidden).');
+    if FirstInstall then
+      Log('Using embedded first-install agent token (value hidden).')
+    else
+      Log('Using embedded release agent token for replacement (value hidden).');
   end
   else
     TokenFile := ResolveInstallTokenFile(TokenFile);
@@ -1038,7 +1061,7 @@ begin
     if HasExternalToken then
       AgentConfigError := '에이전트 토큰 파일을 읽을 수 없습니다: ' + TokenFile
     else
-      AgentConfigError := '첫 설치용 내장 에이전트 토큰 파일을 읽을 수 없습니다.';
+      AgentConfigError := '릴리스 내장 에이전트 토큰 파일을 읽을 수 없습니다.';
     Exit;
   end;
 
@@ -1049,7 +1072,7 @@ begin
     if HasExternalToken then
       AgentConfigError := '에이전트 토큰 파일이 비어 있습니다: ' + TokenFile
     else
-      AgentConfigError := '첫 설치용 내장 에이전트 토큰이 비어 있습니다. ' +
+      AgentConfigError := '릴리스 내장 에이전트 토큰이 비어 있습니다. ' +
         'UPDATEAGENT_AGENT_TOKEN secret을 설정해 다시 빌드하거나 ' +
         InstallConfigFileName + '에 AgentTokenFile을 지정하세요.';
     Exit;
@@ -1065,7 +1088,7 @@ begin
     if HasExternalToken then
       AgentConfigError := '에이전트 토큰 파일이 비어 있습니다: ' + TokenFile
     else
-      AgentConfigError := '첫 설치용 내장 에이전트 토큰이 비어 있습니다. ' +
+      AgentConfigError := '릴리스 내장 에이전트 토큰이 비어 있습니다. ' +
         'UPDATEAGENT_AGENT_TOKEN secret을 설정해 다시 빌드하거나 ' +
         InstallConfigFileName + '에 AgentTokenFile을 지정하세요.';
     Exit;

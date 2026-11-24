@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.32"
+  #define AppVersion "0.1.33"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -147,8 +147,8 @@ begin
   TokenChoicePage := CreateInputOptionPage(wpWelcome,
     '기존 토큰 처리',
     '기존 LabManager 토큰을 어떻게 할까요?',
-    '기존 관리자/에이전트 토큰을 그대로 재사용하거나, 새 두 줄 토큰 파일로 교체할 수 있습니다. ' +
-      '교체를 선택하면 /LabManagerTokenFile=<파일>이 필요합니다.',
+    '기존 관리자/에이전트 토큰을 그대로 재사용하거나, 릴리스에 내장된 새 토큰으로 교체할 수 있습니다. ' +
+      '다른 토큰을 쓰려면 /LabManagerTokenFile=<파일>을 지정하세요.',
     True, False);
   TokenChoicePage.Add('기존 토큰을 백업해 재사용 (권장)');
   TokenChoicePage.Add('기존 토큰을 삭제하고 새 토큰 기록');
@@ -478,8 +478,55 @@ begin
     Result := ExpandConstant('{src}\' + TokenFile);
 end;
 
-{ 업데이트에서 토큰 교체를 선택한 경우에만 외부 두 줄 파일을 읽는다.
-  내장 토큰은 첫 설치 전용이므로 여기서는 절대 사용하지 않는다. }
+{ 릴리스에 내장된 두 줄 토큰 파일을 임시 폴더에 펼쳐 검증한다.
+  첫 설치와, 사용자가 명시적으로 교체를 선택한 업데이트에서만 사용한다.
+  공개된 샘플/기본 토큰이면 lab 전체가 노출되므로 fail-closed로 중단한다. }
+function LoadBundledLabManagerTokens(var AdminToken, AgentToken: String): String;
+var
+  Path: String;
+  Lines: TArrayOfString;
+begin
+  Result := '';
+  AdminToken := '';
+  AgentToken := '';
+  Path := ExpandConstant('{tmp}\' + BundledTokenFileName);
+  if not FileExists(Path) then
+    ExtractTemporaryFile(BundledTokenFileName);
+  if not FileExists(Path) then
+  begin
+    Result := '릴리스 내장 LabManager 토큰 파일을 찾을 수 없습니다.';
+    Exit;
+  end;
+
+  if not LoadStringsFromFile(Path, Lines) then
+  begin
+    Result := '릴리스 내장 LabManager 토큰 파일을 읽을 수 없습니다.';
+    Exit;
+  end;
+
+  if GetArrayLength(Lines) < 2 then
+  begin
+    Result := '릴리스 내장 LabManager 토큰 파일에 AdminToken과 AgentToken 두 줄이 없습니다. ' +
+      '실제 토큰 두 개를 넣어 다시 빌드하세요.';
+    Exit;
+  end;
+  AdminToken := NormalizeTokenLine(Lines[0]);
+  AgentToken := NormalizeTokenLine(Lines[1]);
+  if (AdminToken = '') or (AgentToken = '') then
+  begin
+    Result := '릴리스 내장 LabManager 토큰 파일에 빈 값이 있습니다. ' +
+      '실제 토큰 두 개를 넣어 다시 빌드하세요.';
+    Exit;
+  end;
+  if IsPlaceholderToken(AdminToken) or IsPlaceholderToken(AgentToken) then
+  begin
+    Result := '릴리스 내장 LabManager 토큰에 기본/샘플 값이 있습니다. 실제 토큰으로 다시 빌드하세요.';
+    Exit;
+  end;
+end;
+
+{ 업데이트에서 토큰 교체를 선택한 경우: 외부 파일이 있으면 그것을,
+  없으면 릴리스에 내장된 토큰을 사용한다. }
 function ValidateReplacementLabManagerTokens: String;
 var
   Lines: TArrayOfString;
@@ -491,50 +538,56 @@ begin
   if (not ReplaceExistingToken) or FirstInstall then Exit;
 
   ExternalTokenFile := Trim(CmdParamValue(ExternalTokenSwitch));
-  if ExternalTokenFile = '' then
+  if ExternalTokenFile <> '' then
   begin
-    Result := '기존 토큰을 삭제하고 새로 기록하려면 /LabManagerTokenFile=<파일>을 지정하세요. ' +
-      '파일 첫 줄은 AdminToken, 둘째 줄은 AgentToken입니다.';
-    Exit;
-  end;
-  ExternalTokenFile := ResolveInstallTokenFile(ExternalTokenFile);
-  if not FileExists(ExternalTokenFile) then
-  begin
-    Result := '새 LabManager 토큰 파일을 읽을 수 없습니다: ' + ExternalTokenFile;
-    Exit;
-  end;
-  if (not LoadStringsFromFile(ExternalTokenFile, Lines)) or
-     (GetArrayLength(Lines) < 2) then
-  begin
-    Result := '새 LabManager 토큰 파일에는 AdminToken과 AgentToken 두 줄이 필요합니다: ' +
-      ExternalTokenFile;
-    Exit;
-  end;
+    ExternalTokenFile := ResolveInstallTokenFile(ExternalTokenFile);
+    if not FileExists(ExternalTokenFile) then
+    begin
+      Result := '새 LabManager 토큰 파일을 읽을 수 없습니다: ' + ExternalTokenFile;
+      Exit;
+    end;
+    if (not LoadStringsFromFile(ExternalTokenFile, Lines)) or
+       (GetArrayLength(Lines) < 2) then
+    begin
+      Result := '새 LabManager 토큰 파일에는 AdminToken과 AgentToken 두 줄이 필요합니다: ' +
+        ExternalTokenFile;
+      Exit;
+    end;
 
-  AdminToken := NormalizeTokenLine(Lines[0]);
-  AgentToken := NormalizeTokenLine(Lines[1]);
-  if (AdminToken = '') or (AgentToken = '') then
+    AdminToken := NormalizeTokenLine(Lines[0]);
+    AgentToken := NormalizeTokenLine(Lines[1]);
+    if (AdminToken = '') or (AgentToken = '') then
+    begin
+      Result := '새 LabManager 토큰 파일에 빈 값이 있습니다: ' + ExternalTokenFile;
+      Exit;
+    end;
+    if IsPlaceholderToken(AdminToken) or IsPlaceholderToken(AgentToken) then
+    begin
+      Result := '새 LabManager 토큰 파일에 기본/샘플 값이 있습니다. 실제 토큰으로 교체하세요: ' +
+        ExternalTokenFile;
+      Exit;
+    end;
+    Log('Using explicit replacement LabManager token file (values hidden).');
+  end
+  else
   begin
-    Result := '새 LabManager 토큰 파일에 빈 값이 있습니다: ' + ExternalTokenFile;
-    Exit;
-  end;
-  if IsPlaceholderToken(AdminToken) or IsPlaceholderToken(AgentToken) then
-  begin
-    Result := '새 LabManager 토큰 파일에 기본/샘플 값이 있습니다. 실제 토큰으로 교체하세요: ' +
-      ExternalTokenFile;
-    Exit;
+    Result := LoadBundledLabManagerTokens(AdminToken, AgentToken);
+    if Result <> '' then
+    begin
+      Result := '교체용 릴리스 내장 토큰을 읽을 수 없습니다: ' + Result;
+      Exit;
+    end;
+    Log('Using embedded release LabManager tokens for replacement (values hidden).');
   end;
 
   ExternalAdminToken := AdminToken;
   ExternalAgentToken := AgentToken;
-  Log('Using external replacement LabManager token file (values hidden).');
 end;
 
-{ 업데이트에서는 내장 토큰을 읽지 않는다. 첫 설치에서만 임시 파일을 추출해 검증한다. }
+{ 첫 설치에서는 내장 토큰만 사용한다. 업데이트는 재사용 시 설정을 그대로 두고,
+  교체 선택 시 위의 ValidateReplacementLabManagerTokens가 토큰을 준비한다. }
 function ValidateBundledLabManagerTokens: String;
 var
-  Path: String;
-  Lines: TArrayOfString;
   AdminToken, AgentToken: String;
 begin
   Result := '';
@@ -542,43 +595,8 @@ begin
   BundledAgentToken := '';
   if not FirstInstall then Exit;
 
-  Path := ExpandConstant('{tmp}\' + BundledTokenFileName);
-  if not FileExists(Path) then
-    ExtractTemporaryFile(BundledTokenFileName);
-  if not FileExists(Path) then
-  begin
-    Result := '첫 설치용 내장 LabManager 토큰 파일을 찾을 수 없습니다.';
-    Exit;
-  end;
-
-  if not LoadStringsFromFile(Path, Lines) then
-  begin
-    Result := '첫 설치용 내장 LabManager 토큰 파일을 읽을 수 없습니다.';
-    Exit;
-  end;
-
-  { Fail closed: 공개된 샘플/기본 토큰으로 서버가 뜨면 lab 전체가 노출된다.
-    첫 설치에는 반드시 실제 토큰 두 개가 내장되어 있어야 한다. 업데이트는 이 함수를 통과하지 않는다. }
-  if GetArrayLength(Lines) < 2 then
-  begin
-    Result := '첫 설치용 내장 LabManager 토큰 파일에 AdminToken과 AgentToken 두 줄이 없습니다. ' +
-      '실제 토큰 두 개를 넣어 다시 빌드하세요.';
-    Exit;
-  end;
-  AdminToken := NormalizeTokenLine(Lines[0]);
-  AgentToken := NormalizeTokenLine(Lines[1]);
-  if (AdminToken = '') or (AgentToken = '') then
-  begin
-    Result := '첫 설치용 내장 LabManager 토큰 파일에 빈 값이 있습니다. ' +
-      '실제 토큰 두 개를 넣어 다시 빌드하세요.';
-    Exit;
-  end;
-  if IsPlaceholderToken(AdminToken) or IsPlaceholderToken(AgentToken) then
-  begin
-    Result := '첫 설치용 내장 LabManager 토큰에 기본/샘플 값이 있습니다. 실제 토큰으로 다시 빌드하세요.';
-    Exit;
-  end;
-
+  Result := LoadBundledLabManagerTokens(AdminToken, AgentToken);
+  if Result <> '' then Exit;
   BundledAdminToken := AdminToken;
   BundledAgentToken := AgentToken;
   Log('Using embedded first-install LabManager tokens (values hidden).');
