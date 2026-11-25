@@ -25,6 +25,18 @@
 
 검증: `dotnet test` 252개 통과, `scripts\build-inno.ps1 -NoPublish`, `scripts\build-msi.ps1` 성공.
 
+### 릴리스 결과
+
+- 커밋: `0c562c9`, 태그: `v0.1.39`
+- 워크플로: `45609596340` 성공 (4m18s)
+- Release: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.39
+
+| 산출물 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.39-x64.exe` | `03ce2c9bb669d0cc7dd6a8fd02ebea89bcb86ec81492f0801b22157bc0fc174c` |
+| `UpdateAgent.LabManager-Setup-0.1.39-x64.exe` | `573c5c4a87e385e93d0bcd4e78ef22c96ff0c653ac44b2cacc20036b5b1b2f26` |
+| `UpdateAgent.Agent-0.1.39-x64.msi` | `7130f7d56f380d7935ea64e135a893be15a7f1cbe7b6e9011700269a78296aa3` |
+
 ---
 
 ## 2026-11-25 토큰 교체 시 기존 앱 언인스톨 선행 보강 (v0.1.38)
