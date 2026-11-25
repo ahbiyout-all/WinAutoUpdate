@@ -24,8 +24,19 @@
 ### 검증
 
 - `scripts\build-inno.ps1 -NoPublish`: 두 Setup 인스톨러 컴파일 성공.
-- 최종 게시 산출물 해시는 GitHub Release 노트에 기록한다. 로컬 `-NoPublish` 빌드는
-  시크릿이 내장되지 않아 게시 산출물과 해시가 다르다.
+- 로컬 `-NoPublish` 빌드는 시크릿이 내장되지 않아 게시 산출물과 해시가 다르다.
+
+### 릴리스 결과
+
+- 커밋: `e81f78e` (master push 완료), 태그: `v0.1.37`
+- 워크플로: `45594195574` 성공 (8m24s)
+- Release: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.37
+
+| 산출물 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.37-x64.exe` | `83a3d3788bb26fcde2a8f8fc039fc81fa18d808123a1373d46249c5378bb5d38` |
+| `UpdateAgent.LabManager-Setup-0.1.37-x64.exe` | `7e5b3aff4e4f6bafcef6f30287380039508dfba74a0aadda94af7be450bcb5ca` |
+| `UpdateAgent.Agent-0.1.37-x64.msi` | `d4202dcdf309ee497a7811523437e9e8fa723fc33635c68e43a29a3cf806a04d` |
 
 ---
 
