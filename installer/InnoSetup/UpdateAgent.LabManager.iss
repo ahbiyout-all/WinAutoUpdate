@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.38"
+  #define AppVersion "0.1.39"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -839,6 +839,33 @@ begin
     LastTokenApplyError := 'appsettings.json 접근 권한을 제한하지 못했습니다.';
 end;
 
+{ 토큰 교체를 선택하면 언인스톨 직후 기존 토큰을 담고 있던 백업본과
+  런타임 재정의 파일을 모두 삭제한다. 이후에는 릴리스 기본 설정 위에
+  새 토큰만 기록하므로 이전 토큰이 설치 결과에 남지 않는다. }
+function RemoveExistingLabManagerTokens: Boolean;
+var
+  RuntimeTokenPath: String;
+begin
+  Result := False;
+  if LabManagerConfigRestoreNeeded and (LabManagerConfigBackup <> '') and
+     FileExists(LabManagerConfigBackup) and (not DeleteFile(LabManagerConfigBackup)) then
+  begin
+    Log('Could not remove the backup containing old LabManager tokens.');
+    Exit;
+  end;
+  LabManagerConfigRestoreNeeded := False;
+
+  RuntimeTokenPath := ExpandConstant('{localappdata}\UpdateAgent\LabManager\runtime-admin-token.json');
+  if FileExists(RuntimeTokenPath) and (not DeleteFile(RuntimeTokenPath)) then
+  begin
+    Log('Could not remove the runtime override containing old LabManager tokens.');
+    Exit;
+  end;
+
+  Log('Old LabManager tokens removed before writing replacement tokens (values hidden).');
+  Result := True;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Code: Integer;
@@ -885,8 +912,9 @@ begin
 
   ShowStepNotice('기존 설치 제거',
     '기존 UpdateAgent LabManager 설치를 먼저 완전히 제거합니다.',
-    '토큰을 새로 기록할 때는 언인스톨이 끝난 뒤에만 새 설치를 진행합니다. ' +
-    'appsettings.json은 백업된 뒤 새 설치에 복원됩니다.');
+    '토큰을 새로 기록할 때는 언인스톨이 끝난 뒤에만 새 설치를 진행하며, ' +
+    '기존 토큰(백업본·런타임 재정의)은 모두 삭제됩니다. ' +
+    '기존 토큰을 재사용할 때만 appsettings.json이 복원됩니다.');
 
   { 이전 제거 프로그램/InstallDelete가 appsettings.json을 지우므로 먼저 백업한다. }
   LabManagerConfigFile := ExpandConstant('{app}\appsettings.json');
@@ -934,7 +962,19 @@ begin
       BoolText(ReplaceExistingToken) + ').');
   end;
 
-  { 설정 복원은 InstallDelete/[Files]가 끝난 뒤 ssPostInstall에서 수행한다. }
+  { 새 토큰 기록을 선택했다면 언인스톨이 끝난 시점에 기존 토큰을 제거한다.
+    실패하면 이전 토큰이 새 설치에 섞일 수 있으므로 여기서 중단한다. }
+  if ReplaceExistingToken then
+  begin
+    if not RemoveExistingLabManagerTokens then
+    begin
+      Result := '기존 LabManager 토큰을 삭제하지 못해 설치를 중단합니다.';
+      Exit;
+    end;
+  end;
+
+  { 설정 복원은 InstallDelete/[Files]가 끝난 뒤 ssPostInstall에서 수행한다.
+    토큰 교체를 선택한 경우에는 복원 대상이 이미 삭제되었으므로 복원하지 않는다. }
 end;
 
 function ExtractPortFromUrlLine(const Line: String): String;
