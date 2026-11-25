@@ -191,6 +191,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
                 AgentId = _options.AgentId,
                 AgentName = _options.AgentName,
                 Policy = policy,
+                IsDryRun = _options.DryRun,
                 PreflightChecks = preflight.Checks.ToList(),
                 MaxRebootCount = policy.MaxRebootCount,
                 State = UpdateJobState.Pending,
@@ -528,8 +529,10 @@ public sealed class UpdateJobRunner : IAsyncDisposable
                     }
 
                     context.CurrentKb = item.KbArticleIds;
-                    context.Phase = "업데이트 다운로드 중";
-                    context.Message = $"{item.KbArticleIds} 다운로드 중";
+                    context.Phase = _options.DryRun ? "업데이트 다운로드 시뮬레이션" : "업데이트 다운로드 중";
+                    context.Message = _options.DryRun
+                        ? $"{item.KbArticleIds} 다운로드 시뮬레이션(실제 다운로드 없음)"
+                        : $"{item.KbArticleIds} 다운로드 중";
                     SetItemState(context, item.UpdateId, UpdateItemState.Downloading);
                     await PersistAsync(context, cancellationToken);
 
@@ -574,8 +577,10 @@ public sealed class UpdateJobRunner : IAsyncDisposable
                     }
 
                     context.CurrentKb = item.KbArticleIds;
-                    context.Phase = "업데이트 설치 중";
-                    context.Message = $"{item.KbArticleIds} 설치 중";
+                    context.Phase = _options.DryRun ? "업데이트 설치 시뮬레이션" : "업데이트 설치 중";
+                    context.Message = _options.DryRun
+                        ? $"{item.KbArticleIds} 설치 시뮬레이션(실제 설치 없음)"
+                        : $"{item.KbArticleIds} 설치 중";
                     SetItemState(context, item.UpdateId, UpdateItemState.Installing);
                     await PersistAsync(context, cancellationToken);
 
@@ -872,8 +877,9 @@ public sealed class UpdateJobRunner : IAsyncDisposable
 
     private static string BuildCompletionMessage(JobContext context)
     {
-        var baseMessage =
-            $"업데이트 완료: 설치 {context.InstalledItems}건, 실패/제외 {context.FailedItems}건, 재부팅 {context.RebootCount}회.";
+        var baseMessage = context.IsDryRun
+            ? $"DRY RUN 시뮬레이션 완료(실제 설치 없음): 설치 예정 {context.InstalledItems}건, 실패/제외 {context.FailedItems}건, 재부팅 {context.RebootCount}회."
+            : $"업데이트 완료: 설치 {context.InstalledItems}건, 실패/제외 {context.FailedItems}건, 재부팅 {context.RebootCount}회.";
 
         if (context.RequiresMaestroAttention)
         {
@@ -1093,6 +1099,10 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         public required string AgentId { get; init; }
         public required string AgentName { get; init; }
         public required UpdatePolicy Policy { get; init; }
+
+        /// <summary>시뮬레이션 작업은 실제 설치로 보고하지 않는다.</summary>
+        public bool IsDryRun { get; init; }
+
         public List<PreflightCheck> PreflightChecks { get; init; } = [];
         public List<JobItem> Items { get; init; } = [];
 
@@ -1131,6 +1141,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             AgentId = AgentId,
             AgentName = AgentName,
             State = State,
+            IsDryRun = IsDryRun,
             Phase = Phase,
             ProgressPercent = ProgressPercent,
             TotalItems = TotalItems,

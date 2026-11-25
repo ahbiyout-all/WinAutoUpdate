@@ -15,7 +15,13 @@ public sealed record MaestroDetectionResult
 
     public DateTimeOffset DetectedAt { get; init; } = UpdateAgent.Guards.UtcClock.Now;
 
+    /// <summary>감지 자체가 실패해 설치 여부를 알 수 없는 경우.</summary>
+    public bool DetectionFailed { get; init; }
+
     public static MaestroDetectionResult NotInstalled { get; } = new() { Installed = false };
+
+    /// <summary>감지 예외로 설치 여부를 확인하지 못한 경우.</summary>
+    public static MaestroDetectionResult Failed { get; } = new() { DetectionFailed = true };
 }
 
 public enum MaestroWuFeatureStatus

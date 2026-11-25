@@ -165,8 +165,8 @@ app.MapPost("/api/agents/checkin", async (
 app.MapGet("/api/admin/overview", async (LabStore labStore, CancellationToken cancellationToken) =>
 {
     var agents = await labStore.GetAgentsAsync(cancellationToken);
-    var jobs = await labStore.GetJobsAsync(200, cancellationToken);
     var active = await labStore.CountActiveJobsAsync(cancellationToken);
+    var (completed, failed) = await labStore.CountFinishedJobsAsync(cancellationToken);
 
     return Results.Ok(new OverviewResponse
     {
@@ -174,8 +174,8 @@ app.MapGet("/api/admin/overview", async (LabStore labStore, CancellationToken ca
         OnlineCount = agents.Count(a => a.Online),
         BusyCount = agents.Count(a => UpdateAgent.Guards.JobStateRules.IsBusy(a.Telemetry.State.ToString())),
         ActiveJobs = active,
-        CompletedJobs = jobs.Count(j => j.Summary.State == UpdateJobState.Completed),
-        FailedJobs = jobs.Count(j => j.Summary.State == UpdateJobState.Failed),
+        CompletedJobs = completed,
+        FailedJobs = failed,
     });
 });
 
@@ -508,8 +508,9 @@ app.MapPost("/api/admin/jobs/start", async (
             continue;
         }
 
-        // Maestro가 설치된 PC는 API 직접 호출로도 보호 해제 확인을 건너뛸 수 없다.
-        if (agent.Agent.MaestroInstalled && !request.MaestroConfirmed)
+        // Maestro가 설치된 PC와 감지 자체가 실패한 PC는 모두 보호 해제 확인을 건너뛸 수 없다.
+        if ((agent.Agent.MaestroInstalled || agent.Agent.MaestroDetectionFailed) &&
+            !request.MaestroConfirmed)
         {
             errors.Add($"{agent.Agent.MachineName}: Maestro 보호 해제 확인이 필요합니다.");
             continue;

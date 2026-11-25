@@ -298,6 +298,83 @@ public sealed class Audit25LabManagerTests
     // ---------------- F. 게이트 상한/보존 ----------------
 
     [Fact]
+    public async Task CountFinishedJobs_CountsBeyondRecentJobLimit()
+    {
+        await WithStoreAsync(async (store, _) =>
+        {
+            // 대시보드 개요는 최근 N건이 아니라 전체 작업 수를 표시해야 한다.
+            const int total = 250;
+            for (var i = 0; i < total; i++)
+            {
+                await store.SaveJobSummaryAsync(new JobSummary
+                {
+                    JobId = $"job-{i:D3}",
+                    AgentId = "pc-1",
+                    State = i % 2 == 0 ? UpdateJobState.Completed : UpdateJobState.Failed,
+                    StartedAt = DateTimeOffset.UtcNow.AddMinutes(-i),
+                    UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-i),
+                }, "PC-01");
+            }
+
+            var (completed, failed) = await store.CountFinishedJobsAsync();
+            Assert.Equal(125, completed);
+            Assert.Equal(125, failed);
+            Assert.Equal(200, (await store.GetJobsAsync(200)).Count);
+        });
+    }
+
+    [Fact]
+    public async Task LiveSnapshot_CountsAttentionJobsOutsideRecentList()
+    {
+        await WithStoreAsync(async (store, _) =>
+        {
+            // 오래 확인을 기다리는 작업은 최신 100건 목록에서 밀려나도 합계와
+            // 모니터의 "진행 중인 작업" 목록에 포함돼야 한다.
+            var now = DateTimeOffset.UtcNow;
+            await store.SaveJobSummaryAsync(new JobSummary
+            {
+                JobId = "job-attention",
+                AgentId = "pc-1",
+                State = UpdateJobState.Pending,
+                RequiresMaestroAttention = true,
+                StartedAt = now.AddDays(-1),
+                UpdatedAt = now.AddDays(-1),
+            }, "PC-01");
+            for (var i = 0; i < 120; i++)
+            {
+                await store.SaveJobSummaryAsync(new JobSummary
+                {
+                    JobId = $"job-active-{i:D3}",
+                    AgentId = "pc-2",
+                    State = UpdateJobState.Installing,
+                    StartedAt = now.AddMinutes(-i),
+                    UpdatedAt = now.AddMinutes(-i),
+                }, "PC-02");
+            }
+            for (var i = 0; i < 50; i++)
+            {
+                await store.SaveJobSummaryAsync(new JobSummary
+                {
+                    JobId = $"job-recent-{i:D3}",
+                    AgentId = "pc-3",
+                    State = UpdateJobState.Completed,
+                    StartedAt = now.AddSeconds(-i),
+                    UpdatedAt = now.AddSeconds(-i),
+                }, "PC-03");
+            }
+
+            var snapshot = await LiveSnapshotBuilder.BuildAsync(store);
+            Assert.Equal(1, snapshot.AttentionCount);
+            Assert.Equal(121, snapshot.ActiveJobCount);
+            Assert.Contains(snapshot.Jobs, job => job.JobId == "job-attention");
+            for (var i = 0; i < 120; i++)
+            {
+                Assert.Contains(snapshot.Jobs, job => job.JobId == $"job-active-{i:D3}");
+            }
+        });
+    }
+
+    [Fact]
     public async Task CheckinGate_TimeoutDoesNotOverReleaseSemaphore()
     {
         // 대기 시간이 초과된 요청은 세마포어를 얻지 못했으므로 해제해서는 안 된다.

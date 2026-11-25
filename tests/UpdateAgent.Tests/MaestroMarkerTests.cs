@@ -144,4 +144,19 @@ public sealed class MaestroMarkerTests : IDisposable
         Assert.False(result.Verified);
         Assert.Contains("마커", result.Message);
     }
+
+    [Fact]
+    public void DetectionFailure_IsNotReportedAsNotInstalled()
+    {
+        // 감지 예외는 "Maestro 없음"이 아니라 "확인 불가"로 구분돼야 한다.
+        Assert.True(MaestroDetectionResult.Failed.DetectionFailed);
+        Assert.False(MaestroDetectionResult.Failed.Installed);
+        Assert.False(MaestroDetectionResult.NotInstalled.DetectionFailed);
+
+        var json = UpdateAgentJson.Serialize(MaestroDetectionResult.Failed);
+        var restored = UpdateAgentJson.Deserialize<MaestroDetectionResult>(json);
+
+        Assert.NotNull(restored);
+        Assert.True(restored!.DetectionFailed);
+    }
 }

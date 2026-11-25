@@ -14,6 +14,7 @@ public sealed record LiveAgentView(
     int ProgressPercent,
     bool Online,
     bool MaestroInstalled,
+    bool MaestroDetectionFailed,
     bool RebootPending,
     bool HasActiveJob,
     DateTimeOffset LastSeen);
@@ -31,6 +32,7 @@ public sealed record LiveJobView(
     int RebootCount,
     int MaxRebootCount,
     bool RequiresMaestroAttention,
+    bool IsDryRun,
     DateTimeOffset UpdatedAt,
     string Message);
 
@@ -54,9 +56,19 @@ public static class LiveSnapshotBuilder
         CancellationToken cancellationToken = default)
     {
         var agents = await store.GetAgentsAsync(cancellationToken).ConfigureAwait(false);
-        var jobs = await store.GetJobsAsync(MaxJobs, cancellationToken).ConfigureAwait(false);
-        // 상위 100건만 보는 jobViews로 활성 작업 수를 세면 누락된다. DB에서 전체 수를 얻는다.
+        var recentJobs = await store.GetJobsAsync(MaxJobs, cancellationToken).ConfigureAwait(false);
+        // 최근 목록에 밀려난 활성 작업도 모니터에 표시해야 한다.
+        var activeJobs = await store.GetActiveJobsAsync(cancellationToken).ConfigureAwait(false);
+        var recentIds = recentJobs
+            .Select(job => job.Summary.JobId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var jobs = recentJobs
+            .Concat(activeJobs.Where(job => !recentIds.Contains(job.Summary.JobId)))
+            .OrderByDescending(job => job.Summary.UpdatedAt)
+            .ToList();
+        // 상위 100건만 보는 목록으로 활성 작업 수를 세면 누락된다. DB에서 전체 수를 얻는다.
         var activeJobCount = await store.CountActiveJobsAsync(cancellationToken).ConfigureAwait(false);
+        var attentionCount = await store.CountAttentionJobsAsync(cancellationToken).ConfigureAwait(false);
 
         var agentViews = agents
             .Select(agent =>
@@ -70,6 +82,8 @@ public static class LiveSnapshotBuilder
                     current?.ProgressPercent ?? 0,
                     agent.Online,
                     agent.Agent.MaestroInstalled,
+                    agent.Agent.MaestroDetectionFailed ||
+                        agent.Telemetry.Maestro?.DetectionFailed == true,
                     agent.Telemetry.RebootPending,
                     current is not null && JobStateRules.IsActive(current.State.ToString()),
                     agent.LastSeen);
@@ -91,6 +105,7 @@ public static class LiveSnapshotBuilder
                 job.Summary.MaxRebootCount,
                 job.Summary.RequiresMaestroAttention &&
                 JobStateRules.IsActive(job.Summary.State.ToString()),
+                job.Summary.IsDryRun,
                 job.Summary.UpdatedAt,
                 job.Summary.Message))
             .ToList();
@@ -101,7 +116,7 @@ public static class LiveSnapshotBuilder
             agentViews.Count(a => a.Online),
             agentViews.Count(a => JobStateRules.IsBusy(a.State)),
             activeJobCount,
-            jobViews.Count(j => j.RequiresMaestroAttention),
+            attentionCount,
             agentViews,
             jobViews);
     }

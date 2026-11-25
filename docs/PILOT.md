@@ -52,7 +52,7 @@ dotnet build UpdateAgent.sln
 dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj
 ```
 
-기대 결과: 빌드 경고 0/오류 0, 테스트 195개 통과.
+기대 결과: 빌드 경고 0/오류 0, 테스트 252개 통과.
 
 ## 2. 게시
 

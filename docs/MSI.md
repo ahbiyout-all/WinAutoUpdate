@@ -721,7 +721,7 @@ msiexec /x ".\UpdateAgent.Agent-0.1.37-x64.msi" /qn /norestart /l*v ".\uninstall
 
 ### 파일럿 전 추가 확인
 
-- [ ] `dotnet test` 전체 통과 (195개)
+- [ ] `dotnet test` 전체 통과 (252개)
 - [ ] `dotnet build UpdateAgent.sln` 경고 0/오류 0
 - [ ] MSI SHA-256 기록
 - [ ] 서명 검증 (`signtool verify /pa /all`)
@@ -763,7 +763,7 @@ msiexec /x ".\UpdateAgent.Agent-0.1.37-x64.msi" /qn /norestart /l*v ".\uninstall
 
 | # | 항목 | 상태 |
 |---|---|---|
-| 1 | 코드 변경 (`agent.json`, `AgentVersion`, SessionHelper 폴백) + 단위 테스트 | 완료 (테스트 195개 통과) |
+| 1 | 코드 변경 (`agent.json`, `AgentVersion`, SessionHelper 폴백) + 단위 테스트 | 완료 (테스트 252개 통과) |
 | 2 | WiX 프로젝트 + `Package.wxs` | 완료 |
 | 3 | 정제된 `appsettings.json` 템플릿, `notice.ko.rtf` | 완료 |
 | 3-1 | `ko-KR.wxl` 한국어 WixUI 번역 (Control 테이블 검증) | 완료 |

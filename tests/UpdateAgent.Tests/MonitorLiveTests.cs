@@ -151,4 +151,55 @@ public sealed class MonitorLiveTests
             }
         }
     }
+
+    [Fact]
+    public async Task LiveSnapshot_PreservesUnverifiedProbeAndDryRunFlags()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "UpdateAgentTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new LabStore(Path.Combine(root, "lab.db"));
+            await store.InitializeAsync();
+
+            var dryRunJob = new JobSummary
+            {
+                JobId = "job-dry",
+                AgentId = "agent-1",
+                State = UpdateJobState.Installing,
+                IsDryRun = true,
+                UpdatedAt = DateTimeOffset.Now,
+            };
+            await store.UpsertAgentAsync(
+                new AgentInfo
+                {
+                    AgentId = "agent-1",
+                    MachineName = "PC-01",
+                    MaestroDetectionFailed = true,
+                },
+                new AgentTelemetry
+                {
+                    AgentId = "agent-1",
+                    WuBusyProbeFailed = true,
+                    Maestro = MaestroDetectionResult.Failed,
+                });
+            await store.SaveJobSummaryAsync(dryRunJob, "PC-01");
+
+            var snapshot = await LiveSnapshotBuilder.BuildAsync(store);
+
+            var agent = Assert.Single(snapshot.Agents);
+            Assert.True(agent.MaestroDetectionFailed);
+            Assert.True(Assert.Single(snapshot.Jobs, job => job.JobId == "job-dry").IsDryRun);
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            }
+            catch
+            {
+                // SQLite 연결 풀이 파일을 잡고 있으면 정리를 건너뛴다.
+            }
+        }
+    }
 }

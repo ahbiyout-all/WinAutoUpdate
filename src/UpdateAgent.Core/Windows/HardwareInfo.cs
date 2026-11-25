@@ -7,6 +7,10 @@ public sealed record HardwareSnapshot
 {
     public bool HasBattery { get; init; }
     public bool IsLaptop { get; init; }
+
+    /// <summary>노트북 여부를 조회하지 못했는지. false를 "데스크톱"으로 단정하지 않는다.</summary>
+    public bool LaptopDetectionFailed { get; init; }
+
     public bool OnAcPower { get; init; } = true;
     public int FreeDiskMb { get; init; }
 }
@@ -17,11 +21,13 @@ public static class HardwareInfo
     public static HardwareSnapshot GetSnapshot()
     {
         var power = GetPowerStatus();
+        var (isLaptop, laptopDetectionFailed) = DetectLaptop();
         return new HardwareSnapshot
         {
             HasBattery = power.HasBattery,
             OnAcPower = power.OnAcPower,
-            IsLaptop = DetectLaptop(),
+            IsLaptop = isLaptop,
+            LaptopDetectionFailed = laptopDetectionFailed,
             FreeDiskMb = GetFreeDiskMb(),
         };
     }
@@ -36,7 +42,8 @@ public static class HardwareInfo
         }
         catch
         {
-            return 0;
+            // 조회 실패를 0MB(디스크 가득 참)로 보고하지 않는다. UI는 음수를 "확인 불가"로 표시한다.
+            return -1;
         }
     }
 
@@ -56,7 +63,7 @@ public static class HardwareInfo
         }
     }
 
-    private static bool DetectLaptop()
+    private static (bool IsLaptop, bool Failed) DetectLaptop()
     {
         try
         {
@@ -71,17 +78,17 @@ public static class HardwareInfo
                     {
                         // 8=Portable, 9=Laptop, 10=Notebook, 11=Hand Held, 12=Docking, 14=Sub Notebook,
                         // 18=Expansion Chassis, 21=Desktop
-                        if (type is 8 or 9 or 10 or 11 or 12 or 14 or 18) return true;
+                        if (type is 8 or 9 or 10 or 11 or 12 or 14 or 18) return (true, false);
                     }
                 }
             }
         }
         catch
         {
-            // ignore
+            return (false, true);
         }
 
-        return false;
+        return (false, false);
     }
 
     [StructLayout(LayoutKind.Sequential)]

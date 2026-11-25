@@ -181,7 +181,7 @@ v0.1.36 작업(5회 반복 감사)에서 확인·수정한 항목:
 ## 6. 검증과 한계
 
 - `dotnet build UpdateAgent.sln -c Release --nologo`: 경고 0, 오류 0.
-- `dotnet test tests\UpdateAgent.Tests\UpdateAgent.Tests.csproj -c Release --nologo`: **244개 통과**, 실패 0.
+- `dotnet test tests\UpdateAgent.Tests\UpdateAgent.Tests.csproj -c Release --nologo`: **252개 통과**, 실패 0.
 - 테스트에는 DLL 규칙뿐 아니라 토큰 충돌/내부 BOM/짧은 override/동일 크기 재기록/안전하지 않은 브라우저 URL,
   체크인 ack·감사 절단, 미래 시각 clamp, 대량 배치 ack 회귀가 포함되어 있습니다.
 - `scripts\publish.ps1`, `scripts\build-inno.ps1 -NoPublish`, `scripts\build-msi.ps1`로 게시/패키징을 확인합니다.

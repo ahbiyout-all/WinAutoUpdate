@@ -1,4 +1,5 @@
 using UpdateAgent.SessionHelper;
+using UpdateAgent.Shared.Models;
 
 namespace UpdateAgent.Tests;
 
@@ -42,6 +43,34 @@ public sealed class OverlayHotkeyTests
     public void IsCombo_RejectsOtherKeys()
     {
         Assert.False(EmergencyStopDetector.IsCombo(KeyboardBlocker.VkM, true, true, false, false));
+    }
+
+    [Fact]
+    public void Overlay_ShowsReportedPhaseInsteadOfGenericStateLabel()
+    {
+        var viewModel = new OverlayViewModel();
+        viewModel.Apply(new JobSummary
+        {
+            JobId = "job-1",
+            State = UpdateJobState.Cancelled,
+            Phase = "강제 중단됨",
+        });
+
+        Assert.Equal("강제 중단됨", viewModel.Phase);
+    }
+
+    [Fact]
+    public void Overlay_FallsBackToStateLabelWhenPhaseMissing()
+    {
+        var viewModel = new OverlayViewModel();
+        viewModel.Apply(new JobSummary
+        {
+            JobId = "job-1",
+            State = UpdateJobState.Cancelled,
+            Phase = "",
+        });
+
+        Assert.Equal("업데이트 취소됨", viewModel.Phase);
     }
 
     [Fact]

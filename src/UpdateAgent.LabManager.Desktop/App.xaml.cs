@@ -35,7 +35,7 @@ public partial class App : Application
         if (!ready)
         {
             var hint = server.LocalServerExited
-                ? "로컬 서버가 시작되지 않았습니다. change-me-* 기본 토큰을 변경했는지 확인하세요.\n" +
+                ? "로컬 서버가 시작되지 않았습니다. change-me-*/sample-* 기본 토큰을 변경했는지 확인하세요.\n" +
                   "설정: " + Path.Combine(AppContext.BaseDirectory, "appsettings.json") + "\n" +
                   "로그: " + Path.Combine(
                       Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

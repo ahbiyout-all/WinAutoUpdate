@@ -37,6 +37,21 @@ public sealed class GitHubReleaseCheckerTests
     }
 
     [Fact]
+    public async Task CheckAsync_OnFailure_DoesNotFabricateLatestVersion()
+    {
+        using var handler = new StubHandler("{}", HttpStatusCode.ServiceUnavailable);
+        using var http = new HttpClient(handler);
+
+        var info = await new GitHubReleaseChecker(http).CheckAsync(UpdateProduct.LabManager);
+
+        Assert.False(info.CheckSucceeded);
+        Assert.False(info.UpdateAvailable);
+        Assert.Equal("", info.LatestVersion);
+        Assert.Equal(UpdateAgentConstants.LabManagerVersion, info.CurrentVersion);
+        Assert.NotNull(info.Error);
+    }
+
+    [Fact]
     public async Task CheckAsync_RequestsTheExactLatestReleaseEndpoint()
     {
         using var handler = new StubHandler("{}", HttpStatusCode.NotFound);

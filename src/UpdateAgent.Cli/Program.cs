@@ -245,7 +245,10 @@ internal static class Program
         var provider = new ManualMaestroProvider();
         var detection = await provider.DetectAsync(ct);
 
-        Console.WriteLine($"Maestro 감지: {(detection.Installed ? "설치됨" : "감지되지 않음")}");
+        var detectionText = detection.DetectionFailed
+            ? "확인 불가(감지 오류)"
+            : detection.Installed ? "설치됨" : "감지되지 않음";
+        Console.WriteLine($"Maestro 감지: {detectionText}");
         Console.WriteLine($"Windows Update 기능: {detection.WuFeatureStatus}");
         foreach (var evidence in detection.Evidence)
         {

@@ -20,6 +20,12 @@ public sealed record JobSummary
     public int MaxRebootCount { get; init; } = 5;
     public string? CurrentKb { get; init; }
     public string Message { get; init; } = "";
+
+    /// <summary>
+    /// 실제 설치가 아닌 시뮬레이션(--dry-run) 작업인지. 대시보드가 설치 완료로 오인하지 않게 표시한다.
+    /// </summary>
+    public bool IsDryRun { get; init; }
+
     public PauseReason PauseReason { get; init; }
     public DateTimeOffset? PauseUntil { get; init; }
     public DateTimeOffset StartedAt { get; init; } = UpdateAgent.Guards.UtcClock.Now;
@@ -83,7 +89,15 @@ public sealed record AgentInfo
     public DateTimeOffset LastSeen { get; init; } = UpdateAgent.Guards.UtcClock.Now;
     public AgentState State { get; init; } = AgentState.Online;
     public bool MaestroInstalled { get; init; }
+
+    /// <summary>감지 오류로 설치 여부를 확인하지 못했는지. false를 "미설치"로 단정하지 않는다.</summary>
+    public bool MaestroDetectionFailed { get; init; }
+
     public bool IsLaptop { get; init; }
+
+    /// <summary>노트북 여부 조회 실패 여부.</summary>
+    public bool LaptopDetectionFailed { get; init; }
+
     public bool HasBattery { get; init; }
     public int FreeDiskMb { get; init; }
 }
@@ -100,6 +114,10 @@ public sealed record AgentTelemetry
     public bool UserLoggedOn { get; init; }
     public IReadOnlyList<string> LoggedOnUsers { get; init; } = [];
     public bool WuBusy { get; init; }
+
+    /// <summary>WUA 사용 중 여부를 확인하지 못했는지. false를 "유휴"로 단정하지 않는다.</summary>
+    public bool WuBusyProbeFailed { get; init; }
+
     public bool RebootPending { get; init; }
     public MaestroDetectionResult? Maestro { get; init; }
     public int FreeDiskMb { get; init; }

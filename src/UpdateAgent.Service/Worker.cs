@@ -290,17 +290,20 @@ public sealed class Worker : BackgroundService
         }
         catch
         {
-            maestro = MaestroDetectionResult.NotInstalled;
+            // 감지 자체가 실패하면 "미설치"가 아니라 "확인 불가"로 보고한다.
+            maestro = MaestroDetectionResult.Failed;
         }
 
         var wuBusy = false;
+        var wuBusyProbeFailed = false;
         try
         {
             wuBusy = await _wua.IsBusyAsync(cancellationToken);
         }
         catch
         {
-            // WUA 확인 실패는 "사용 중 아님"으로 보고한다.
+            // 확인에 실패했으므로 false를 "WU 유휴"로 해석하지 않는다.
+            wuBusyProbeFailed = true;
         }
 
         var current = _runner.Current;
@@ -318,7 +321,9 @@ public sealed class Worker : BackgroundService
             LastSeen = DateTimeOffset.Now,
             State = state,
             MaestroInstalled = maestro.Installed,
+            MaestroDetectionFailed = maestro.DetectionFailed,
             IsLaptop = hardware.IsLaptop,
+            LaptopDetectionFailed = hardware.LaptopDetectionFailed,
             HasBattery = hardware.HasBattery,
             FreeDiskMb = hardware.FreeDiskMb,
         };
@@ -333,6 +338,7 @@ public sealed class Worker : BackgroundService
             CurrentPhase = current?.Summary.Phase,
             UserLoggedOn = sessions.Count > 0,
             WuBusy = wuBusy,
+            WuBusyProbeFailed = wuBusyProbeFailed,
             RebootPending = _reboot.IsRebootPending(),
             Maestro = maestro,
             FreeDiskMb = hardware.FreeDiskMb,

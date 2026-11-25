@@ -110,6 +110,21 @@ public sealed class SqliteJobStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveJob_PreservesDryRunFlag()
+    {
+        await _store.InitializeAsync();
+        var job = Job("job-dry", UpdateJobState.Completed);
+        job = job with { Summary = job.Summary with { IsDryRun = true } };
+        await _store.SaveJobAsync(job);
+
+        var stored = await _store.GetJobAsync("job-dry");
+
+        Assert.NotNull(stored);
+        Assert.True(stored!.Summary.IsDryRun);
+        Assert.False(Job("job-real", UpdateJobState.Completed).Summary.IsDryRun);
+    }
+
+    [Fact]
     public async Task GetActiveJob_IsScopedToAgent()
     {
         await _store.InitializeAsync();

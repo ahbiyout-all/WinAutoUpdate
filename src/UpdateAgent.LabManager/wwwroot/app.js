@@ -180,6 +180,10 @@ function chip(label, tone) {
   return `<span class="chip chip-${tone}">${escapeHtml(label)}</span>`;
 }
 
+function isActiveJobState(state) {
+  return !['completed', 'failed', 'cancelled'].includes(String(state || '').toLowerCase());
+}
+
 // ---------------- OS 구분 / 업데이트 옵션 ----------------
 
 function osGroup(os) {
@@ -408,6 +412,7 @@ function formatTime(value) {
 function ago(value) {
   if (!value) return '';
   const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
   const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
   if (seconds < 60) return `${seconds}초 전`;
   if (seconds < 3600) return `${Math.round(seconds / 60)}분 전`;
@@ -459,7 +464,8 @@ function renderAgents() {
     const state = online ? telemetry.state || 'idle' : 'offline';
     const [label, tone] = stateInfo(state);
     const os = agent.os || {};
-    const job = telemetry.currentJob;
+    // 종료된 작업은 "현재 작업"이 아니다. 최근 작업 목록에서만 표시한다.
+    const job = isActiveJobState(telemetry.currentJob?.state) ? telemetry.currentJob : null;
 
     const tr = el('tr');
     if (selected.has(agent.agentId)) tr.classList.add('selected');
@@ -479,13 +485,15 @@ function renderAgents() {
 
     const nameCell = el('td');
     nameCell.innerHTML = `<div class="strong">${escapeHtml(agent.machineName)}</div>
-      <div class="muted mono">${escapeHtml(agent.ipAddress || agent.agentId.slice(0, 13))}</div>`;
+      <div class="muted mono">${escapeHtml(agent.ipAddress || 'IP 주소 없음')}</div>`;
     tr.appendChild(nameCell);
 
     const stateCell = el('td');
     stateCell.innerHTML = chip(label, tone) +
       (telemetry.userLoggedOn ? ` ${chip('사용자 로그온', 'amber')}` : '') +
-      (telemetry.wuBusy ? ` ${chip('WU 사용 중', 'red')}` : '');
+      (telemetry.wuBusyProbeFailed
+        ? ` ${chip('WU 확인 실패', 'red')}`
+        : telemetry.wuBusy ? ` ${chip('WU 사용 중', 'red')}` : '');
     tr.appendChild(stateCell);
 
     const jobCell = el('td');
@@ -506,13 +514,21 @@ function renderAgents() {
       <div class="small">${escapeHtml(os.shortName || os.productName || '알 수 없음')}</div>
       <div class="muted small">${escapeHtml(os.versionString || '')}</div>
       ${policyInfo?.hasOverride ? chip('개별 옵션', 'purple') + ' ' : ''}
-      ${agent.maestroInstalled ? '<span class="small amber-text">Maestro 감지됨</span>' : ''}`;
+      ${agent.maestroInstalled ? '<span class="small amber-text">Maestro 감지됨</span>' : ''}
+      ${telemetry.maestro?.detectionFailed ? ` ${chip('Maestro 확인 실패', 'red')}` : ''}`;
     tr.appendChild(osCell);
 
     const freeCell = el('td');
-    const freeGb = telemetry.freeDiskMb ? (telemetry.freeDiskMb / 1024).toFixed(1) : '?';
-    freeCell.innerHTML = `<div class="small">${escapeHtml(String(freeGb))} GB</div>
-      <div class="muted small">${escapeHtml(agent.isLaptop ? '노트북' : '데스크톱')}</div>`;
+    // 0MB는 실제 값(디스크 부족)이므로 물음표로 바꾸지 않는다.
+    const freeMb = Number(telemetry.freeDiskMb);
+    const freeText = Number.isFinite(freeMb) && freeMb >= 0
+      ? `${(freeMb / 1024).toFixed(1)} GB`
+      : '확인 불가';
+    const laptopText = agent.isLaptop
+      ? '노트북'
+      : agent.laptopDetectionFailed ? '노트북 여부 확인 불가' : '데스크톱';
+    freeCell.innerHTML = `<div class="small">${escapeHtml(freeText)}</div>
+      <div class="muted small">${escapeHtml(laptopText)}</div>`;
     tr.appendChild(freeCell);
 
     const seenCell = el('td');
@@ -560,7 +576,7 @@ function renderJobs() {
     return;
   }
 
-  for (const record of jobs.slice(0, 40)) {
+  for (const record of jobs) {
     const job = record.summary;
     const [label, tone] = jobStateInfo(job.state);
     const tr = el('tr');
@@ -572,6 +588,7 @@ function renderJobs() {
 
     const stateCell = el('td');
     stateCell.innerHTML = `${chip(label, tone)}
+      ${job.isDryRun ? ` ${chip('DRY RUN', 'purple')}` : ''}
       <div class="muted small">${escapeHtml(job.phase || '')}</div>`;
     tr.appendChild(stateCell);
 
@@ -619,7 +636,7 @@ function renderAudit() {
     return;
   }
 
-  for (const entry of audit.slice(0, 25)) {
+  for (const entry of audit) {
     const row = el('div', 'audit-row');
     row.innerHTML = `<div class="audit-time">${escapeHtml(formatTime(entry.timestamp))}</div>
       <div class="audit-main"><span class="mono small">${escapeHtml(entry.action)}</span>
@@ -820,7 +837,10 @@ function openStartDialog(agentIds) {
   }
 
   const records = agents.filter((a) => selected.has(a.agent.agentId));
-  const anyMaestro = records.some((a) => a.agent.maestroInstalled);
+  // 감지 실패도 Maestro가 있을 수 있으므로 확인 절차를 건너뛰지 않는다.
+  const anyMaestro = records.some((a) =>
+    a.agent.maestroInstalled || a.agent.maestroDetectionFailed ||
+    a.telemetry?.maestro?.detectionFailed === true);
   $('#maestro-block').classList.toggle('hidden', !anyMaestro);
   if (anyMaestro) $('#p-maestro-confirm').checked = false;
   else $('#p-maestro-confirm').checked = true;
@@ -903,7 +923,7 @@ function renderJobDetail(data) {
 
   const summary = $('#detail-summary');
   summary.innerHTML = `
-    <div class="detail-row"><span>상태</span><span>${chip(label, tone)} ${escapeHtml(job.phase || '')}</span></div>
+    <div class="detail-row"><span>상태</span><span>${chip(label, tone)} ${job.isDryRun ? ` ${chip('DRY RUN', 'purple')}` : ''} ${escapeHtml(job.phase || '')}</span></div>
     <div class="detail-row"><span>진행</span><span>${job.progressPercent || 0}%</span></div>
     <div class="progress"><div style="width:${Math.max(0, Math.min(100, job.progressPercent || 0))}%"></div></div>
     <div class="detail-row"><span>항목</span><span>전체 ${job.totalItems || 0} · 설치 ${job.installedItems || 0} · 실패 ${job.failedItems || 0}</span></div>
@@ -923,7 +943,7 @@ function renderJobDetail(data) {
     for (const item of detailItems) {
       const row = el('div', 'item-row');
       const itemState = String(item.state || '').toLowerCase();
-      row.innerHTML = `<div class="item-kb mono">${escapeHtml(item.kbArticleIds || 'KB-')}</div>
+      row.innerHTML = `<div class="item-kb mono">${escapeHtml(item.kbArticleIds || 'KB 번호 없음')}</div>
         <div class="item-title">${escapeHtml(item.title || '')}</div>
         <div class="item-state state-${escapeHtml(itemState)}">${escapeHtml(itemState)}</div>
         ${item.error ? `<div class="item-error">${escapeHtml(item.error)}</div>` : ''}`;

@@ -357,6 +357,48 @@ public sealed class LabStore
         return results;
     }
 
+    /// <summary>
+    /// 실시간 모니터가 "진행 중인 작업"을 누락 없이 보여주도록 활성 작업 전체를 반환한다.
+    /// 최근 N건 목록에는 오래 정지된 작업이 밀려날 수 있다.
+    /// </summary>
+    public async Task<IReadOnlyList<LabJobRecord>> GetActiveJobsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT summary_json, detail_json, machine_name FROM jobs
+            WHERE state NOT IN ($completed, $failed, $cancelled)
+            ORDER BY updated_at DESC;
+            """;
+        command.Parameters.AddWithValue("$completed", (int)UpdateJobState.Completed);
+        command.Parameters.AddWithValue("$failed", (int)UpdateJobState.Failed);
+        command.Parameters.AddWithValue("$cancelled", (int)UpdateJobState.Cancelled);
+
+        var results = new List<LabJobRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var summary = UpdateAgentJson.Deserialize<JobSummary>(reader.GetString(0));
+            if (summary is null) continue;
+            summary = ToUtc(summary);
+
+            var detail = reader.IsDBNull(1)
+                ? null
+                : UpdateAgentJson.Deserialize<JobDetail>(reader.GetString(1));
+            if (detail is not null) detail = ToUtc(detail);
+
+            results.Add(new LabJobRecord
+            {
+                Summary = summary,
+                Detail = detail,
+                MachineName = reader.GetString(2),
+            });
+        }
+
+        return results;
+    }
+
     public async Task<LabJobRecord?> GetJobAsync(string jobId, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
@@ -400,6 +442,61 @@ public sealed class LabStore
         command.Parameters.AddWithValue("$cancelled", (int)UpdateJobState.Cancelled);
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return Convert.ToInt32(result ?? 0);
+    }
+
+    /// <summary>
+    /// 완료/실패 작업 수를 전체 테이블에서 센다. 최근 N건만 읽는 GetJobsAsync로 세면
+    /// 오래된 랩에서 실제보다 적게 표시된다.
+    /// </summary>
+    public async Task<(int Completed, int Failed)> CountFinishedJobsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                SUM(CASE WHEN state = $completed THEN 1 ELSE 0 END),
+                SUM(CASE WHEN state = $failed THEN 1 ELSE 0 END)
+            FROM jobs;
+            """;
+        command.Parameters.AddWithValue("$completed", (int)UpdateJobState.Completed);
+        command.Parameters.AddWithValue("$failed", (int)UpdateJobState.Failed);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) return (0, 0);
+        return (
+            reader.IsDBNull(0) ? 0 : reader.GetInt32(0),
+            reader.IsDBNull(1) ? 0 : reader.GetInt32(1));
+    }
+
+    /// <summary>
+    /// Maestro 확인이 필요한 활성 작업 수를 전체 테이블에서 센다.
+    /// 최근 N건으로 세면 오래 정지된 작업이 목록에서 밀려 0으로 표시된다.
+    /// </summary>
+    public async Task<int> CountAttentionJobsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT summary_json FROM jobs
+            WHERE state NOT IN ($completed, $failed, $cancelled);
+            """;
+        command.Parameters.AddWithValue("$completed", (int)UpdateJobState.Completed);
+        command.Parameters.AddWithValue("$failed", (int)UpdateJobState.Failed);
+        command.Parameters.AddWithValue("$cancelled", (int)UpdateJobState.Cancelled);
+
+        var count = 0;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var summary = UpdateAgentJson.Deserialize<JobSummary>(reader.GetString(0));
+            if (summary is not null &&
+                summary.RequiresMaestroAttention &&
+                JobStateRules.IsActive(summary.State.ToString()))
+            {
+                count++;
+            }
+        }
+        return count;
     }
 
     // ---------- Commands ----------

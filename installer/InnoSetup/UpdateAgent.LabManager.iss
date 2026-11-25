@@ -126,6 +126,7 @@ var
   ExternalTokenFile: String;
   ExternalAdminToken: String;
   ExternalAgentToken: String;
+  LastTokenApplyError: String;
 
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
@@ -695,6 +696,19 @@ begin
   Log('Using embedded first-install LabManager tokens (values hidden).');
 end;
 
+{ CopyFile는 원본 파일 속성을 유지한다. 백업본이 읽기 전용이면 복원된
+  appsettings.json도 읽기 전용이 되어 토큰 저장이 실패하므로 먼저 해제한다. }
+function EnsureWritableConfigFile(const Path: String): Boolean;
+begin
+  Result := True;
+  if not FileExists(Path) then Exit;
+  if RunHidden(ExpandConstant('{sys}\attrib.exe'), '-R "' + Path + '"') <> 0 then
+  begin
+    Log('Could not clear read-only attribute on LabManager config: ' + Path);
+    Result := False;
+  end;
+end;
+
 { 첫 설치에서만 appsettings.json의 토큰을 내장 값으로 교체한다. }
 function ApplyBundledLabManagerTokens: Boolean;
 var
@@ -703,6 +717,7 @@ var
   I: Integer;
 begin
   Result := False;
+  LastTokenApplyError := '';
   if (not FirstInstall) or (BundledAdminToken = '') or (BundledAgentToken = '') then
   begin
     Result := True;
@@ -714,6 +729,7 @@ begin
   RuntimeTokenPath := ExpandConstant('{localappdata}\UpdateAgent\LabManager\runtime-admin-token.json');
   if FileExists(RuntimeTokenPath) and (not DeleteFile(RuntimeTokenPath)) then
   begin
+    LastTokenApplyError := '이전 관리자 토큰 재정의 파일을 삭제하지 못했습니다.';
     Log('Could not remove runtime admin token override during first install: ' + RuntimeTokenPath);
     Exit;
   end;
@@ -721,6 +737,7 @@ begin
   Path := ExpandConstant('{app}\appsettings.json');
   if not LoadStringsFromFile(Path, Lines) then
   begin
+    LastTokenApplyError := 'appsettings.json을 읽을 수 없습니다.';
     Log('Could not read appsettings.json during first install: ' + Path);
     Exit;
   end;
@@ -736,13 +753,21 @@ begin
 
   SetArrayLength(Lines, 1);
   Lines[0] := Text;
+  if not EnsureWritableConfigFile(Path) then
+  begin
+    LastTokenApplyError := 'appsettings.json의 읽기 전용 속성을 해제하지 못했습니다.';
+    Exit;
+  end;
   Result := SaveStringsToUTF8File(Path, Lines, False);
   if not Result then
   begin
+    LastTokenApplyError := 'appsettings.json에 토큰을 저장할 수 없습니다.';
     Log('Could not write appsettings.json during first install: ' + Path);
     Exit;
   end;
   Result := RestrictLabManagerConfigAcl(Path);
+  if not Result then
+    LastTokenApplyError := 'appsettings.json 접근 권한을 제한하지 못했습니다.';
 end;
 
 { 업데이트에서 교체를 선택한 경우에만 실제 토큰 두 개를 설정에 반영한다. }
@@ -753,6 +778,7 @@ var
   I: Integer;
 begin
   Result := False;
+  LastTokenApplyError := '';
   if FirstInstall or (not ReplaceExistingToken) or
      (ExternalAdminToken = '') or (ExternalAgentToken = '') then
   begin
@@ -764,6 +790,7 @@ begin
   RuntimeTokenPath := ExpandConstant('{localappdata}\UpdateAgent\LabManager\runtime-admin-token.json');
   if FileExists(RuntimeTokenPath) and (not DeleteFile(RuntimeTokenPath)) then
   begin
+    LastTokenApplyError := '이전 관리자 토큰 재정의 파일을 삭제하지 못했습니다.';
     Log('Could not remove runtime admin token override during replacement: ' + RuntimeTokenPath);
     Exit;
   end;
@@ -771,6 +798,7 @@ begin
   Path := ExpandConstant('{app}\appsettings.json');
   if not LoadStringsFromFile(Path, Lines) then
   begin
+    LastTokenApplyError := 'appsettings.json을 읽을 수 없습니다.';
     Log('Could not read appsettings.json during token replacement: ' + Path);
     Exit;
   end;
@@ -781,24 +809,34 @@ begin
 
   if not SetJsonStringValueAnywhere(Text, 'AdminToken', ExternalAdminToken) then
   begin
+    LastTokenApplyError := 'AdminToken 키를 찾지 못했거나 값 형식이 올바르지 않습니다.';
     Log('AdminToken key was not found or is malformed during replacement: ' + Path);
     Exit;
   end;
   if not SetJsonStringValueAnywhere(Text, 'AgentToken', ExternalAgentToken) then
   begin
+    LastTokenApplyError := 'AgentToken 키를 찾지 못했거나 값 형식이 올바르지 않습니다.';
     Log('AgentToken key was not found or is malformed during replacement: ' + Path);
     Exit;
   end;
 
   SetArrayLength(Lines, 1);
   Lines[0] := Text;
+  if not EnsureWritableConfigFile(Path) then
+  begin
+    LastTokenApplyError := 'appsettings.json의 읽기 전용 속성을 해제하지 못했습니다.';
+    Exit;
+  end;
   Result := SaveStringsToUTF8File(Path, Lines, False);
   if not Result then
   begin
+    LastTokenApplyError := 'appsettings.json에 토큰을 저장할 수 없습니다.';
     Log('Could not write appsettings.json during token replacement: ' + Path);
     Exit;
   end;
   Result := RestrictLabManagerConfigAcl(Path);
+  if not Result then
+    LastTokenApplyError := 'appsettings.json 접근 권한을 제한하지 못했습니다.';
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -1100,6 +1138,7 @@ begin
     begin
       Log('Restoring LabManager appsettings.json: ' + LabManagerConfigBackup + ' -> ' + LabManagerConfigFile);
       ForceDirectories(ExtractFileDir(LabManagerConfigFile));
+      EnsureWritableConfigFile(LabManagerConfigFile);
       { [Files] may have created appsettings.json with onlyifdoesntexist; overwrite with the backup. }
       if not CopyFile(LabManagerConfigBackup, LabManagerConfigFile, False) then
         RaiseException('기존 LabManager appsettings.json 복원에 실패해 설치를 중단합니다. 백업: ' + LabManagerConfigBackup);
@@ -1112,11 +1151,13 @@ begin
     { 첫 설치에서만 내장 토큰을 appsettings.json에 반영한다.
       기존 설치를 업데이트하는 경우 이 함수는 아무 것도 바꾸지 않는다. }
     if not ApplyBundledLabManagerTokens then
-      RaiseException('첫 설치용 내장 LabManager 토큰을 설정에 반영하지 못해 설치를 중단합니다.');
+      RaiseException('첫 설치용 내장 LabManager 토큰을 설정에 반영하지 못해 설치를 중단합니다. ' +
+        LastTokenApplyError);
 
     { 업데이트에서 교체를 선택한 경우에만 백업에서 복원된 설정의 토큰을 새 값으로 바꾼다. }
     if not ApplyReplacementLabManagerTokens then
-      RaiseException('새 LabManager 토큰을 설정에 반영하지 못해 설치를 중단합니다.');
+      RaiseException('새 LabManager 토큰을 설정에 반영하지 못해 설치를 중단합니다. ' +
+        LastTokenApplyError);
 
     { 두 토큰 적용이 모두 성공한 뒤에만 백업을 삭제한다. 토큰 저장이 실패하면
       복원본을 남겨 두어 이전 단계의 실패에서도 되돌릴 수 있게 한다. }

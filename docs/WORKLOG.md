@@ -5,6 +5,82 @@
 
 ---
 
+## 2026-11-25 LabManager 토큰 교체 설치 실패 추가 대응 (v0.1.37 게시)
+
+### 배경
+
+ 교사가 기존 LabManager를 업데이트하면서 "기존 토큰을 삭제하고 새 토큰 기록"을 선택하면
+ 설치가 토큰 반영 단계에서 중단된다는 보고가 반복됐다. 대소문자 불일치 수정(`1291fca`)에
+ 더해 설치를 막을 수 있는 나머지 경로를 보강했다.
+
+### 수정
+
+| 파일 | 수정 |
+|---|---|
+| `installer/InnoSetup/UpdateAgent.LabManager.iss` | `CopyFile`가 유지한 읽기 전용 속성을 토큰 저장/설정 복원 전에 해제 |
+| 위 동일 | 토큰 적용 실패 원인을 오류 창 메시지에도 표시(`LastTokenApplyError`) |
+| 위 동일 | 첫 설치·교체 경로의 모든 실패 지점에 원인 문구와 로그 기록 |
+
+### 검증
+
+- `scripts\build-inno.ps1 -NoPublish`: 두 Setup 인스톨러 컴파일 성공.
+- 최종 게시 산출물 해시는 GitHub Release 노트에 기록한다. 로컬 `-NoPublish` 빌드는
+  시크릿이 내장되지 않아 게시 산출물과 해시가 다르다.
+
+---
+
+## 2026-11-24 표시 데이터 실제 소스 감사
+
+### 배경
+
+대시보드·실시간 모니터·학생용 앱·오버레이에서 실제 값 대신 추정값이나 잘린 목록이
+표시되는 경로를 찾아 실제 데이터 소스로 연결했습니다. 확인된 결함만 수정했습니다.
+
+### 확인된 결함과 수정
+
+| 영역 | 결함 | 수정 |
+|---|---|---|
+| 개요 API | `CompletedJobs`/`FailedJobs`를 최근 200건에서 집계 | 전체 테이블 `CountFinishedJobsAsync` 사용 |
+| 실시간 모니터 | `AttentionCount`를 최근 100건에서 집계해 오래된 대기 작업이 0으로 표시 | 전체 활성 작업 `CountAttentionJobsAsync` 사용 |
+| 에이전트 목록 | IP가 없으면 `agentId` 앞 13자를 IP처럼 표시 | `IP 주소 없음`으로 명시 |
+| 작업 상세 | KB 번호가 없으면 `KB-` 표시 | `KB 번호 없음`으로 명시 |
+| 에이전트 목록 | 종료된 작업도 "현재 작업"에 표시 | 활성 상태만 표시 |
+| 작업/감사 목록 | 60건을 받아 40/25건만 표시하면서 캡션은 60건으로 안내 | 받은 데이터를 모두 표시 |
+| 업데이트 확인 | 조회 실패 시 `LatestVersion`을 현재 버전으로 채움 | 빈 값 반환 |
+| 오버레이 | 에이전트가 보고한 실제 `Phase` 대신 상태별 일반 문구 표시 | 실제 단계 우선, 없을 때만 상태 문구 |
+| 런처 오류 안내 | `change-me-*` 기본 토큰만 안내 | `sample-*`도 포함 |
+| Dry-run | 시뮬레이션 설치를 `설치 N건`으로 표시 | `IsDryRun` 플래그와 `DRY RUN` 문구로 구분 |
+| WU 사용 중 | 확인 실패를 `false`(유휴)로 보고 | `WuBusyProbeFailed`로 "WU 확인 실패" 표시 |
+| Maestro 감지 | 감지 실패를 `NotInstalled`로 보고 | `DetectionFailed`로 "확인 실패" 표시, API·대시보드 시작 확인 게이트 유지 |
+| 실시간 작업 목록 | 최근 100건만 담아 활성 작업이 "없음"으로 표시 | 전체 활성 작업을 추가해 표시 |
+| 디스크 여유 공간 | 조회 실패를 `0MB`로 보고 | `-1`을 보내 "확인 불가"로 표시 |
+| 노트북 감지 | WMI 조회 실패를 "데스크톱"으로 단정 | `LaptopDetectionFailed`로 "확인 불가" 표시 |
+| 문서 | 현재 테스트 수를 195개/244개로 안내 | 실제 결과인 252개로 갱신 |
+
+### 검증
+
+- `dotnet build UpdateAgent.sln -c Release`: 경고 0, 오류 0.
+- `dotnet test tests\UpdateAgent.Tests\UpdateAgent.Tests.csproj -c Release`: 252개 통과, 실패 0, 건너뜀 0.
+- `node --check app.js`, `node --check monitor.js`: 구문 오류 없음.
+- `scripts\publish.ps1`, `scripts\build-inno.ps1 -NoPublish`, `scripts\build-msi.ps1`: 성공.
+- 회귀 테스트 추가: 전체 테이블 집계 2건, 조회 실패 버전 1건, 오버레이 단계 2건,
+  Dry-run 플래그 저장 1건, Maestro 감지 실패 구분 1건, 스냅샷 플래그 전달 1건.
+  기존 스냅샷 테스트를 100건 초과 활성 작업 포함으로 강화.
+
+최종 표시 데이터 수정 이후 로컬 산출물 SHA-256(게시 전 상태, 시크릿 없는 빌드):
+
+| 파일 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.37-x64.exe` | `67803f50c644aacab151a0407e37bec42ecbcaf6fd7adb3e01624c710d0f05f7` |
+| `UpdateAgent.LabManager-Setup-0.1.37-x64.exe` | `f5cc605cc1dd66fd04cffe240c11890bf8a62343b9ec188d8f1d638d362ff2a0` |
+| `UpdateAgent.Agent-0.1.37-x64.msi` | `effa242b9f0a84eb3c6b5edc16fa9db56ea0c4dcd3b85c83f806ff2d0325296d` |
+
+### 남은 작업
+
+- 실 PC에서 토큰 교체 설치 로그를 확보한 뒤 v0.1.37 게시 여부 결정.
+
+---
+
 ## 2026-11-24 LabManager 토큰 교체 설치 실패 분석 및 v0.1.37
 
 ### 배경
@@ -38,7 +114,7 @@ v0.1.36 LabManager Setup에서 기존 설치를 업데이트하며 토큰 선택
   Inno Setup 6.7.1에서 `CompareText` 지원 확인.
 - 버전 4개 소스와 문서 예제: `0.1.37` 일치.
 
-로컬 산출물 SHA-256(게시 전 상태, 시크릿 없는 빌드):
+토큰 교체 수정 직후 로컬 산출물 SHA-256(이후 표시 데이터 수정으로 해시가 바뀜):
 
 | 파일 | SHA-256 |
 |---|---|

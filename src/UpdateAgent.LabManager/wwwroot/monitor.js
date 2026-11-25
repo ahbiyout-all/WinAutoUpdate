@@ -72,6 +72,7 @@ function formatTime(value) {
 function ago(value) {
   if (!value) return '';
   const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
   const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
   if (seconds < 60) return `${seconds}초 전`;
   if (seconds < 3600) return `${Math.round(seconds / 60)}분 전`;
@@ -156,7 +157,7 @@ function renderActiveJobs(jobs) {
         <div class="muted small mono">${escapeHtml(job.jobId)}</div>
       </td>
       <td>
-        ${chip(label, tone)}
+        ${chip(label, tone)} ${job.isDryRun ? chip('DRY RUN', 'purple') : ''}
         <div class="muted small">${escapeHtml(job.phase || '')}</div>
       </td>
       <td>
@@ -195,7 +196,9 @@ function renderAgents(agents) {
       ? `${chip('작업 중', 'blue')} ${progressBar(agent.progressPercent)}
          <div class="muted small">${escapeHtml(agent.phase || '')}</div>`
       : `<span class="muted">-</span>`;
-    const maestro = agent.maestroInstalled ? chip('설치됨', 'green') : chip('없음', 'gray');
+    const maestro = agent.maestroInstalled
+      ? chip('설치됨', 'green')
+      : agent.maestroDetectionFailed ? chip('확인 실패', 'red') : chip('없음', 'gray');
     const reboot = agent.rebootPending ? `<div class="muted small amber-text">재부팅 대기</div>` : '';
     const tr = el('tr');
     tr.innerHTML = `

@@ -15,16 +15,19 @@ public sealed class MaestroDetector
     public MaestroDetectionResult Detect()
     {
         var evidence = new List<string>();
-        var services = FindServices(evidence);
+        var probeFailed = false;
+        var services = FindServices(evidence, ref probeFailed);
         var processes = FindProcesses(evidence);
         var paths = FindInstallPaths(evidence);
-        var uninstall = FindUninstallEntries(evidence);
+        var uninstall = FindUninstallEntries(evidence, ref probeFailed);
 
         var installed = services.Count > 0 || paths.Count > 0 || uninstall > 0;
 
         return new MaestroDetectionResult
         {
             Installed = installed,
+            // 흔적이 없더라도 주요 조회가 실패했다면 "미설치"가 아니라 "확인 불가"로 표시한다.
+            DetectionFailed = !installed && probeFailed,
             Evidence = evidence,
             Services = services,
             Processes = processes,
@@ -33,7 +36,7 @@ public sealed class MaestroDetector
         };
     }
 
-    private static List<string> FindServices(List<string> evidence)
+    private static List<string> FindServices(List<string> evidence, ref bool probeFailed)
     {
         var found = new List<string>();
         try
@@ -64,6 +67,7 @@ public sealed class MaestroDetector
         }
         catch
         {
+            probeFailed = true;
             // 레지스트리 접근 실패는 감지 실패로 처리한다.
         }
 
@@ -131,7 +135,7 @@ public sealed class MaestroDetector
         return found;
     }
 
-    private static int FindUninstallEntries(List<string> evidence)
+    private static int FindUninstallEntries(List<string> evidence, ref bool probeFailed)
     {
         var count = 0;
         var keys = new[]
@@ -165,7 +169,8 @@ public sealed class MaestroDetector
             }
             catch
             {
-                // ignore
+                probeFailed = true;
+                // Uninstall 레지스트리 접근 실패도 감지 실패로 기록한다.
             }
         }
 

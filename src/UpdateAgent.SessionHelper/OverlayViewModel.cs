@@ -114,21 +114,25 @@ public sealed class OverlayViewModel : INotifyPropertyChanged
 
     public void Apply(JobSummary summary)
     {
-        Phase = summary.State switch
-        {
-            UpdateJobState.Pending => "업데이트 준비 중",
-            UpdateJobState.Preflight => "사전 점검 중",
-            UpdateJobState.Scanning => "업데이트 검색 중",
-            UpdateJobState.Downloading => "업데이트 다운로드 중",
-            UpdateJobState.Installing => "업데이트 설치 중",
-            UpdateJobState.PendingReboot => "재부팅 준비",
-            UpdateJobState.Rebooting => "재부팅 중",
-            UpdateJobState.Paused => "잠시 일시중지됨",
-            UpdateJobState.Completed => "업데이트 완료",
-            UpdateJobState.Failed => "업데이트 실패",
-            UpdateJobState.Cancelled => "업데이트 취소됨",
-            _ => summary.Phase,
-        };
+        // 에이전트가 보고한 실제 단계를 우선 표시한다. 상태에서 만든 일반 문구는
+        // 값이 없을 때만 쓴다(예: "강제 중단됨", "복원 위험"이 "취소됨"/"사전 점검 중"으로 바뀌지 않게).
+        Phase = string.IsNullOrWhiteSpace(summary.Phase)
+            ? summary.State switch
+            {
+                UpdateJobState.Pending => "업데이트 준비 중",
+                UpdateJobState.Preflight => "사전 점검 중",
+                UpdateJobState.Scanning => "업데이트 검색 중",
+                UpdateJobState.Downloading => "업데이트 다운로드 중",
+                UpdateJobState.Installing => "업데이트 설치 중",
+                UpdateJobState.PendingReboot => "재부팅 준비",
+                UpdateJobState.Rebooting => "재부팅 중",
+                UpdateJobState.Paused => "잠시 일시중지됨",
+                UpdateJobState.Completed => "업데이트 완료",
+                UpdateJobState.Failed => "업데이트 실패",
+                UpdateJobState.Cancelled => "업데이트 취소됨",
+                _ => "",
+            }
+            : summary.Phase;
 
         var progress = UpdateAgent.Guards.ProgressGuard.Display(summary.ProgressPercent);
         PercentText = $"{progress}%";

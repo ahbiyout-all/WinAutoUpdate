@@ -43,7 +43,8 @@ public sealed record AppUpdateInfo
         CheckSucceeded = false,
         UpdateAvailable = false,
         CurrentVersion = currentVersion,
-        LatestVersion = currentVersion,
+        // 조회에 실패했으면 최신 버전을 알 수 없다. 현재 버전을 최신인 것처럼 채우지 않는다.
+        LatestVersion = "",
         ReleaseUrl = UpdateAgentConstants.GitHubReleasesUrl,
         RepositoryUrl = UpdateAgentConstants.GitHubRepositoryUrl,
         Error = error,
