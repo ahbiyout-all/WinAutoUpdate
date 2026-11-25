@@ -22,7 +22,19 @@
 | 위 동일 | 단계 안내 문구에 "언인스톨 완료 후 설치" 순서 명시 |
 | 버전 4개 소스 | `0.1.37` → `0.1.38` 상향 |
 
-검증: `scripts\build-inno.ps1 -NoPublish` 컴파일 성공.
+검증: `dotnet test` 252개 통과, `scripts\build-inno.ps1 -NoPublish`, `scripts\build-msi.ps1` 성공.
+
+### 릴리스 결과
+
+- 커밋: `2bab9c7`, 태그: `v0.1.38`
+- 워크플로: `45599512916` 성공 (4m57s)
+- Release: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.38
+
+| 산출물 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.38-x64.exe` | `de801f7aa931d98314b279989d6263260aa767771f439396a606cc6614547d86` |
+| `UpdateAgent.LabManager-Setup-0.1.38-x64.exe` | `49bec231388229f732c75e7fdc7567f7100173748b93ba73b0cd2b41c73d44ff` |
+| `UpdateAgent.Agent-0.1.38-x64.msi` | `d966d56186dfecdafc859fd22df45cc8fdf52726b3bac69281053e027c32296b` |
 
 ---
 
