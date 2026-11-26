@@ -31,6 +31,18 @@
 - `.github/workflows/release.yml` YAML 파싱 성공, `app.js`/`monitor.js` 구문 검사 성공
 - 두 `.iss` 파일 UTF-8 BOM 유지
 
+### 릴리스 결과
+
+- 커밋: `b080f8b` (master push 완료), 태그: `v0.1.40`
+- 워크플로: `45808236329` 성공 (3m54s)
+- Release: https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.40
+
+| 산출물 | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.40-x64.exe` | `af7a8155ce7a08531da8a6deae821a48bb5d2442af40c8b3f93d781770c4bbff` |
+| `UpdateAgent.LabManager-Setup-0.1.40-x64.exe` | `99ac37af5eaff3f87e2fc60febb1f2d3f25b4fea227040d9700c6e9de4e97ab6` |
+| `UpdateAgent.Agent-0.1.40-x64.msi` | `7fec45c1d783750dd37ed9ccdb3401cfc078a57e04e170854dcaa36bac48e7c3` |
+
 ---
 
 ## 2026-11-26 자아성찰·심층 감사 50회 (결함 68건 수정)
