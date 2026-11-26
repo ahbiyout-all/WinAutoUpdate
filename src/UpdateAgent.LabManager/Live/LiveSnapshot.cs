@@ -45,7 +45,19 @@ public sealed record LiveSnapshot(
     int ActiveJobCount,
     int AttentionCount,
     IReadOnlyList<LiveAgentView> Agents,
-    IReadOnlyList<LiveJobView> Jobs);
+    IReadOnlyList<LiveJobView> Jobs,
+    /// <summary>마지막 체크인이 기준 시각보다 90초 이상 오래된 에이전트 수.</summary>
+    int StaleCount = 0,
+    /// <summary>오래됨 판정과 표시에 사용한 스냅샷 기준 시각(UTC). 구 버전 호환을 위해 null 허용.</summary>
+    DateTimeOffset? SnapshotAt = null)
+{
+    /// <summary>오래됨 판정 기준(초). 90초를 넘기면 오래된 체크인으로 본다.</summary>
+    public const int StaleThresholdSeconds = 90;
+
+    /// <summary>순수 판정 함수. 미래 시각(시계 차이)은 오래됨으로 처리하지 않는다.</summary>
+    public static bool IsStale(DateTimeOffset lastSeen, DateTimeOffset now) =>
+        now - lastSeen > TimeSpan.FromSeconds(StaleThresholdSeconds);
+}
 
 public static class LiveSnapshotBuilder
 {
@@ -61,6 +73,10 @@ public static class LiveSnapshotBuilder
         var activeJobs = await store.GetActiveJobsAsync(cancellationToken).ConfigureAwait(false);
         var recentIds = recentJobs
             .Select(job => job.Summary.JobId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // 텔레메트리의 현재 작업이 비어 있어도 DB에 활성 작업이 있으면 모니터는 작업 중으로 표시해야 한다.
+        var activeAgentIds = activeJobs
+            .Select(job => job.Summary.AgentId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var jobs = recentJobs
             .Concat(activeJobs.Where(job => !recentIds.Contains(job.Summary.JobId)))
@@ -85,7 +101,8 @@ public static class LiveSnapshotBuilder
                     agent.Agent.MaestroDetectionFailed ||
                         agent.Telemetry.Maestro?.DetectionFailed == true,
                     agent.Telemetry.RebootPending,
-                    current is not null && JobStateRules.IsActive(current.State.ToString()),
+                    (current is not null && JobStateRules.IsActive(current.State.ToString())) ||
+                        activeAgentIds.Contains(agent.Agent.AgentId),
                     agent.LastSeen);
             })
             .OrderBy(a => a.MachineName, StringComparer.OrdinalIgnoreCase)
@@ -110,14 +127,19 @@ public static class LiveSnapshotBuilder
                 job.Summary.Message))
             .ToList();
 
+        // 모든 판정에 동일한 기준 시각을 사용해야 스냅샷 안에서 오래됨 상태가 일관된다.
+        var snapshotAt = UtcTimestamps.Now;
+
         return new LiveSnapshot(
-            UtcTimestamps.Now,
+            snapshotAt,
             agentViews.Count,
             agentViews.Count(a => a.Online),
             agentViews.Count(a => JobStateRules.IsBusy(a.State)),
             activeJobCount,
             attentionCount,
             agentViews,
-            jobViews);
+            jobViews,
+            agentViews.Count(a => LiveSnapshot.IsStale(a.LastSeen, snapshotAt)),
+            snapshotAt);
     }
 }

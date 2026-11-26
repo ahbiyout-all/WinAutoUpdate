@@ -52,7 +52,7 @@ function Resolve-Secret {
         [string]$Prompt
     )
 
-    if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value.Trim() }
+    if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value.TrimStart([char]0xFEFF).Trim() }
 
     if (-not [string]::IsNullOrWhiteSpace($File)) {
         if (-not (Test-Path -LiteralPath $File)) { throw "Secret file not found: $File" }
@@ -61,7 +61,7 @@ function Resolve-Secret {
 
     if (-not [string]::IsNullOrWhiteSpace($EnvName)) {
         $fromEnv = [Environment]::GetEnvironmentVariable($EnvName, "Process")
-        if (-not [string]::IsNullOrWhiteSpace($fromEnv)) { return $fromEnv.Trim() }
+        if (-not [string]::IsNullOrWhiteSpace($fromEnv)) { return $fromEnv.TrimStart([char]0xFEFF).Trim() }
     }
 
     $secure = Read-Host -AsSecureString $Prompt

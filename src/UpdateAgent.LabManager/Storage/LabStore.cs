@@ -303,6 +303,7 @@ public sealed class LabStore
                              created_at, updated_at, summary_json, detail_json)
             VALUES($id, $agent, $machine, $state, $phase, $progress, $created, $updated, $summary, NULL)
             ON CONFLICT(job_id) DO UPDATE SET
+                machine_name = excluded.machine_name,
                 state = excluded.state,
                 phase = excluded.phase,
                 progress = excluded.progress,

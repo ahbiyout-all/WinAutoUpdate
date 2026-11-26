@@ -73,6 +73,10 @@ public static class AgentCheckInHandler
                 StatusCodes.Status400BadRequest, Error: "작업 ID 형식이 올바르지 않습니다.");
         }
 
+        // 거부/오버사이즈 응답에도 정책을 함께 돌려줘야 학생 PC가 서버 정책을 캐시할 수 있다.
+        var effective = await agentPolicies.GetEffectiveAsync(
+            agentId, request.Agent.Os, cancellationToken);
+
         // 거부 응답에도 모든 결과 ID를 ack로 돌려줘야 에이전트 큐가 영구히 막히지 않는다.
         if (commandResults.Count > MaxCommandResultsPerCheckIn)
         {
@@ -80,7 +84,8 @@ public static class AgentCheckInHandler
                 "agent", "command-result-batch-rejected", request.Agent.MachineName,
                 $"명령 결과 {commandResults.Count}건이 상한 {MaxCommandResultsPerCheckIn}건을 초과",
                 cancellationToken);
-            return AcknowledgeAll(receivedAt, commandResults, "명령 결과 배치가 너무 큽니다.");
+            return AcknowledgeAll(
+                receivedAt, commandResults, "명령 결과 배치가 너무 큽니다.", effective);
         }
 
         var foreignResults = commandResults
@@ -92,7 +97,8 @@ public static class AgentCheckInHandler
                 "agent", "command-result-rejected",
                 $"{request.Agent.MachineName}/{foreignResults.Count}",
                 "다른 에이전트의 명령 결과 제출", cancellationToken);
-            return AcknowledgeAll(receivedAt, commandResults, "자신의 명령 결과만 제출할 수 있습니다.");
+            return AcknowledgeAll(
+                receivedAt, commandResults, "자신의 명령 결과만 제출할 수 있습니다.", effective);
         }
 
         // 검증을 통과한 체크인만 에이전트 정보를 갱신한다.
@@ -196,7 +202,7 @@ public static class AgentCheckInHandler
             }
             else
             {
-                var validated = JobStateGuard.Normalize(summary, receivedAt);
+                var validated = JobStateGuard.Normalize(summary, receivedAt, previous?.Summary);
                 if (request.Telemetry.CurrentJobDetail is { } detail)
                 {
                     // 상세의 요약은 검증된 요약으로 교체해 별도로 위조된 값이 저장되지 않게 한다.
@@ -243,9 +249,6 @@ public static class AgentCheckInHandler
             cancellationToken);
 
         // PC별 저장 정책이 있으면 그것을, 없으면 서버 기본 정책을 사용한다.
-        // 에이전트가 보고한 OS로 지원되지 않는 옵션을 여기서도 제거한다.
-        var effective = await agentPolicies.GetEffectiveAsync(
-            request.Agent.AgentId, request.Agent.Os, cancellationToken);
         var policy = effective.Policy;
 
         // 체크인으로 에이전트/작업 상태가 바뀌었음을 모니터에 알린다.
@@ -266,7 +269,8 @@ public static class AgentCheckInHandler
     private static CheckInProcessingResult AcknowledgeAll(
         DateTimeOffset serverTime,
         IReadOnlyList<CommandResult> results,
-        string notice) =>
+        string notice,
+        EffectivePolicy effective) =>
         new(StatusCodes.Status200OK,
             new AgentCheckInResponse
             {
@@ -279,6 +283,8 @@ public static class AgentCheckInHandler
                     })
                     .ToList(),
                 Notice = notice,
+                Policy = effective.Policy,
+                MaestroManualConfirmationRequired = effective.Policy.RequireMaestroManualConfirmation,
             });
 
     private static async Task FailJobForRejectedCommandAsync(

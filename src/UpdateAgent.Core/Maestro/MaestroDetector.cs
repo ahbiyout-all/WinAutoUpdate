@@ -21,7 +21,7 @@ public sealed class MaestroDetector
         var paths = FindInstallPaths(evidence);
         var uninstall = FindUninstallEntries(evidence, ref probeFailed);
 
-        var installed = services.Count > 0 || paths.Count > 0 || uninstall > 0;
+        var installed = HasInstallationEvidence(services.Count, processes.Count, paths.Count, uninstall);
 
         return new MaestroDetectionResult
         {
@@ -35,6 +35,14 @@ public sealed class MaestroDetector
             WuFeatureStatus = MaestroWuFeatureStatus.Unknown,
         };
     }
+
+    /// <summary>수집한 흔적이 설치를 입증하는지. 프로세스 흔적도 설치 증거로 취급한다.</summary>
+    public static bool HasInstallationEvidence(
+        int services,
+        int processes,
+        int installPaths,
+        int uninstallEntries) =>
+        services > 0 || processes > 0 || installPaths > 0 || uninstallEntries > 0;
 
     private static List<string> FindServices(List<string> evidence, ref bool probeFailed)
     {

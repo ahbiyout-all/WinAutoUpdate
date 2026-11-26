@@ -35,7 +35,9 @@ public sealed class SqliteJobStore : IJobStore
     public SqliteJobStore(string? databasePath = null)
     {
         var path = databasePath ?? Path.Combine(UpdateAgent.Shared.UpdateAgentConstants.DataDirectory, "agent.db");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        // 파일 이름만 전달되면 GetDirectoryName이 빈 문자열을 반환하므로 생성하지 않는다.
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = path,

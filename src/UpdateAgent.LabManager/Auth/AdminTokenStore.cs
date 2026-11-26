@@ -15,15 +15,23 @@ namespace UpdateAgent.LabManager.Auth;
 /// </summary>
 public sealed class AdminTokenStore
 {
+    /// <summary>토큰 회전이 필요한 기준 기간.</summary>
+    public const int RotationAfterDays = 90;
+
     private readonly IOptionsMonitor<LabManagerOptions>? _options;
     private readonly string _overridePath;
     private readonly ILogger<AdminTokenStore> _logger;
     private readonly object _sync = new();
     private readonly SemaphoreSlim _writeSync = new(1, 1);
     private readonly bool _restrictAcl;
+    private readonly TokenAuditLog _audit;
+    private readonly Func<DateTimeOffset> _clock;
+    private readonly Action<string, string, bool>? _moveFile;
     private string? _overrideToken;
     private string? _overrideFingerprint;
     private bool _hasOverrideFingerprint;
+    private DateTimeOffset? _lastChangedAt;
+    private volatile bool _failClosed;
 
     /// <summary>프로덕션 생성자. DI가 사용한다.</summary>
     public AdminTokenStore(
@@ -33,20 +41,39 @@ public sealed class AdminTokenStore
     {
     }
 
-    /// <summary>테스트용 생성자.override 파일 경로를 직접 지정한다.</summary>
+    /// <summary>테스트용 생성자. override 파일 경로·감사 로그·시계를 직접 지정한다.</summary>
     public AdminTokenStore(
         IOptionsMonitor<LabManagerOptions> options,
         string overridePath,
         ILogger<AdminTokenStore> logger,
-        bool restrictAcl = false)
+        bool restrictAcl = false,
+        TokenAuditLog? auditLog = null,
+        Func<DateTimeOffset>? clock = null,
+        Action<string, string, bool>? moveFile = null)
     {
         _options = options;
         _overridePath = overridePath;
         _logger = logger;
         _restrictAcl = restrictAcl;
+        _clock = clock ?? (() => UtcClock.Now);
+        _moveFile = moveFile;
+        _audit = auditLog ?? new TokenAuditLog(ResolveAuditPath(overridePath), logger, restrictAcl, clock);
         _overrideToken = LoadOverrideToken();
         CaptureFingerprint();
+        if (_overrideToken is not null)
+        {
+            _lastChangedAt = ReadOverrideLastWriteTimeUtc();
+            _audit.Record(TokenAuditLog.Loaded, TokenAuditLog.Fingerprint(_overrideToken));
+        }
     }
+
+    /// <summary>대시보드에 표시하는 현재 토큰 상태.</summary>
+    public sealed record AdminTokenStatus(
+        bool IsPlaceholder,
+        bool HasRuntimeOverride,
+        DateTimeOffset? LastChangedAt,
+        bool RotationDue,
+        bool AuditAvailable);
 
     /// <summary>현재 유효한 관리자 토큰. 런타임 override가 있으면 그것을 우선한다.</summary>
     public string CurrentToken
@@ -54,11 +81,43 @@ public sealed class AdminTokenStore
         get
         {
             RefreshOverrideIfChanged();
+            if (_failClosed) return string.Empty;
+
+            string token;
             lock (_sync)
             {
-                if (!string.IsNullOrWhiteSpace(_overrideToken)) return _overrideToken!;
+                token = !string.IsNullOrWhiteSpace(_overrideToken)
+                    ? _overrideToken!
+                    : _options?.CurrentValue.AdminToken ?? string.Empty;
             }
-            return _options?.CurrentValue.AdminToken ?? string.Empty;
+
+            // 설정 파일이 다시 로드되어 에이전트 토큰과 같아지면 학생도 관리자 API를 호출할 수 있다.
+            // 시작 시 검사만으로 부족하므로 요청마다 사용할 토큰을 다시 확인한다.
+            return CollidesWithAgentToken(token) ? string.Empty : token;
+        }
+    }
+
+    /// <summary>토큰 상태를 한 번의 조회로 일관되게 반환한다.</summary>
+    public AdminTokenStatus GetStatus()
+    {
+        RefreshOverrideIfChanged();
+        lock (_sync)
+        {
+            var token = _failClosed
+                ? string.Empty
+                : !string.IsNullOrWhiteSpace(_overrideToken)
+                    ? _overrideToken!
+                    : _options?.CurrentValue.AdminToken ?? string.Empty;
+            var effective = CollidesWithAgentToken(token) ? string.Empty : token;
+            var lastChangedAt = _lastChangedAt;
+            var rotationDue = lastChangedAt is { } changed &&
+                _clock() - changed > TimeSpan.FromDays(RotationAfterDays);
+            return new AdminTokenStatus(
+                TokenGuard.IsPlaceholder(effective),
+                !_failClosed && !string.IsNullOrWhiteSpace(_overrideToken),
+                lastChangedAt,
+                rotationDue,
+                _audit.Available);
         }
     }
 
@@ -68,7 +127,7 @@ public sealed class AdminTokenStore
         get
         {
             RefreshOverrideIfChanged();
-            lock (_sync) return !string.IsNullOrWhiteSpace(_overrideToken);
+            lock (_sync) return !_failClosed && !string.IsNullOrWhiteSpace(_overrideToken);
         }
     }
 
@@ -83,14 +142,23 @@ public sealed class AdminTokenStore
     {
         var candidate = TokenGuard.Normalize(newToken);
         if (candidate.Length < TokenGuard.MinimumLength)
+        {
+            Reject();
             throw new ArgumentException($"관리자 토큰은 {TokenGuard.MinimumLength}자 이상이어야 합니다.", nameof(newToken));
+        }
 
         if (!AllowDefaultTokens && TokenGuard.IsPlaceholder(candidate))
+        {
+            Reject();
             throw new ArgumentException("기본값/샘플 토큰은 관리자 토큰으로 사용할 수 없습니다.", nameof(newToken));
+        }
 
         // 관리자 토큰이 에이전트 토큰과 같아지면 학생 토큰으로 관리자 API를 호출할 수 있다.
         if (CollidesWithAgentToken(candidate))
+        {
+            Reject();
             throw new ArgumentException("관리자 토큰은 에이전트 토큰과 달라야 합니다.", nameof(newToken));
+        }
 
         var directory = Path.GetDirectoryName(_overridePath);
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
@@ -99,31 +167,105 @@ public sealed class AdminTokenStore
         await _writeSync.WaitAsync(cancellationToken);
         try
         {
-            var tempPath = _overridePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            var json = JsonSerializer.Serialize(new AdminTokenFile { AdminToken = candidate });
-            try
-            {
-                await File.WriteAllTextAsync(tempPath, json, new System.Text.UTF8Encoding(false), cancellationToken);
-                if (_restrictAcl) RestrictAcl(tempPath);
-                File.Move(tempPath, _overridePath, overwrite: true);
-            }
-            finally
-            {
-                if (File.Exists(tempPath)) File.Delete(tempPath);
-            }
-
+            string? previousToken;
+            DateTimeOffset? previousChangedAt;
             lock (_sync)
             {
-                // 저장 직후 새 값이 즉시 인증에 쓰이도록 메모리와 파일 지문을 함께 갱신한다.
-                _overrideToken = candidate;
-                CaptureFingerprintLocked();
+                previousToken = _failClosed ? null : _overrideToken;
+                previousChangedAt = _lastChangedAt;
             }
+
+            try
+            {
+                await WriteAtomicallyAsync(candidate, cancellationToken);
+                lock (_sync)
+                {
+                    if (_failClosed)
+                        throw new InvalidOperationException("감사 로그 복구 실패 후에는 토큰을 변경할 수 없습니다.");
+
+                    // 저장 직후 새 값이 즉시 인증에 쓰이도록 메모리와 파일 지문을 함께 갱신한다.
+                    _overrideToken = candidate;
+                    _lastChangedAt = _clock();
+                    CaptureFingerprintLocked();
+                }
+                _audit.Record(TokenAuditLog.Changed, TokenAuditLog.Fingerprint(candidate));
+            }
+            catch (Exception ex)
+            {
+                if (previousToken is not null)
+                {
+                    try
+                    {
+                        // 이전 토큰은 디스크 백업 없이 메모리에서만 유지한 뒤 같은 원자적 경로로 되돌린다.
+                        await WriteAtomicallyAsync(previousToken, cancellationToken);
+                        _audit.Record(TokenAuditLog.RolledBack, TokenAuditLog.Fingerprint(previousToken));
+                        lock (_sync)
+                        {
+                            _overrideToken = previousToken;
+                            _lastChangedAt = previousChangedAt;
+                            CaptureFingerprintLocked();
+                        }
+                    }
+                    catch (Exception rollbackEx)
+                    {
+                        EnterFailClosed(rollbackEx);
+                        throw new InvalidOperationException(
+                            "관리자 토큰 저장 실패 후 이전 토큰 복구에도 실패해 인증을 중단했습니다.", rollbackEx);
+                    }
+                }
+                else
+                {
+                    EnterFailClosed(ex);
+                }
+                throw new InvalidOperationException("관리자 토큰을 저장하지 못했습니다.", ex);
+            }
+
+            _logger.LogInformation("관리자 토큰이 대시보드에서 변경되었습니다. (길이: {Length})", candidate.Length);
         }
         finally
         {
             _writeSync.Release();
         }
-        _logger.LogInformation("관리자 토큰이 대시보드에서 변경되었습니다. (길이: {Length})", candidate.Length);
+    }
+
+    /// <summary>거부된 요청은 지문 없이 감사 로그에 남긴다.</summary>
+    private void Reject() => _audit.Record(TokenAuditLog.Rejected);
+
+    /// <summary>복구까지 실패하면 토큰을 비워 조용히 이전 값으로 돌아가지 않게 한다.</summary>
+    private void EnterFailClosed(Exception reason)
+    {
+        lock (_sync)
+        {
+            _failClosed = true;
+            _overrideToken = null;
+            _lastChangedAt = null;
+            _overrideFingerprint = null;
+            _hasOverrideFingerprint = false;
+        }
+        _logger.LogError(reason, "관리자 토큰 저장·복구 실패로 인증 토큰을 비웠습니다.");
+    }
+
+    /// <summary>임시 파일 + 원자적 이동으로 토큰 파일을 교체한다.</summary>
+    private async Task WriteAtomicallyAsync(string token, CancellationToken cancellationToken)
+    {
+        var tempPath = _overridePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        var json = JsonSerializer.Serialize(new AdminTokenFile { AdminToken = token });
+        try
+        {
+            await File.WriteAllTextAsync(tempPath, json, new System.Text.UTF8Encoding(false), cancellationToken);
+            if (_restrictAcl) RestrictAcl(tempPath);
+            MoveFile(tempPath, _overridePath);
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
+    }
+
+    private void MoveFile(string tempPath, string destination)
+    {
+        if (_moveFile is not null) _moveFile(tempPath, destination, true);
+        else File.Move(tempPath, destination, overwrite: true);
     }
 
     /// <summary>토큰 파일을 관리자/SYSTEM만 읽을 수 있도록 제한한다.</summary>
@@ -177,11 +319,18 @@ public sealed class AdminTokenStore
     private void RefreshOverrideIfChanged()
     {
         string? fingerprint;
+        DateTimeOffset? fileChangedAt = null;
         try
         {
-            fingerprint = File.Exists(_overridePath)
-                ? Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(_overridePath)))
-                : null;
+            if (File.Exists(_overridePath))
+            {
+                fingerprint = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(_overridePath)));
+                fileChangedAt = new DateTimeOffset(File.GetLastWriteTimeUtc(_overridePath), TimeSpan.Zero);
+            }
+            else
+            {
+                fingerprint = null;
+            }
         }
         catch (Exception ex)
         {
@@ -191,6 +340,8 @@ public sealed class AdminTokenStore
 
         lock (_sync)
         {
+            if (_failClosed) return;
+
             if (fingerprint is null)
             {
                 if (_hasOverrideFingerprint || _overrideToken is not null)
@@ -198,6 +349,7 @@ public sealed class AdminTokenStore
                     _hasOverrideFingerprint = false;
                     _overrideFingerprint = null;
                     _overrideToken = null;
+                    _lastChangedAt = null;
                 }
                 return;
             }
@@ -208,6 +360,7 @@ public sealed class AdminTokenStore
             _overrideFingerprint = fingerprint;
             _hasOverrideFingerprint = true;
             _overrideToken = LoadOverrideToken();
+            _lastChangedAt = _overrideToken is null ? null : fileChangedAt;
         }
     }
 
@@ -275,6 +428,25 @@ public sealed class AdminTokenStore
 
     private bool CollidesWithAgentToken(string token) =>
         TokenGuard.FixedTimeEquals(token, _options?.CurrentValue.AgentToken);
+
+    private DateTimeOffset? ReadOverrideLastWriteTimeUtc()
+    {
+        try
+        {
+            return File.Exists(_overridePath)
+                ? new DateTimeOffset(File.GetLastWriteTimeUtc(_overridePath), TimeSpan.Zero)
+                : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "런타임 관리자 토큰 변경 시각을 확인할 수 없습니다: {Path}", _overridePath);
+            return null;
+        }
+    }
+
+    private static string ResolveAuditPath(string overridePath) => Path.Combine(
+        Path.GetDirectoryName(overridePath) ?? string.Empty,
+        "runtime-admin-token.audit.log");
 
     private static string ResolveOverridePath() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

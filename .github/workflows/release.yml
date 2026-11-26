@@ -64,7 +64,7 @@ jobs:
 
           $tag = "v$version"
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            if ($env:GITHUB_REF_NAME -ne $tag) {
+            if ($env:GITHUB_REF_NAME -cne $tag) {
               throw "Tag $env:GITHUB_REF_NAME does not match Directory.Build.props version $version."
             }
           }
@@ -116,8 +116,17 @@ jobs:
             throw 'ISCC.exe was not found after installing Inno Setup.'
           }
 
-          $isccVersionText = (& $iscc /? 2>$null | Select-Object -First 1)
-          if ($isccVersionText -notmatch 'Inno Setup\s+6') {
+          # ISCC prints its version/usage text to stderr; discarding stderr makes
+          # the check fail even when Inno Setup 6 is installed.
+          $previousErrorAction = $ErrorActionPreference
+          try {
+            $ErrorActionPreference = 'SilentlyContinue'
+            $isccVersionText = (& $iscc /? 2>&1 | Select-Object -First 1)
+          }
+          finally {
+            $ErrorActionPreference = $previousErrorAction
+          }
+          if ("$isccVersionText" -notmatch 'Inno Setup\s+6') {
             throw "Inno Setup 6 compiler is required, found: $isccVersionText"
           }
           Write-Host "ISCC: $iscc ($isccVersionText)"

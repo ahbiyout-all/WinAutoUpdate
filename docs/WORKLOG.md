@@ -5,6 +5,68 @@
 
 ---
 
+## 2026-11-26 다음 단계 기능 개선 설계 및 적용
+
+### 설계
+
+`docs/NEXT-STAGE-FEATURES.md`에 4개 영역(토큰·보안 수명주기, 무인 배포·운영 자동화,
+대시보드·실시간 모니터링, 오프라인·실패 복구)의 현재 상태·설계·수용 기준을 확정했습니다.
+`README.md` 문서 표와 본문에 연결했습니다.
+
+### 적용
+
+| 영역 | 수정 파일 | 적용 내용 |
+|---|---|---|
+| 토큰·보안 수명주기 | `Auth/TokenAuditLog.cs`(신규), `Auth/AdminTokenStore.cs` | UTC·이벤트·지문만 기록하는 감사 로그(원문 금지, 256 KiB 상한, ACL 제한), 90일 회전 상태(`LastChangedAt`/`RotationDue`/`AuditAvailable`), 저장 실패 시 이전 토큰 복구 및 `rolled-back`, 거부 이벤트는 지문 없이 기록 |
+| 무인 배포·운영 자동화 | `scripts/deploy-agents.ps1` | 생성 전 `/api/health` 사전 점검과 토큰 8자·placeholder 검증, `deployment-report.json`(해시만 기록, 원문 금지), `-Verify` 무쓰기 검증 모드, `-SkipPreflight` |
+| 대시보드·실시간 모니터링 | `Live/LiveSnapshot.cs`, `wwwroot/monitor.js`, `app.js`, `index.html`, `styles.css` | 90초 기준 `StaleCount`/`IsStale`, `없음`/`확인 불가` 명시, 상태 필터와 검색 결합, 최종 갱신·재연결 횟수 표시, 정상 종료 시에도 재연결 |
+| 오프라인·실패 복구 | `Shared/Comms/CheckInRetryPolicy.cs`(신규), `Service/Comms/LabManagerClient.cs`, `Worker.cs` | 순수 C# 지수 백오프(기본 30초 → 최대 300초), 연속 실패·마지막 실패 시각 추적, 토큰/URL 자격증명 마스킹, 복구 후 `오프라인 복구:` 알림 |
+
+### 검증
+
+- `dotnet test tests\UpdateAgent.Tests\UpdateAgent.Tests.csproj -c Release`: **313개 통과, 0 실패**
+  (감사 50회 회귀 3개 파일 + 기능 개선 회귀 3개 파일 포함)
+- `scripts\*.ps1` 13개 PowerShell 파서 오류 0, 배포 스크립트 기능 테스트(생성→검증 성공,
+  설치 파일 1바이트 변조 후 검증 실패, 토큰 원문 비포함, 생성 전 실패 시 산출물 없음)
+- `.github/workflows/release.yml` YAML 파싱 성공, `app.js`/`monitor.js` 구문 검사 성공
+- 두 `.iss` 파일 UTF-8 BOM 유지
+
+---
+
+## 2026-11-26 자아성찰·심층 감사 50회 (결함 68건 수정)
+
+### 방법
+
+인스톨러 / 스크립트·릴리스 워크플로 / Core·Shared / 에이전트 런타임 /
+LabManager 서버·웹 / 문서의 6개 영역을 병렬로 감사했습니다.
+가설이나 추정이 아닌 **코드로 입증된 결함만** 수정했고, 영역별로 신규 회귀 테스트를 추가했습니다.
+
+### 수정 건수
+
+| 영역 | 수정 | 주요 내용 |
+|---|---:|---|
+| 인스톨러(`.iss`) | 12 | BOM/따옴표 경로 처리, 서비스 복구 실패 fail-closed, 언인스톨 실패 중단, 방화벽 포트 고정, 토큰 동일 값 거부 |
+| 스크립트·워크플로 | 12 | 대소문자 구분 태그 검증, 시크릿 정규식, 기존 태그 재사용 차단, INI 토큰 파일 덮어쓰기 방지, BOM 트리밍, 원자적 설정 저장, 포트 범위 검증 |
+| Core·Shared | 13 | dry-run 재개/재부팅 플래그, 승인되지 않은 기능 업데이트 차단, Maestro 프로세스 증거, 사전검사 Warn, 동시성, DB 경로, 릴리스 태그 검증 |
+| 에이전트 런타임 | 10 | 만료 명령 중복, 토큰·URL·명령 수 검증, 오버레이 DRY RUN/재부팅 경고, ASCII 식별자, IPv6 loopback |
+| LabManager·웹 | 11 | 작업 머신명 갱신, 서버 소유 정책 필드 보호, Maestro 게이트, 대소문자 정책 재정의, 토큰 충돌 재검증, WoL MAC 엄격 검증, 대시보드 플래그 |
+| 문서 | 10 | 방화벽·서비스 우선순위·기본 토큰·인증 범위·재게시 절차·빌드 선결 조건 등 실제 동작과 불일치 정정 |
+| **합계** | **68** | |
+
+### 회귀 테스트
+
+신규 테스트 3개 파일(`Audit50CoreTests.cs`, `Audit50AgentTests.cs`, `Audit50LabManagerTests.cs`)에
+영역별 1건씩 총 39개 테스트를 추가했습니다. 최종 `dotnet test` 결과 **291개 통과, 0 실패**입니다.
+
+### 검증
+
+- `dotnet test tests\UpdateAgent.Tests\UpdateAgent.Tests.csproj -c Release`: 291/291 통과
+- 두 `.iss` 파일 UTF-8 BOM 유지, `scripts\*.ps1` 13개 PowerShell 파서 오류 0
+- `.github/workflows/release.yml` YAML 파싱 성공, `app.js`/`monitor.js` 구문 검사 성공
+- `git diff --check`: 공백 오류 없음(CRLF 변환 경고만 존재)
+
+---
+
 ## 2026-11-25 토큰 교체 시 기존 토큰 삭제 보강 (v0.1.39)
 
 ### 요구사항

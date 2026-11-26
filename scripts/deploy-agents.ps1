@@ -14,8 +14,15 @@ passed on the command line. No token is ever placed on a command line.
 With -UseEmbeddedToken the token file is not copied and the INI contains only
 the LabManager URL; the installer uses its embedded first-install token.
 Generation is the default and performs
-no remote action. Packages can be copied to each PC (USB/RDP) or wrapped by
-PsExec/WinRM. Use -ExecuteLocal to run one package on the current PC.
+no remote action apart from a preflight check of LabManager /api/health.
+Packages can be copied to each PC (USB/RDP) or wrapped by PsExec/WinRM.
+Use -ExecuteLocal to run one package on the current PC.
+
+Generation writes deploy\agents\deployment-report.json. The report contains
+file hashes and metadata only; it never contains the token value. -Verify reads
+that report and checks the generated files without changing or regenerating
+anything. -SkipPreflight bypasses only the network health check; the token file
+is always validated for every generated deployment.
 
 .EXAMPLE
 .\scripts\deploy-agents.ps1 -InventoryCsv .\scripts\agents.sample.csv -AgentTokenFile .\secure\agent-token.txt
@@ -25,15 +32,27 @@ PsExec/WinRM. Use -ExecuteLocal to run one package on the current PC.
 
 # Use the embedded first-install token when the setup exe was built with secrets.
 .\scripts\deploy-agents.ps1 -InventoryCsv .\inventory.csv -UseEmbeddedToken
+
+# Skip the remote health check for an offline staging run.
+.\scripts\deploy-agents.ps1 -InventoryCsv .\inventory.csv -AgentTokenFile .\secure\agent-token.txt -SkipPreflight
+
+# Check an existing output folder against its report (no files are modified).
+.\scripts\deploy-agents.ps1 -Verify
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
+    # Required for generation, not used by -Verify.
     [string]$InventoryCsv,
 
     [string]$AgentTokenFile,
 
     [switch]$UseEmbeddedToken,
+
+    # Skips the LabManager /api/health check only; token validation still runs.
+    [switch]$SkipPreflight,
+
+    # Checks the deployment report and files without generating or modifying anything.
+    [switch]$Verify,
 
     [string]$InstallerPath,
     [string]$LabManagerUrl = 'http://labmanager:5080',
@@ -112,7 +131,209 @@ function Resolve-AgentTokenFile {
         ($lower.StartsWith('sample-') -and $lower.EndsWith('-replace-before-pilot'))) {
         throw 'The agent token is a default/sample placeholder. Generate a real token before deployment.'
     }
+    # 8 mirrors TokenGuard.MinimumLength; the installer applies the same rule.
+    $minimumTokenLength = 8
+    if ($value.Length -lt $minimumTokenLength) {
+        throw "Agent token is too short (minimum $minimumTokenLength characters): $full"
+    }
     return $full
+}
+
+function Get-InstallerVersion {
+    param([string]$Name)
+
+    if ($Name -match 'Setup-(\d+)\.(\d+)\.(\d+)-x64\.exe$') {
+        return "$($Matches[1]).$($Matches[2]).$($Matches[3])"
+    }
+    return $null
+}
+
+function Get-FileSha256 {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "File to hash not found: $Path"
+    }
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Get-SafeLabManagerUrl {
+    param([string]$Url)
+
+    # Drop userinfo before the URL reaches the report or the health check message.
+    return [regex]::Replace($Url, '^([A-Za-z][A-Za-z0-9+.\-]*://)[^/@]*@', '$1')
+}
+
+function Invoke-LabManagerHealthCheck {
+    param([string]$BaseUrl)
+
+    $healthUrl = "$BaseUrl/api/health"
+    $statusCode = 0
+    try {
+        $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        $statusCode = [int]$response.StatusCode
+    }
+    catch {
+        $responseProperty = $_.Exception.PSObject.Properties['Response']
+        if ($null -ne $responseProperty -and $null -ne $responseProperty.Value) {
+            $statusProperty = $responseProperty.Value.PSObject.Properties['StatusCode']
+            if ($null -ne $statusProperty -and $null -ne $statusProperty.Value) {
+                try { $statusCode = [int]$statusProperty.Value } catch { $statusCode = 0 }
+            }
+        }
+    }
+    if ($statusCode -lt 200 -or $statusCode -ge 300) {
+        $detail = 'no HTTP response'
+        if ($statusCode -gt 0) { $detail = "HTTP $statusCode" }
+        throw "Preflight failed: LabManager health check at $healthUrl did not return 2xx ($detail). No packages were created."
+    }
+}
+
+function Get-RequiredReportValue {
+    param([object]$Object, [string]$Name, [string]$Context)
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property -or $null -eq $property.Value) {
+        throw "$Context is missing required field '$Name'."
+    }
+    if ($property.Value -is [string] -and [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+        throw "$Context has an empty field '$Name'."
+    }
+    return $property.Value
+}
+
+function Test-PackageFolderName {
+    param([string]$Name)
+
+    if ([string]::IsNullOrWhiteSpace($Name) -or $Name -match '[\\/]' -or
+        $Name -eq '.' -or $Name -eq '..' -or
+        $Name -ne [IO.Path]::GetFileName($Name)) {
+        return $false
+    }
+    return $true
+}
+
+function Invoke-DeploymentVerification {
+    param([string]$ReportPath)
+
+    if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
+        throw "Deployment report not found: $ReportPath"
+    }
+    try {
+        $report = Get-Content -LiteralPath $ReportPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "Deployment report is not valid JSON: $ReportPath"
+    }
+    if ($null -eq $report) { throw "Deployment report is empty: $ReportPath" }
+
+    $expectedCountValue = Get-RequiredReportValue -Object $report -Name 'PackageCount' -Context 'Deployment report'
+    $expectedCount = 0
+    if (-not [int]::TryParse([string]$expectedCountValue, [ref]$expectedCount)) {
+        throw "Deployment report has an invalid PackageCount: $expectedCountValue"
+    }
+    $reportPackagesValue = Get-RequiredReportValue -Object $report -Name 'Packages' -Context 'Deployment report'
+    $reportPackages = @($reportPackagesValue)
+    if ($expectedCount -ne $reportPackages.Count) {
+        throw "PackageCount ($expectedCount) does not match the Packages array ($($reportPackages.Count))."
+    }
+    if ($expectedCount -eq 0) {
+        throw 'Deployment report contains no packages.'
+    }
+
+    $reportInstallerName = [string](Get-RequiredReportValue -Object $report -Name 'InstallerName' -Context 'Deployment report')
+    $reportInstallerSha = ([string](Get-RequiredReportValue -Object $report -Name 'InstallerSha256' -Context 'Deployment report')).ToLowerInvariant()
+    $reportLabManagerUrl = [string](Get-RequiredReportValue -Object $report -Name 'LabManagerUrl' -Context 'Deployment report')
+
+    foreach ($entry in $reportPackages) {
+        $computerName = [string](Get-RequiredReportValue -Object $entry -Name 'ComputerName' -Context 'Deployment report package')
+        $context = "Package $computerName"
+        $packageFolder = [string](Get-RequiredReportValue -Object $entry -Name 'PackageDir' -Context $context)
+        if (-not (Test-PackageFolderName -Name $packageFolder)) {
+            throw "$context has an unsafe PackageDir: $packageFolder"
+        }
+        $packageDir = Join-Path $OutputDir $packageFolder
+        if (-not (Test-Path -LiteralPath $packageDir -PathType Container)) {
+            throw "$context directory not found: $packageDir"
+        }
+
+        $installerName = [string](Get-RequiredReportValue -Object $entry -Name 'InstallerName' -Context $context)
+        if (-not [string]::Equals($installerName, $reportInstallerName, [StringComparison]::Ordinal)) {
+            throw "$context records a different installer name than the deployment report."
+        }
+        $installerSha = ([string](Get-RequiredReportValue -Object $entry -Name 'InstallerSha256' -Context $context)).ToLowerInvariant()
+        if (-not [string]::Equals($installerSha, $reportInstallerSha, [StringComparison]::Ordinal)) {
+            throw "$context records a different installer hash than the deployment report."
+        }
+        $actualInstallerSha = Get-FileSha256 -Path (Join-Path $packageDir $installerName)
+        if (-not [string]::Equals($actualInstallerSha, $installerSha, [StringComparison]::Ordinal)) {
+            throw "$context installer SHA-256 mismatch: $installerName"
+        }
+
+        $configName = [string](Get-RequiredReportValue -Object $entry -Name 'ConfigName' -Context $context)
+        $configSha = ([string](Get-RequiredReportValue -Object $entry -Name 'ConfigSha256' -Context $context)).ToLowerInvariant()
+        $actualConfigSha = Get-FileSha256 -Path (Join-Path $packageDir $configName)
+        if (-not [string]::Equals($actualConfigSha, $configSha, [StringComparison]::Ordinal)) {
+            throw "$context config SHA-256 mismatch: $configName"
+        }
+
+        $tokenPresentRaw = Get-RequiredReportValue -Object $entry -Name 'TokenPresent' -Context $context
+        $tokenPresent = $false
+        if (-not [bool]::TryParse([string]$tokenPresentRaw, [ref]$tokenPresent)) {
+            throw "$context has an invalid TokenPresent value: $tokenPresentRaw"
+        }
+        $tokenNameProperty = $entry.PSObject.Properties['TokenName']
+        $tokenName = ''
+        if ($null -ne $tokenNameProperty -and $null -ne $tokenNameProperty.Value) {
+            $tokenName = [string]$tokenNameProperty.Value
+        }
+        $tokenShaProperty = $entry.PSObject.Properties['TokenSha256']
+        $tokenSha = ''
+        if ($null -ne $tokenShaProperty -and $null -ne $tokenShaProperty.Value) {
+            $tokenSha = ([string]$tokenShaProperty.Value).ToLowerInvariant()
+        }
+
+        if ($tokenPresent) {
+            if ([string]::IsNullOrWhiteSpace($tokenName)) {
+                throw "$context is marked TokenPresent but has no TokenName."
+            }
+            if ([string]::IsNullOrWhiteSpace($tokenSha)) {
+                throw "$context is marked TokenPresent but has no TokenSha256."
+            }
+            $actualTokenSha = Get-FileSha256 -Path (Join-Path $packageDir $tokenName)
+            if (-not [string]::Equals($actualTokenSha, $tokenSha, [StringComparison]::Ordinal)) {
+                throw "$context token file SHA-256 mismatch: $tokenName"
+            }
+        }
+        else {
+            if (-not [string]::IsNullOrWhiteSpace($tokenSha)) {
+                throw "$context uses an embedded token but records a TokenSha256."
+            }
+            $absentTokenName = 'agent-token.txt'
+            if (-not [string]::IsNullOrWhiteSpace($tokenName)) { $absentTokenName = $tokenName }
+            if (Test-Path -LiteralPath (Join-Path $packageDir $absentTokenName) -PathType Leaf) {
+                throw "$context uses an embedded token but contains a token file: $absentTokenName"
+            }
+        }
+    }
+
+    $versionProperty = $report.PSObject.Properties['InstallerVersion']
+    $versionText = 'not recorded'
+    if ($null -ne $versionProperty -and $null -ne $versionProperty.Value) {
+        $versionText = [string]$versionProperty.Value
+    }
+    Write-Host "Verification succeeded: $($reportPackages.Count) package(s) match the deployment report." -ForegroundColor Green
+    Write-Host "  Report: $ReportPath"
+    Write-Host "  Installer: $reportInstallerName (version $versionText)"
+    Write-Host "  LabManager: $reportLabManagerUrl"
+}
+
+if ($Verify) {
+    if ($ExecuteLocal) {
+        throw '-Verify cannot be combined with -ExecuteLocal.'
+    }
+    Invoke-DeploymentVerification -ReportPath (Join-Path $OutputDir 'deployment-report.json')
+    return
 }
 
 if ($UseEmbeddedToken -and -not [string]::IsNullOrWhiteSpace($AgentTokenFile)) {
@@ -130,7 +351,11 @@ if (-not [Uri]::TryCreate($LabManagerUrl, [UriKind]::Absolute, [ref]$uri) -or
     ($uri.Scheme -ne 'http' -and $uri.Scheme -ne 'https')) {
     throw "LabManagerUrl must be an absolute http/https URL: $LabManagerUrl"
 }
+$safeLabManagerUrl = Get-SafeLabManagerUrl -Url $LabManagerUrl
 
+if ([string]::IsNullOrWhiteSpace($InventoryCsv)) {
+    throw 'InventoryCsv is required for package generation.'
+}
 if (-not (Test-Path -LiteralPath $InventoryCsv -PathType Leaf)) {
     throw "Inventory CSV not found: $InventoryCsv"
 }
@@ -180,6 +405,12 @@ if (-not $UseEmbeddedToken) {
     $tokenPath = Resolve-AgentTokenFile -Path $AgentTokenFile
 }
 
+# Fail closed before creating the output directory or any package.
+$preflightPerformed = -not $SkipPreflight
+if ($preflightPerformed) {
+    Invoke-LabManagerHealthCheck -BaseUrl $safeLabManagerUrl
+}
+
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
 $cmdTemplate = @'
@@ -196,7 +427,11 @@ set "SETUP=%PKG%__SETUP__"
 set "TOKEN=%PKG%agent-token.txt"
 set "CONFIG=%PKG%agent-install.ini"
 set "UPGRADE=0"
-if /i "%~1"=="/Upgrade" set "UPGRADE=1"
+set "UPGRADE_FLAG="
+if /i "%~1"=="/Upgrade" (
+  set "UPGRADE=1"
+  set "UPGRADE_FLAG=/AgentTokenFile="
+)
 
 if not exist "%SETUP%" (
   echo [UpdateAgent] Installer not found: %SETUP%
@@ -209,7 +444,7 @@ if not exist "%CONFIG%" (
 __TOKEN_BLOCK__
 echo [UpdateAgent] Installing Agent for __PC__
 echo [UpdateAgent] Settings: %CONFIG%
-"%SETUP%" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART __UPGRADE_FLAG__
+"%SETUP%" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART !UPGRADE_FLAG!
 if errorlevel 1 (
   echo [UpdateAgent] Install failed with code !ERRORLEVEL!. Token file kept for retry.
   echo [UpdateAgent] Setup log: %TEMP%\Setup Log ^<date^>.txt
@@ -239,7 +474,6 @@ __TOKEN_LINE__
 if ($UseEmbeddedToken) {
     $tokenBlock = 'rem First-install token is embedded in the setup executable.'
     $tokenLine = ''
-    $upgradeFlag = ''
 }
 else {
     $tokenBlock = @'
@@ -257,11 +491,14 @@ if "!UPGRADE!"=="0" (
 )
 '@
     $tokenLine = 'AgentTokenFile=agent-token.txt'
-    # 업그레이드에서는 토큰 파일이 삭제되어 있으므로 INI의 AgentTokenFile을 빈 값으로 덮어쓴다.
-    # 토큰 값 자체는 명령줄에 오르지 않는다.
-    $upgradeFlag = '/AgentTokenFile='
+    # Only an upgrade clears the INI token reference. Passing /AgentTokenFile=
+    # on a first install would discard the copied token file and use the
+    # installer's embedded (usually empty) token instead.
 }
 
+$installerSha256 = Get-FileSha256 -Path $installer.FullName
+$installerVersion = Get-InstallerVersion -Name $installer.Name
+$reportPackages = @()
 $packages = @()
 foreach ($target in $targets) {
     $safeName = $target.SafeName
@@ -293,6 +530,14 @@ foreach ($target in $targets) {
         if ($LASTEXITCODE -ne 0) {
             throw "Could not restrict ACL on generated token file: $tokenCopy"
         }
+        # Keep the restriction above, but let the deploying user hash this copy
+        # for the report and for -Verify without requiring elevation. Access is
+        # still limited to Administrators, SYSTEM, and the current user.
+        $operatorSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        & icacls.exe $tokenCopy '/grant' "*${operatorSid}:(F)" 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not grant the current user access to the generated token file: $tokenCopy"
+        }
     }
     else {
         # The package directory was recreated above, so no earlier token copy can remain.
@@ -305,8 +550,7 @@ foreach ($target in $targets) {
     $cmd = $cmdTemplate.
         Replace('__SETUP__', $installer.Name).
         Replace('__PC__', $safeName).
-        Replace('__TOKEN_BLOCK__', $tokenBlock).
-        Replace('__UPGRADE_FLAG__', $upgradeFlag)
+        Replace('__TOKEN_BLOCK__', $tokenBlock)
     $cmd = [regex]::Replace($cmd, "\r?\n", "`r`n")
     [IO.File]::WriteAllText((Join-Path $fullPackageDir 'install-agent.cmd'), $cmd, (New-Object System.Text.UTF8Encoding($false)))
 
@@ -314,6 +558,28 @@ foreach ($target in $targets) {
         $iniTemplate.Replace('__URL__', $LabManagerUrl).Replace('__TOKEN_LINE__', $tokenLine),
         "\r?\n", "`r`n")
     [IO.File]::WriteAllText((Join-Path $fullPackageDir 'agent-install.ini'), $ini, (New-Object System.Text.UTF8Encoding($false)))
+
+    $packageInstallerSha = Get-FileSha256 -Path (Join-Path $fullPackageDir $installer.Name)
+    $configSha = Get-FileSha256 -Path (Join-Path $fullPackageDir 'agent-install.ini')
+    $tokenName = $null
+    $tokenSha256 = $null
+    $tokenPresent = $false
+    if (-not $UseEmbeddedToken) {
+        $tokenName = 'agent-token.txt'
+        $tokenSha256 = Get-FileSha256 -Path (Join-Path $fullPackageDir $tokenName)
+        $tokenPresent = $true
+    }
+    $reportPackages += [pscustomobject]@{
+        ComputerName    = $target.ComputerName
+        PackageDir      = $safeName
+        InstallerName   = $installer.Name
+        InstallerSha256 = $packageInstallerSha
+        ConfigName      = 'agent-install.ini'
+        ConfigSha256    = $configSha
+        TokenName       = $tokenName
+        TokenSha256     = $tokenSha256
+        TokenPresent    = $tokenPresent
+    }
 
     $packages += [pscustomobject]@{
         ComputerName = $target.ComputerName
@@ -356,9 +622,24 @@ else {
     $readme = $readme.
         Replace('__CONFIG_TOKEN__', '+ token file name').
         Replace('__PACKAGE_TOKEN__', "  agent-token.txt                            shared agent token (do not distribute widely)`n").
-        Replace('__TOKEN_NOTE__', 'Generated token copies are restricted to Administrators/SYSTEM and the script restricts them again before installing. The token file is deleted after a successful install; if the install fails, the token file is kept for retry.')
+        Replace('__TOKEN_NOTE__', 'Generated token copies are restricted to Administrators, SYSTEM, and the deploying user, and the script restricts them again before installing. The token file is deleted after a successful install; if the install fails, the token file is kept for retry.')
 }
 [IO.File]::WriteAllText((Join-Path $OutputDir 'README.txt'), $readme, (New-Object System.Text.UTF8Encoding($false)))
+
+# Hashes and metadata only: no token value is ever written to this report.
+$deploymentReport = [ordered]@{
+    GeneratedAtUtc   = [DateTime]::UtcNow.ToString('o')
+    InstallerName    = $installer.Name
+    InstallerVersion = $installerVersion
+    InstallerSha256  = $installerSha256
+    LabManagerUrl    = $safeLabManagerUrl
+    Preflight        = $preflightPerformed
+    PackageCount     = $packages.Count
+    Packages         = @($reportPackages)
+}
+$reportPath = Join-Path $OutputDir 'deployment-report.json'
+$reportJson = $deploymentReport | ConvertTo-Json -Depth 6
+[IO.File]::WriteAllText($reportPath, $reportJson + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
 
 Write-Host ''
 Write-Host "Generated $($packages.Count) agent package(s) in $OutputDir" -ForegroundColor Green

@@ -84,6 +84,10 @@ function Get-ConfiguredLabManagerPort {
 
 Assert-Administrator
 
+if ($Port -lt 1 -or $Port -gt 65535) {
+    throw "Port must be between 1 and 65535: $Port"
+}
+
 # Only an explicit -Port overrides the configured value.
 if (-not $PSBoundParameters.ContainsKey('Port')) {
     $Port = Get-ConfiguredLabManagerPort

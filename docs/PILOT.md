@@ -75,8 +75,9 @@ publish\cli
 
 > **주의:** `publish.ps1`을 다시 실행하면 `publish\labmanager\appsettings.json`과
 > `publish\agent\service\appsettings.json`이 기본값으로 돌아갑니다.
-> 게시 후에는 `configure-labmanager.ps1` / `install-service.ps1`을 다시 실행하세요.
-> MSI를 쓴다면 `publish.ps1` 직후 `build-msi.ps1`을 다시 실행합니다.
+> 권장 방식인 Inno Setup을 쓴다면 게시 후 `build-inno.ps1`로 설치 파일을 다시 만들고
+> `configure-labmanager.ps1` / 학생 PC 설치를 다시 수행하세요. 레거시 `install-service.ps1`은
+> 스크립트 설치를 유지할 때만 사용합니다. MSI를 쓴다면 `publish.ps1` 직후 `build-msi.ps1`을 다시 실행합니다.
 > 이미 설정한 토큰을 잃지 않도록 파일럿 중에는 게시를 반복하지 않는 것이 좋습니다.
 
 ## 3. 교사 PC 설정 및 LabManager 실행
@@ -141,7 +142,7 @@ Set-Location .\publish\labmanager
 변경은 재시작 없이 즉시 적용되고 브라우저 localStorage도 새 값으로 갱신되며,
 이전 토큰은 바로 거부됩니다. 서버만 띄우려면 `.\UpdateAgent.LabManager.exe`를 직접 실행해도 됩니다.
 
-### 3-3. 실시간 작업 현황 모니터 열기
+### 3-5. 실시간 작업 현황 모니터 열기
 
 - 대시보드 우측 상단의 **작업 현황 모니터** 버튼을 누르면 전용 모니터 창(`http://localhost:5080/monitor.html`)이
   별도로 열립니다. 대시보드는 그대로 남아 있으므로 작업 제어와 현황 관찰을 동시에 할 수 있습니다.
@@ -161,8 +162,8 @@ Phase 0 파일럿에서는 Inno Setup을 먼저 검증하고, 문제가 있으�
 
 ### 4-A. Inno Setup 설치 (권장)
 
-개별 파일(Unpacked Multi-File) 구조로 설치하며, 서비스 등록과 방화벽 규칙
-(기본 이름/버전 이름)을 설치 단계에서 조용히 처리합니다.
+개별 파일(Unpacked Multi-File) 구조로 설치하며, 서비스 등록을 설치 단계에서 조용히 처리합니다.
+학생 PC는 수신 대기 구성 요소가 없어 새 인바운드 규칙을 만들지 않고, `UpdateAgent` 그룹의 이전 규칙만 제거합니다.
 
 ```powershell
 # 개발 PC
@@ -193,7 +194,8 @@ Set-Location "<복사한 폴더>"
 - 명령줄 `/LabManagerUrl`, `/AgentTokenFile`도 계속 지원하지만 배포에는 INI를 권장합니다.
 - 기존 Inno 설치가 있으면 무인 설치에서는 자동으로 제거 후 설치합니다.
 - `%ProgramData%\UpdateAgent\agent.json`과 로그/데이터는 업그레이드 후에도 유지됩니다.
-- 방화벽 규칙은 `UpdateAgent` 그룹의 `UpdateAgent Agent`, `UpdateAgent Agent <버전>` 두 개가 등록됩니다.
+- 방화벽 규칙은 학생 PC에 새로 등록되지 않고, `UpdateAgent` 그룹의 이전 규칙만 제거됩니다.
+  교사 PC의 TCP 5080 규칙은 LabManager 설치/설정에서 처리합니다.
 - 설치 후 서비스(`UpdateAgentService`)가 자동 시작됩니다.
 - INI/BOM, URL, 토큰 검증은 기존 설치 제거 전에 수행되며 실패 시 설치가 중단됩니다.
   원인은 `%TEMP%\Setup Log <날짜>.txt`에서 확인하세요.

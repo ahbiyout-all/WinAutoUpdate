@@ -233,6 +233,10 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             if (detail.Summary.IsTerminal) return detail.Summary;
 
             var context = JobContext.FromDetail(detail);
+            // 캐시된 정책이 오래된/OS 안전 규칙을 어기는 상태로 남아 있어도 재개 시 다시 정규화한다.
+            // 기능 업데이트 2차 승인이 없는 정책이 재부팅 후 되살아나지 않도록 StartAsync와 같은 규칙을 적용한다.
+            context.Policy = context.Policy.ForExecution(_os);
+            context.MaxRebootCount = context.Policy.MaxRebootCount;
             _current = detail;
 
             if (context.RebootCount > 0
@@ -259,6 +263,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
                     context.RequiresMaestroAttention = true;
                     context.CompletedAt = UtcClock.Now;
                     await PersistAsync(context, CancellationToken.None);
+                    _current = context.ToDetail();
                     return context.ToSummary();
                 }
 
@@ -500,9 +505,16 @@ public sealed class UpdateJobRunner : IAsyncDisposable
 
                 if (pending.Count == 0)
                 {
-                    var status = await _wua.GetSystemStatusAsync(cancellationToken);
-                    if ((status.RebootRequired || scan.Status.RebootRequired)
-                        && context.RebootCount < context.MaxRebootCount)
+                    // 시뮬레이션은 실제 설치가 없으므로 실제 WU 재부팅 요구를 근거로
+                    // shutdown.exe를 예약하지 않는다. 검색 결과의 상태도 같은 이유로 무시한다.
+                    var rebootRequiredAfterScan = false;
+                    if (!_options.DryRun)
+                    {
+                        var status = await _wua.GetSystemStatusAsync(cancellationToken);
+                        rebootRequiredAfterScan = status.RebootRequired || scan.Status.RebootRequired;
+                    }
+
+                    if (rebootRequiredAfterScan && context.RebootCount < context.MaxRebootCount)
                     {
                         await RebootAndStopAsync(context, "업데이트 적용을 위해 재부팅합니다.", cancellationToken);
                         return;
@@ -610,8 +622,12 @@ public sealed class UpdateJobRunner : IAsyncDisposable
                     await PersistAsync(context, cancellationToken);
                 }
 
-                var systemStatus = await _wua.GetSystemStatusAsync(cancellationToken);
-                rebootRequired |= systemStatus.RebootRequired;
+                // DRY RUN의 설치 결과는 시뮬레이션이므로 실제 시스템 상태로 재부팅을 결정하지 않는다.
+                if (!_options.DryRun)
+                {
+                    var systemStatus = await _wua.GetSystemStatusAsync(cancellationToken);
+                    rebootRequired |= systemStatus.RebootRequired;
+                }
 
                 if (rebootRequired)
                 {
@@ -862,7 +878,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             context.FailedItems,
             context.RebootCount);
 
-        if (context.Policy.ShutdownAfterComplete && !context.RequiresMaestroAttention)
+        if (!context.IsDryRun && context.Policy.ShutdownAfterComplete && !context.RequiresMaestroAttention)
         {
             try
             {
@@ -1035,7 +1051,15 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             _logger.LogWarning(ex, "진행 상황 전송 실패");
         }
 
-        ProgressChanged?.Invoke(this, detail);
+        try
+        {
+            ProgressChanged?.Invoke(this, detail);
+        }
+        catch (Exception ex)
+        {
+            // UI 구독자의 예외가 이미 저장된 작업을 실패로 바꾸지 않게 한다.
+            _logger.LogWarning(ex, "진행 상황 구독자 알림 실패");
+        }
     }
 
     private async Task PersistSafeAsync(JobContext context)
@@ -1098,7 +1122,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         public required string JobId { get; init; }
         public required string AgentId { get; init; }
         public required string AgentName { get; init; }
-        public required UpdatePolicy Policy { get; init; }
+        public required UpdatePolicy Policy { get; set; }
 
         /// <summary>시뮬레이션 작업은 실제 설치로 보고하지 않는다.</summary>
         public bool IsDryRun { get; init; }
@@ -1176,6 +1200,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             JobId = detail.Summary.JobId,
             AgentId = detail.Summary.AgentId,
             AgentName = detail.Summary.AgentName,
+            IsDryRun = detail.Summary.IsDryRun,
             Policy = detail.Policy,
             PreflightChecks = detail.PreflightChecks.ToList(),
             Items = detail.Items.ToList(),

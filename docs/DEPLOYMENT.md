@@ -146,12 +146,18 @@ STUDENT-02,AA:BB:CC:DD:EE:02,192.168.0.102
 (명시한 외부 토큰 파일이 있으면 그것이 우선하고, URL을 지정하지 않으면 기존 URL을 유지합니다).
 두 옵션(`-AgentTokenFile`, `-UseEmbeddedToken`)은 동시에 쓸 수 없습니다.
 
+기본적으로 패키지를 만들기 **전에** 사전 점검을 합니다. 토큰 파일 첫 줄이 8자 이상이고 기본값/샘플이 아닌지
+확인하고, LabManager `http://주소:5080/api/health`에 5초 제한으로 요청해 2xx 응답을 요구합니다.
+하나라도 실패하면 패키지와 리포트를 만들지 않고 중단합니다. 네트워크 점검만 생략하려면
+`-SkipPreflight`를 사용하세요. 토큰 검증은 이 옵션을 써도 생략되지 않습니다.
+
 결과 (`deploy\agents\` — Git에서 제외됨):
 
 ```text
 deploy\agents\
   README.txt
   manifest.csv
+  deployment-report.json
   STUDENT-01\
     UpdateAgent.Agent-Setup-<버전>-x64.exe
     agent-install.ini
@@ -169,7 +175,7 @@ AgentTokenFile=agent-token.txt
 ```
 
 상대 경로는 설치 exe가 있는 폴더 기준입니다. **토큰 값은 설정 파일에 쓰지 않고** 토큰 파일의 첫 줄에만 둡니다.
-INI는 BOM 없이 저장하고, 값 뒤의 `; 주석`은 사용하지 마세요.
+INI는 BOM 없이 저장하세요. 값 뒤의 `; 주석`은 설치 프로그램이 무시하므로 사용해도 됩니다.
 토큰 파일이 없는 업그레이드는 기존 설치가 감지되고 기존 `agent.json`이 유효한 경우에만 설정을 유지하고,
 새 설치에서 누락되거나 명령줄 값이 있으면 중단됩니다. 단, 릴리스 빌드에 `UPDATEAGENT_AGENT_TOKEN` secret이
 포함되어 있으면 첫 설치에서 내장 토큰을 사용하므로 외부 토큰 파일 없이도 설치됩니다.
@@ -183,9 +189,19 @@ INI는 BOM 없이 저장하고, 값 뒤의 `; 주석`은 사용하지 마세요.
 3. 같은 폴더의 `agent-install.ini`에서 주소와 토큰 파일 경로를 자동으로 읽음 (**명령줄 인자 없음**)
 4. 성공하면 토큰 파일 즉시 삭제하고 삭제를 확인, 실패하면 재시도 위해 보관(`agent-install.ini`는 유지)
 
-패키지 생성 시 복사되는 토큰 파일에도 같은 ACL이 적용되며, ACL 적용 실패는 패키지 생성을 중단합니다.
-설치 전 검증(URL, 토큰, INI)은 기존 설치 제거 전에 수행되므로 실패 시 PC를 변경하지 않습니다.
+패키지 생성 시 복사되는 토큰 파일에는 관리자/SYSTEM 및 현재 사용자 ACL이 적용되며, ACL 적용 실패는
+패키지 생성을 중단합니다. 설치 전 검증(URL, 토큰, INI)은 기존 설치 제거 전에 수행되므로 실패 시 PC를 변경하지 않습니다.
 설치 실패 시 오류 원인은 `%TEMP%\Setup Log <날짜>.txt`에서 확인하세요.
+
+`deployment-report.json`에는 생성 시각(UTC), 설치 파일 이름·버전·SHA-256, LabManager 주소, 사전 점검 결과,
+PC 수와 각 패키지의 설치 파일/INI/토큰 파일 SHA-256이 들어갑니다. **토큰 원문은 기록하지 않습니다.**
+패키지를 복사한 뒤에는 다음 명령으로 파일이 변조되지 않았는지 검증할 수 있습니다. 이 모드는 파일을 쓰지 않습니다.
+
+```powershell
+.\scripts\deploy-agents.ps1 -Verify -OutputDir ".\deploy\agents"
+```
+
+보고서가 없거나 파일이 없거나 해시가 다르면 오류 코드로 종료합니다.
 
 토큰 파일이 삭제된 뒤 같은 폴더로 업그레이드하려면 `install-agent.cmd /Upgrade`를 실행하세요.
 이 모드는 토큰 파일 검사를 건너뛰고, 기존 설치가 감지되면 `agent.json`을 유지합니다.

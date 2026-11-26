@@ -109,7 +109,7 @@ C:\Program Files\UpdateAgent\LabManager\
 5. **바탕화면 바로가기 선택**
    - `바로가기:` 작업에서 체크/해제할 수 있습니다(기본 체크).
 6. **서비스·방화벽·설정 적용** (Agent)
-   - 서비스 등록/갱신, 방화벽 규칙 등록, 선택적 `agent.json` 작성.
+   - 서비스 등록/갱신, 이전 버전 방화벽 규칙 정리, 선택적 `agent.json` 작성.
 7. **앱 실행**
    - Agent: 서비스를 시작하고 마지막 화면에서 `UpdateAgent 상태 확인` 데스크톱 앱을 실행할 수 있습니다.
      시작 메뉴/바탕화면 바로가기도 같은 앱(`{app}\Desktop\UpdateAgent.Agent.Desktop.exe`)을 엽니다.
@@ -278,12 +278,12 @@ PC를 변경하지 않고 설치가 중단됩니다(`/VERYSILENT`에서는 오�
   첫 설치에서 INI가 BOM 포함/잘못된 형식(명령줄 키가 있어도 중단)
 - `LabManagerUrl`이 절대 `http`/`https` URL이 아님
 - 토큰 파일이 없거나 비었거나 샘플/기본 토큰임(첫 설치에서 내장 토큰도 동일하게 검사)
-- `agent.json` 생성/ACL 제한 실패, 방화벽 규칙 등록 실패
+- `agent.json` 생성/ACL 제한 실패, 방화벽 규칙 처리 실패
 
-방화벽 규칙은 `netsh`가 지원하지 않는 그룹 등록을 PowerShell `New-NetFirewallRule`로 처리합니다.
-에이전트는 `UpdateAgent` 그룹에 `UpdateAgent Agent`, `UpdateAgent Agent <버전>` 규칙을 등록하고,
-교사 PC는 `UpdateAgent LabManager` 그룹에 TCP 5080 Domain/Private 규칙을 등록합니다.
-규칙 등록이 실패하면 설치를 중단합니다.
+방화벽 규칙은 `netsh`가 지원하지 않는 그룹 정리를 PowerShell `Remove-NetFirewallRule`로 처리합니다.
+학생용 에이전트는 수신 대기 구성 요소가 없어 인바운드 규칙을 만들지 않고, `UpdateAgent` 그룹에 남아 있는
+이전 버전 규칙만 제거합니다. 교사 PC는 `UpdateAgent LabManager` 그룹에 TCP 5080 Domain/Private 규칙을
+등록하며, 규칙 처리 실패 시 설치를 중단합니다.
 
 ### 교사 PC
 
@@ -310,8 +310,14 @@ Program Files의 `appsettings.json`보다 우선하며 재시작 후에도 유�
 브라우저에 저장된 토큰도 새 값으로 갱신되지만, 이전 토큰은 변경 직후부터 거부됩니다.
 에이전트 토큰(`AgentToken`)은 이 화면에서 변경되지 않으므로
 `configure-labmanager.ps1`로 별도 교체해야 합니다.
-`appsettings.json`과 `runtime-admin-token.json`은 관리자/SYSTEM만 접근할 수 있도록 ACL이 제한되며,
-교체 선택 업데이트에서 런타임 재정의 파일을 삭제하지 못하면 설치를 중단합니다(fail-closed).
+`appsettings.json`과 `runtime-admin-token.json`은 관리자/SYSTEM 및 현재 사용자만 접근할 수 있도록
+ACL이 제한되며, 교체 선택 업데이트에서 런타임 재정의 파일을 삭제하지 못하면 설치를 중단합니다(fail-closed).
+
+토큰 변경 이력은 `%LOCALAPPDATA%\UpdateAgent\LabManager\runtime-admin-token.audit.log`에 기록됩니다.
+UTC 시각, 이벤트(`changed`, `rolled-back`, `loaded`, `rejected`)와 토큰 지문(SHA-256 앞 12자리)만 남고
+**토큰 원문은 기록되지 않습니다.** 저장에 실패하면 이전 토큰을 복구하고 `rolled-back`을 남기며,
+복구도 실패하면 인증을 fail-closed로 유지합니다. `GET /api/admin/token` 응답의 `LastChangedAt`,
+`RotationDue`(90일 경과), `AuditAvailable`로 회전 시점을 확인할 수 있습니다.
 
 ### 설치 로그
 
@@ -320,14 +326,13 @@ Program Files의 `appsettings.json`보다 우선하며 재시작 후에도 유�
 
 ## 7. 방화벽 규칙
 
-설치 단계에서 PowerShell `NetSecurity` 모듈(`New-NetFirewallRule`, 창 숨김)로 등록합니다.
-`netsh`는 그룹 등록을 지원하지 않으므로 사용하지 않습니다.
-**기본 이름과 버전이 붙은 이름을 모두** 등록합니다.
+방화벽 규칙은 PowerShell `NetSecurity` 모듈로 처리합니다(창 숨김).
+`netsh`는 그룹 단위 정리를 지원하지 않으므로 사용하지 않습니다.
+교사 PC는 **기본 이름과 버전이 붙은 이름을 모두** 등록하고, 학생 PC는 새 규칙 없이 `UpdateAgent` 그룹의 이전 규칙만 제거합니다.
 
 | 제품 | 규칙 이름 | 대상 | 프로필 |
 |---|---|---|---|
-| Agent | `UpdateAgent Agent` | `...\UpdateAgent\Service\UpdateAgent.Service.exe` | 전체 |
-| Agent | `UpdateAgent Agent <버전>` | 동일 | 전체 |
+| Agent | (신규 규칙 없음) | `UpdateAgent` 그룹의 이전 버전 규칙만 제거 | 해당 없음 |
 | LabManager | `UpdateAgent LabManager` | 인바운드 TCP 5080(포트 규칙) | Domain/Private |
 | LabManager | `UpdateAgent LabManager <버전>` | 동일 | Domain/Private |
 
@@ -335,7 +340,7 @@ Program Files의 `appsettings.json`보다 우선하며 재시작 후에도 유�
   `scripts\allow-labmanager.ps1` 모두 설치된 `appsettings.json`의 `Urls`/`ListenUrl`에서
   포트를 읽되 없으면 5080을 사용합니다. Public 프로필은 차단 상태로 유지합니다.
 - 설치 후 포트를 변경했다면 `scripts\allow-labmanager.ps1`을 다시 실행해 규칙을 갱신하세요.
-- 모든 규칙은 그룹(`UpdateAgent`, `UpdateAgent LabManager`)으로 묶습니다.
+- 교사 PC에 새로 등록하는 규칙은 그룹(`UpdateAgent LabManager`)으로 묶습니다.
 - 설치/업그레이드 시 그룹 단위로 이전 규칙을 먼저 삭제하므로, 이전 버전의
   `UpdateAgent Agent 0.0.9` 같은 규칙이 남지 않습니다.
 - 제거 시에도 그룹 단위로 규칙을 삭제합니다.
@@ -427,7 +432,7 @@ build\agent\<버전>\
 - 업그레이드: 새 설치 파일을 실행하면 AppID/MSI 등록 정보를 기준으로 기존 설치를 찾아
   묻지 않고 먼저 제거한 뒤 설치합니다. 실패하면 설치를 중단하고 오류를 표시합니다.
 - 제거: 설정 → 앱 → `UpdateAgent Agent <버전>` / `UpdateAgent LabManager <버전>` → 제거.
-- Agent 제거 시 서비스와 방화벽 규칙을 함께 제거합니다.
+- Agent 제거 시 서비스와 `UpdateAgent` 그룹에 남아 있는 이전 방화벽 규칙을 제거합니다.
 - `C:\ProgramData\UpdateAgent`는 제거 후에도 남습니다. 완전 삭제는 수동으로 폴더를 지웁니다.
 - LabManager의 `appsettings.json`은 업그레이드 시 백업/복원으로 유지됩니다.
 - 앱 모드 브라우저 프로필(`browser-profile`)과 `desktop-settings.json`은
@@ -449,7 +454,8 @@ build\agent\<버전>\
 - [ ] 설치된 앱이 설정 → 앱에 `UpdateAgent Agent <버전>`으로 표시됨
 - [ ] 바탕화면 바로가기 체크/해제가 동작함
 - [ ] 설치 완료 후 서비스가 `Running`
-- [ ] 방화벽 규칙 2개(기본/버전)가 그룹과 함께 등록됨
+- [ ] 학생 PC에는 새 인바운드 규칙이 없고 이전 `UpdateAgent` 그룹 규칙만 제거됨
+- [ ] 교사 PC에는 기본/버전 규칙 2개가 `UpdateAgent LabManager` 그룹으로 등록됨
 - [ ] 기존 설치 위에 실행 시 묻지 않고 이전 버전이 자동 제거된 뒤 설치됨
 - [ ] `/VERYSILENT` 설치가 프롬프트 없이 완료됨
 - [ ] 이전 제거가 실패하면 오류가 표시되고 설치가 중단됨

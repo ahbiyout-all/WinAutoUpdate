@@ -32,14 +32,14 @@ $PublishDir = [IO.Path]::GetFullPath($PublishDir)
 
 function Resolve-Secret {
     param([string]$Value, [string]$File, [string]$EnvName, [string]$Prompt)
-    if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value.Trim() }
+    if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value.TrimStart([char]0xFEFF).Trim() }
     if (-not [string]::IsNullOrWhiteSpace($File)) {
         if (-not (Test-Path -LiteralPath $File)) { throw "Secret file not found: $File" }
         return (Get-Content -LiteralPath $File -Raw).TrimStart([char]0xFEFF).Trim()
     }
     if (-not [string]::IsNullOrWhiteSpace($EnvName)) {
         $fromEnv = [Environment]::GetEnvironmentVariable($EnvName, "Process")
-        if (-not [string]::IsNullOrWhiteSpace($fromEnv)) { return $fromEnv.Trim() }
+        if (-not [string]::IsNullOrWhiteSpace($fromEnv)) { return $fromEnv.TrimStart([char]0xFEFF).Trim() }
     }
     $secure = Read-Host -AsSecureString $Prompt
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
@@ -60,6 +60,25 @@ function Set-JsonProperty {
     else {
         $Object | Add-Member -MemberType NoteProperty -Name $Name -Value $Value
     }
+}
+
+function Write-ConfigAtomic {
+    param([string]$Path, $Object)
+
+    $json = $Object | ConvertTo-Json -Depth 12
+    $temp = "$Path.tmp"
+    if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force }
+    [IO.File]::WriteAllText($temp, $json, (New-Object System.Text.UTF8Encoding($false)))
+
+    # Tokens are secrets: do not rely on inherited ACLs, and keep the app's own
+    # account able to read the installed configuration.
+    $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    & icacls $temp /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)" "*${currentSid}:(R)" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+        throw "Could not tighten the ACL on $temp. Configuration was not changed."
+    }
+    Move-Item -LiteralPath $temp -Destination $Path -Force
 }
 
 $configPath = Join-Path $PublishDir "appsettings.json"
@@ -123,8 +142,7 @@ Set-JsonProperty $lab "AgentToken" $AgentToken
 Set-JsonProperty $lab "AllowDefaultTokens" ([bool]$AllowDefaultTokens)
 Set-JsonProperty $config "Urls" $ListenUrl
 
-$json = $config | ConvertTo-Json -Depth 12
-[IO.File]::WriteAllText($configPath, $json, (New-Object System.Text.UTF8Encoding($false)))
+Write-ConfigAtomic -Path $configPath -Object $config
 
 Write-Host "Updated $configPath" -ForegroundColor Green
 Write-Host "  AdminToken = ***"

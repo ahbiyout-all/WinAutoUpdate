@@ -138,6 +138,13 @@ public sealed class CommandExecutor
     {
         foreach (var command in commands)
         {
+            // 만료 여부보다 중복 여부를 먼저 확인한다. 만료 분기를 먼저 타면 서버가
+            // 같은 명령을 다시 보낼 때마다 "유효 시간 만료" 결과를 중복 제출한다.
+            if (_processedSet.Contains(command.CommandId))
+            {
+                continue;
+            }
+
             if (command.ExpiresAt < DateTimeOffset.Now)
             {
                 await AddResultAsync(new CommandResult
@@ -148,11 +155,6 @@ public sealed class CommandExecutor
                     Message = "명령 유효 시간이 지났습니다.",
                 }, cancellationToken);
                 RememberCommand(command.CommandId);
-                continue;
-            }
-
-            if (_processedSet.Contains(command.CommandId))
-            {
                 continue;
             }
 

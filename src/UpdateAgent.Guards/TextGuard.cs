@@ -16,7 +16,9 @@ public static class TextGuard
     public static bool IsSafeIdentifier(string? value, int maxLength = MaxIdentifierLength)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Length > maxLength) return false;
-        return value.All(c => char.IsLetterOrDigit(c) || c is '-' or '_');
+        // char.IsLetterOrDigit는 한글/전각 숫자도 허용한다. ID는 명세대로 ASCII만 허용한다.
+        return value.All(c => c is >= 'A' and <= 'Z' or >= 'a' and <= 'z'
+            or >= '0' and <= '9' or '-' or '_');
     }
 
     /// <summary>클라이언트가 보낸 텍스트를 감사 로그에 저장하기 전에 잘라낸다.</summary>

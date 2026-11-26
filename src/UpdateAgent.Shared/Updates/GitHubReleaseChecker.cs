@@ -89,6 +89,10 @@ public sealed class GitHubReleaseChecker
             }
 
             var latest = NormalizeVersion(release.TagName);
+            if (string.IsNullOrWhiteSpace(latest))
+            {
+                return AppUpdateInfo.Failed(current, "릴리스 버전 태그를 해석할 수 없습니다.");
+            }
 
             // 릴리스에는 설치 파일만 첨부한다.
             // 같은 릴리스를 에이전트/LabManager가 공유하므로 제품 접두사로 자산을 먼저 고른다.

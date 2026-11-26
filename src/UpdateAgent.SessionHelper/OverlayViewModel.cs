@@ -116,7 +116,7 @@ public sealed class OverlayViewModel : INotifyPropertyChanged
     {
         // 에이전트가 보고한 실제 단계를 우선 표시한다. 상태에서 만든 일반 문구는
         // 값이 없을 때만 쓴다(예: "강제 중단됨", "복원 위험"이 "취소됨"/"사전 점검 중"으로 바뀌지 않게).
-        Phase = string.IsNullOrWhiteSpace(summary.Phase)
+        var phase = string.IsNullOrWhiteSpace(summary.Phase)
             ? summary.State switch
             {
                 UpdateJobState.Pending => "업데이트 준비 중",
@@ -134,6 +134,9 @@ public sealed class OverlayViewModel : INotifyPropertyChanged
             }
             : summary.Phase;
 
+        // 시뮬레이션 작업을 실제 설치로 오인하지 않도록 상태 문구에 표시한다.
+        Phase = summary.IsDryRun ? $"DRY RUN · {phase}" : phase;
+
         var progress = UpdateAgent.Guards.ProgressGuard.Display(summary.ProgressPercent);
         PercentText = $"{progress}%";
         ProgressValue = progress;
@@ -144,7 +147,9 @@ public sealed class OverlayViewModel : INotifyPropertyChanged
             $"설치 {summary.InstalledItems}/{summary.TotalItems}건 · 실패 {summary.FailedItems}건 · " +
             $"재부팅 {summary.RebootCount}/{summary.MaxRebootCount}회";
 
-        var rebootWanted = summary.State is UpdateJobState.PendingReboot or UpdateJobState.Rebooting;
+        // 시뮬레이션 작업은 실제 재부팅을 하지 않으므로 재부팅 경고를 띄우지 않는다.
+        var rebootWanted = !summary.IsDryRun &&
+            summary.State is UpdateJobState.PendingReboot or UpdateJobState.Rebooting;
         RebootText = rebootWanted
             ? "곧 자동으로 재부팅됩니다. 저장하지 않은 작업을 정리하세요."
             : "";

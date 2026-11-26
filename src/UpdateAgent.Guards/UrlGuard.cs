@@ -47,8 +47,10 @@ public static class UrlGuard
     public static bool IsLoopbackHost(string? host)
     {
         if (string.IsNullOrWhiteSpace(host)) return false;
-        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
-        return IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address);
+        // Uri.Host는 IPv6 주소를 대괄호로 감싸서 반환할 수 있다.
+        var value = host.Trim().Trim('[', ']');
+        if (value.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
+        return IPAddress.TryParse(value, out var address) && IPAddress.IsLoopback(address);
     }
 
     /// <summary>

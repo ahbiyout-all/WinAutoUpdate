@@ -72,7 +72,7 @@ function Resolve-Secret {
         [switch]$PreferFile
     )
 
-    if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value.Trim() }
+    if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value.TrimStart([char]0xFEFF).Trim() }
 
     # An explicitly supplied file always wins over a stale session/CI environment token.
     if ($PreferFile -and -not [string]::IsNullOrWhiteSpace($File)) {

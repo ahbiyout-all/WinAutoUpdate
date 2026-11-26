@@ -79,7 +79,11 @@ public sealed class OverlayJobProgressSink : IJobProgressSink, IDisposable
         CancellationToken cancellationToken = default)
     {
         // 중단 응답에 담긴 작업 ID를 직접 받아 진행률이 늦게 도착해도 오버레이가 다시 뜨지 않게 한다.
-        lock (_gate) _suppressedJobId = jobId ?? _lastSummary?.JobId;
+        // 호출자가 ID가 없을 때 빈 문자열을 넘겨도 마지막 작업을 억제하도록 null과 같이 취급한다.
+        lock (_gate)
+        {
+            _suppressedJobId = string.IsNullOrWhiteSpace(jobId) ? _lastSummary?.JobId : jobId;
+        }
         CancelHide();
         try
         {

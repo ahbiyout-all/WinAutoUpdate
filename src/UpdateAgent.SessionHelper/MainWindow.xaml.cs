@@ -135,9 +135,15 @@ public partial class MainWindow : Window
         Mouse.OverrideCursor = null;
 
         // 안내가 있으면 짧게 보여준 뒤 숨긴다. 안내가 없으면(자동 숨김/재동기화) 즉시 숨긴다.
-        if (!string.IsNullOrWhiteSpace(notice) && IsVisible)
+        if (ApplyHideNotice(_viewModel, notice))
         {
-            _viewModel.SetNotice(notice);
+            // 창이 이미 숨겨져 있어도 안내를 잃지 않고 잠깐 표시한다.
+            if (!IsVisible)
+            {
+                PositionWindow();
+                Show();
+            }
+
             _noticeTimer ??= new DispatcherTimer(TimeSpan.FromSeconds(4), DispatcherPriority.Normal,
                 (_, _) => FinishHide(), Dispatcher);
             _noticeTimer.Stop();
@@ -146,6 +152,14 @@ public partial class MainWindow : Window
         }
 
         FinishHide();
+    }
+
+    /// <summary>숨김 안내를 뷰모델에 반영한다. 창 표시 여부와 무관하게 안내를 보존한다.</summary>
+    internal static bool ApplyHideNotice(OverlayViewModel viewModel, string? notice)
+    {
+        if (string.IsNullOrWhiteSpace(notice)) return false;
+        viewModel.SetNotice(notice);
+        return true;
     }
 
     private void FinishHide()

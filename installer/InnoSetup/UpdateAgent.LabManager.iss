@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.39"
+  #define AppVersion "0.1.40"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -138,6 +138,8 @@ const
   NoticeSeconds = {#NoticeDelaySeconds};
 
 function ReplaceAllText(const S, OldPat, NewPat: String): String; forward;
+function FindTextNoCase(const Text, Pattern: String): Integer; forward;
+function NormalizeTokenLine(const Value: String): String; forward;
 
 procedure InitializeWizard;
 begin
@@ -166,6 +168,13 @@ end;
 function BoolText(const Value: Boolean): String;
 begin
   if Value then Result := 'true' else Result := 'false';
+end;
+
+{ "/LabManagerTokenFile=\"C:\path with spaces\tokens.txt\"" 처럼 값 안에 남은
+  큰따옴표를 제거한다. Windows 경로에는 큰따옴표가 올 수 없다. }
+function StripDoubleQuotes(const Value: String): String;
+begin
+  Result := ReplaceAllText(Value, '"', '');
 end;
 
 function RunHidden(const FileName, Params: String): Integer;
@@ -395,13 +404,48 @@ begin
       (Copy(UpperToken, Length(UpperToken) - 20, 21) = '-REPLACE-BEFORE-PILOT');
 end;
 
+{ JSON 문자열 속성 하나를 대소문자 무관하게 읽는다. SetJsonStringValueAnywhere와
+  같은 키 검색 규칙을 써야 재사용 판단과 실제 치환이 어긋나지 않는다. }
+function GetJsonStringValueAnywhere(const Text, Key: String): String;
+var
+  P, ColonPos, ValueEnd: Integer;
+  KeyPattern: String;
+  Escaped: Boolean;
+begin
+  Result := '';
+  KeyPattern := '"' + Key + '"';
+  P := FindTextNoCase(Text, KeyPattern);
+  if P = 0 then Exit;
+
+  ColonPos := P + Length(KeyPattern);
+  while (ColonPos <= Length(Text)) and (Text[ColonPos] <> ':') do Inc(ColonPos);
+  if ColonPos > Length(Text) then Exit;
+  Inc(ColonPos);
+  while (ColonPos <= Length(Text)) and
+        (Text[ColonPos] in [' ', #9, #13, #10]) do Inc(ColonPos);
+  if (ColonPos > Length(Text)) or (Text[ColonPos] <> '"') then Exit;
+  Inc(ColonPos);
+
+  ValueEnd := ColonPos;
+  Escaped := False;
+  while ValueEnd <= Length(Text) do
+  begin
+    if Escaped then Escaped := False
+    else if Text[ValueEnd] = '\' then Escaped := True
+    else if Text[ValueEnd] = '"' then Break;
+    Inc(ValueEnd);
+  end;
+  if ValueEnd > Length(Text) then Exit;
+  Result := NormalizeTokenLine(Copy(Text, ColonPos, ValueEnd - ColonPos));
+end;
+
 { 레지스트리 흔적이 남아 있어도 실제 설정이 없거나 샘플 토큰이면 첫 설치로 취급한다.
   이 경우에만 내장 토큰을 사용하고, 실제 토큰이 없으면 무인 설치도 중단한다. }
 function HasUsableLabManagerConfig: Boolean;
 var
   Lines: TStringList;
   I: Integer;
-  LowerLine: String;
+  LowerLine, Text, AdminValue, AgentValue: String;
   HasAdmin, HasAgent: Boolean;
 begin
   Result := False;
@@ -427,7 +471,15 @@ begin
         if Pos('"agenttoken"', LowerLine) > 0 then HasAgent := True;
       end;
     end;
-    Result := HasAdmin and HasAgent;
+    if not (HasAdmin and HasAgent) then Exit;
+
+    { 같은 토큰이면 서버가 시작 시 거부하므로 재사용 가능한 설정이 아니다. }
+    Text := '';
+    for I := 0 to Lines.Count - 1 do
+      Text := Text + Lines.Strings[I] + #13#10;
+    AdminValue := GetJsonStringValueAnywhere(Text, 'AdminToken');
+    AgentValue := GetJsonStringValueAnywhere(Text, 'AgentToken');
+    Result := (AdminValue <> '') and (AgentValue <> '') and (AdminValue <> AgentValue);
   finally
     Lines.Free;
   end;
@@ -532,7 +584,7 @@ begin
   UpperPrefix := Uppercase(Prefix);
   for I := 1 to ParamCount do
   begin
-    Param := RemoveQuotes(ParamStr(I));
+    Param := StripDoubleQuotes(ParamStr(I));
     if Pos(UpperPrefix, Uppercase(Param)) = 1 then
     begin
       Result := Copy(Param, Length(Prefix) + 1, Length(Param));
@@ -546,7 +598,7 @@ function ResolveInstallTokenFile(const Value: String): String;
 var
   TokenFile: String;
 begin
-  TokenFile := Trim(RemoveQuotes(Value));
+  TokenFile := Trim(StripDoubleQuotes(Value));
   if Copy(TokenFile, 1, 2) = '.\' then
     TokenFile := Copy(TokenFile, 3, Length(TokenFile) - 2);
   if Copy(TokenFile, 1, 2) = '//' then
@@ -977,80 +1029,12 @@ begin
     토큰 교체를 선택한 경우에는 복원 대상이 이미 삭제되었으므로 복원하지 않는다. }
 end;
 
-function ExtractPortFromUrlLine(const Line: String): String;
-var
-  ProtocolPos, StartPos, BreakPos, ColonPos, I: Integer;
-begin
-  Result := '';
-  ProtocolPos := Pos('http://', Line);
-  if ProtocolPos > 0 then
-    StartPos := ProtocolPos + 7
-  else
-  begin
-    ProtocolPos := Pos('https://', Line);
-    if ProtocolPos = 0 then Exit;
-    StartPos := ProtocolPos + 8;
-  end;
-
-  BreakPos := Length(Line) + 1;
-  ColonPos := 0;
-  for I := StartPos to Length(Line) do
-  begin
-    if (Line[I] = '/') or (Line[I] = '"') then
-    begin
-      BreakPos := I;
-      Break;
-    end;
-    if Line[I] = ':' then ColonPos := I;
-  end;
-  if ColonPos = 0 then Exit;
-
-  Result := Copy(Line, ColonPos + 1, BreakPos - ColonPos - 1);
-  I := 1;
-  while I <= Length(Result) do
-  begin
-    if (Result[I] < '0') or (Result[I] > '9') then
-    begin
-      Result := '';
-      Exit;
-    end;
-    Inc(I);
-  end;
-  if (Length(Result) = 0) or (Length(Result) > 5) or
-     ((Length(Result) = 5) and (Result > '65535')) then
-    Result := '';
-end;
-
+{ 교사 PC 방화벽은 TCP 5080만 Domain/Private 프로필로 연다.
+  appsettings.json의 Urls/ListenUrl 값을 따르면 오래된 설정이 임의 포트를 열 수 있으므로
+  설정 파일과 무관하게 고정한다. }
 function GetConfiguredFirewallPort: String;
-var
-  Lines: TStringList;
-  I: Integer;
-  Candidate: String;
 begin
   Result := '5080';
-  if LabManagerConfigFile = '' then
-    LabManagerConfigFile := ExpandConstant('{app}\appsettings.json');
-  if not FileExists(LabManagerConfigFile) then Exit;
-
-  Lines := TStringList.Create;
-  try
-    Lines.LoadFromFile(LabManagerConfigFile);
-    for I := 0 to Lines.Count - 1 do
-    begin
-      if (Pos('"Urls"', Lines.Strings[I]) > 0) or
-         (Pos('"ListenUrl"', Lines.Strings[I]) > 0) then
-      begin
-        Candidate := ExtractPortFromUrlLine(Lines.Strings[I]);
-        if Candidate <> '' then
-        begin
-          Result := Candidate;
-          Exit;
-        end;
-      end;
-    end;
-  finally
-    Lines.Free;
-  end;
 end;
 
 function PsLiteral(const Value: String): String;
@@ -1237,10 +1221,14 @@ begin
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Terminated: Boolean;
 begin
   if CurUninstallStep = usUninstall then
   begin
-    TerminateLabManagerApps;
+    Terminated := TerminateLabManagerApps;
     RemoveFirewallRules;
+    if not Terminated then
+      RaiseException('기존 UpdateAgent LabManager 앱을 종료하지 못해 제거를 중단합니다.');
   end;
 end;

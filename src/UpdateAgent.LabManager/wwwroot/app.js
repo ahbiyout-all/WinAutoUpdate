@@ -1,9 +1,14 @@
 const STORAGE_KEY = 'ua_admin_token';
+const STALE_SECONDS = 90;
+const ABSENT = '없음';
+const UNKNOWN = '확인 불가';
+
 let adminToken = localStorage.getItem(STORAGE_KEY) || '';
 let agents = [];
 let jobs = [];
 let audit = [];
 let overview = {};
+let lastRefreshAt = null;
 let selected = new Set();
 let openJobId = null;
 let lastError = '';
@@ -420,16 +425,47 @@ function ago(value) {
   return `${Math.round(seconds / 86400)}일 전`;
 }
 
+function valueText(value) {
+  return value === null || value === undefined || value === '' ? ABSENT : String(value);
+}
+
+function timeText(value) {
+  return formatTime(value) || ABSENT;
+}
+
+function agoText(value) {
+  return ago(value) || ABSENT;
+}
+
+function countSubText(value, suffix) {
+  return value === null || value === undefined ? `${suffix} ${ABSENT}` : `${value}${suffix}`;
+}
+
+function isStale(lastSeen, now) {
+  if (!lastSeen) return false;
+  const seen = new Date(lastSeen).getTime();
+  const base = new Date(now || Date.now()).getTime();
+  if (Number.isNaN(seen) || Number.isNaN(base)) return false;
+  return (base - seen) / 1000 > STALE_SECONDS;
+}
+
+function staleAgentCount() {
+  const now = overview.snapshotAt || Date.now();
+  return agents.filter((record) => isStale(record.lastSeen, now)).length;
+}
+
 // ---------------- 렌더링 ----------------
 
 function renderOverview() {
   const host = $('#stats');
   host.innerHTML = '';
+  const staleCount = overview.staleCount ?? staleAgentCount();
   const cards = [
-    ['등록된 PC', `${overview.agentCount ?? 0}`, `${overview.onlineCount ?? 0}대 온라인`, 'blue'],
-    ['작업 중', `${overview.activeJobs ?? 0}`, `${overview.busyCount ?? 0}대 실행 중`, 'amber'],
-    ['완료', `${overview.completedJobs ?? 0}`, '누적 작업', 'green'],
-    ['실패', `${overview.failedJobs ?? 0}`, '확인 필요', 'red'],
+    ['등록된 PC', valueText(overview.agentCount), countSubText(overview.onlineCount, '대 온라인'), 'blue'],
+    ['작업 중', valueText(overview.activeJobs), countSubText(overview.busyCount, '대 실행 중'), 'amber'],
+    ['오래됨', valueText(staleCount), `체크인 ${STALE_SECONDS}초 초과`, 'amber'],
+    ['완료', valueText(overview.completedJobs), '누적 작업', 'green'],
+    ['실패', valueText(overview.failedJobs), '확인 필요', 'red'],
   ];
   for (const [label, value, sub, tone] of cards) {
     const card = el('div', `stat stat-${tone}`);
@@ -438,6 +474,11 @@ function renderOverview() {
       <div class="stat-sub">${escapeHtml(sub)}</div>`;
     host.appendChild(card);
   }
+
+  // 스냅샷 필드가 있는 서버에서는 그 값을, 구 버전에서는 마지막 성공 갱신 시각을 표시한다.
+  const snapshotAt = overview.snapshotAt ?? lastRefreshAt;
+  const meta = $('#snapshot-meta');
+  if (meta) meta.textContent = `최종 갱신: ${timeText(snapshotAt)} · 오래됨: ${valueText(staleCount)}`;
 }
 
 function renderAgents() {
@@ -489,19 +530,21 @@ function renderAgents() {
     tr.appendChild(nameCell);
 
     const stateCell = el('td');
+    const probeFailed = telemetry.wuBusyProbeFailed;
+    const wuChip = probeFailed === null || probeFailed === undefined
+      ? ` ${chip(UNKNOWN, 'gray')}`
+      : probeFailed ? ` ${chip('WU 확인 실패', 'red')}`
+        : telemetry.wuBusy ? ` ${chip('WU 사용 중', 'red')}` : '';
     stateCell.innerHTML = chip(label, tone) +
-      (telemetry.userLoggedOn ? ` ${chip('사용자 로그온', 'amber')}` : '') +
-      (telemetry.wuBusyProbeFailed
-        ? ` ${chip('WU 확인 실패', 'red')}`
-        : telemetry.wuBusy ? ` ${chip('WU 사용 중', 'red')}` : '');
+      (telemetry.userLoggedOn ? ` ${chip('사용자 로그온', 'amber')}` : '') + wuChip;
     tr.appendChild(stateCell);
 
     const jobCell = el('td');
     if (job) {
       const [jobLabel, jobTone] = jobStateInfo(job.state);
       jobCell.innerHTML = `${chip(jobLabel, jobTone)}
-        <div class="progress mini"><div style="width:${Math.max(0, Math.min(100, job.progressPercent || 0))}%"></div></div>
-        <div class="muted small">${escapeHtml(job.phase || '')}</div>`;
+        <div class="progress mini"><div style="width:${Math.max(0, Math.min(100, Number(job.progressPercent) || 0))}%"></div></div>
+        <div class="muted small">${escapeHtml(valueText(job.phase))}</div>`;
     } else {
       jobCell.innerHTML = '<span class="muted">-</span>';
     }
@@ -512,10 +555,10 @@ function renderAgents() {
     const policyInfo = agentPolicies[agent.agentId];
     osCell.innerHTML = `<div class="small">${chip(group.label, group.tone)}</div>
       <div class="small">${escapeHtml(os.shortName || os.productName || '알 수 없음')}</div>
-      <div class="muted small">${escapeHtml(os.versionString || '')}</div>
+      <div class="muted small">${escapeHtml(valueText(os.versionString))}</div>
       ${policyInfo?.hasOverride ? chip('개별 옵션', 'purple') + ' ' : ''}
       ${agent.maestroInstalled ? '<span class="small amber-text">Maestro 감지됨</span>' : ''}
-      ${telemetry.maestro?.detectionFailed ? ` ${chip('Maestro 확인 실패', 'red')}` : ''}`;
+      ${(agent.maestroDetectionFailed || telemetry.maestro?.detectionFailed) ? ` ${chip('Maestro 확인 실패', 'red')}` : ''}`;
     tr.appendChild(osCell);
 
     const freeCell = el('td');
@@ -532,8 +575,10 @@ function renderAgents() {
     tr.appendChild(freeCell);
 
     const seenCell = el('td');
-    seenCell.innerHTML = `<div class="small">${online ? '온라인' : '오프라인'}</div>
-      <div class="muted small">${escapeHtml(ago(record.lastSeen))}</div>`;
+    const stale = isStale(record.lastSeen, overview.snapshotAt || Date.now())
+      ? ` ${chip('오래됨', 'amber')}` : '';
+    seenCell.innerHTML = `<div class="small">${online ? '온라인' : '오프라인'}${stale}</div>
+      <div class="muted small">${escapeHtml(timeText(record.lastSeen))} · ${escapeHtml(agoText(record.lastSeen))}</div>`;
     tr.appendChild(seenCell);
 
     const actionCell = el('td');
@@ -587,24 +632,36 @@ function renderJobs() {
     tr.appendChild(pcCell);
 
     const stateCell = el('td');
-    stateCell.innerHTML = `${chip(label, tone)}
-      ${job.isDryRun ? ` ${chip('DRY RUN', 'purple')}` : ''}
-      <div class="muted small">${escapeHtml(job.phase || '')}</div>`;
+    const dryRun = job.isDryRun === null || job.isDryRun === undefined
+      ? ` ${chip(UNKNOWN, 'gray')}` : job.isDryRun ? ` ${chip('DRY RUN', 'purple')}` : '';
+    stateCell.innerHTML = `${chip(label, tone)}${dryRun}
+      <div class="muted small">${escapeHtml(valueText(job.phase))}</div>`;
     tr.appendChild(stateCell);
 
+    const percentText = job.progressPercent === null || job.progressPercent === undefined
+      ? ABSENT : `${job.progressPercent}%`;
+    const installedText = job.installedItems === null || job.installedItems === undefined ||
+      job.totalItems === null || job.totalItems === undefined
+      ? ABSENT : `${job.installedItems}/${job.totalItems}`;
     const progressCell = el('td');
-    progressCell.innerHTML = `<div class="progress"><div style="width:${Math.max(0, Math.min(100, job.progressPercent || 0))}%"></div></div>
-      <div class="muted small">${job.progressPercent || 0}% · 설치 ${job.installedItems || 0}/${job.totalItems || 0}</div>`;
+    progressCell.innerHTML = `<div class="progress"><div style="width:${Math.max(0, Math.min(100, Number(job.progressPercent) || 0))}%"></div></div>
+      <div class="muted small">${escapeHtml(percentText)} · 설치 ${escapeHtml(installedText)}</div>`;
     tr.appendChild(progressCell);
 
+    const rebootText = job.rebootCount === null || job.rebootCount === undefined ||
+      job.maxRebootCount === null || job.maxRebootCount === undefined
+      ? ABSENT : `${job.rebootCount}/${job.maxRebootCount}`;
+    const attentionFlag = job.requiresMaestroAttention;
+    const attentionText = attentionFlag === null || attentionFlag === undefined
+      ? UNKNOWN : attentionFlag ? 'Maestro 확인 필요' : '';
     const rebootCell = el('td');
-    rebootCell.innerHTML = `<div class="small">${job.rebootCount || 0}/${job.maxRebootCount || 0}</div>
-      <div class="muted small">${job.requiresMaestroAttention ? 'Maestro 확인 필요' : ''}</div>`;
+    rebootCell.innerHTML = `<div class="small">${escapeHtml(rebootText)}</div>
+      <div class="muted small">${escapeHtml(attentionText)}</div>`;
     tr.appendChild(rebootCell);
 
     const timeCell = el('td');
-    timeCell.innerHTML = `<div class="small">${escapeHtml(formatTime(job.updatedAt))}</div>
-      <div class="muted small">${escapeHtml(ago(job.updatedAt))}</div>`;
+    timeCell.innerHTML = `<div class="small">${escapeHtml(timeText(job.updatedAt))}</div>
+      <div class="muted small">${escapeHtml(agoText(job.updatedAt))}</div>`;
     tr.appendChild(timeCell);
 
     const actionCell = el('td');
@@ -662,6 +719,7 @@ async function refresh() {
     jobs = jobsData || [];
     overview = overviewData || {};
     audit = auditData || [];
+    lastRefreshAt = new Date().toISOString();
     setError('');
     renderOverview();
     renderOsFilter();
@@ -921,16 +979,26 @@ function renderJobDetail(data) {
   const [label, tone] = jobStateInfo(job.state);
   $('#detail-title').textContent = `${data.machineName || job.agentName || ''} · ${job.jobId}`;
 
+  const dryRun = job.isDryRun === null || job.isDryRun === undefined
+    ? chip(UNKNOWN, 'gray') : job.isDryRun ? chip('DRY RUN', 'purple') : '';
+  const percentText = job.progressPercent === null || job.progressPercent === undefined
+    ? ABSENT : `${job.progressPercent}%`;
+  const totalText = valueText(job.totalItems);
+  const installedText = valueText(job.installedItems);
+  const failedText = valueText(job.failedItems);
+  const rebootText = job.rebootCount === null || job.rebootCount === undefined ||
+    job.maxRebootCount === null || job.maxRebootCount === undefined
+    ? ABSENT : `${job.rebootCount}/${job.maxRebootCount}회`;
   const summary = $('#detail-summary');
   summary.innerHTML = `
-    <div class="detail-row"><span>상태</span><span>${chip(label, tone)} ${job.isDryRun ? ` ${chip('DRY RUN', 'purple')}` : ''} ${escapeHtml(job.phase || '')}</span></div>
-    <div class="detail-row"><span>진행</span><span>${job.progressPercent || 0}%</span></div>
-    <div class="progress"><div style="width:${Math.max(0, Math.min(100, job.progressPercent || 0))}%"></div></div>
-    <div class="detail-row"><span>항목</span><span>전체 ${job.totalItems || 0} · 설치 ${job.installedItems || 0} · 실패 ${job.failedItems || 0}</span></div>
-    <div class="detail-row"><span>재부팅</span><span>${job.rebootCount || 0}/${job.maxRebootCount || 0}회</span></div>
-    <div class="detail-row"><span>메시지</span><span>${escapeHtml(job.message || '')}</span></div>
-    <div class="detail-row"><span>시작</span><span>${escapeHtml(formatTime(job.startedAt))}</span></div>
-    <div class="detail-row"><span>갱신</span><span>${escapeHtml(formatTime(job.updatedAt))}</span></div>
+    <div class="detail-row"><span>상태</span><span>${chip(label, tone)} ${dryRun} ${escapeHtml(valueText(job.phase))}</span></div>
+    <div class="detail-row"><span>진행</span><span>${escapeHtml(percentText)}</span></div>
+    <div class="progress"><div style="width:${Math.max(0, Math.min(100, Number(job.progressPercent) || 0))}%"></div></div>
+    <div class="detail-row"><span>항목</span><span>전체 ${escapeHtml(totalText)} · 설치 ${escapeHtml(installedText)} · 실패 ${escapeHtml(failedText)}</span></div>
+    <div class="detail-row"><span>재부팅</span><span>${escapeHtml(rebootText)}</span></div>
+    <div class="detail-row"><span>메시지</span><span>${escapeHtml(valueText(job.message))}</span></div>
+    <div class="detail-row"><span>시작</span><span>${escapeHtml(timeText(job.startedAt))}</span></div>
+    <div class="detail-row"><span>갱신</span><span>${escapeHtml(timeText(job.updatedAt))}</span></div>
     ${job.lastError ? `<div class="alert-inline">${escapeHtml(job.lastError)}</div>` : ''}
   `;
 

@@ -30,10 +30,13 @@ public sealed class UpdateScanner
 
     public async Task<ScanReport> ScanAsync(UpdatePolicy policy, CancellationToken cancellationToken = default)
     {
-        var result = await _wua.ScanAsync(policy.IncludeDrivers, cancellationToken);
+        // CLI/직접 호출에서도 실행 경로와 같은 규칙을 적용한다. 승인되지 않은 기능 업데이트가
+        // 검색 결과에 나타나지 않도록 러너(UpdateJobRunner.ScanAsync)와 동일하게 정규화한다.
+        var effectivePolicy = policy.ForExecution(_os);
+        var result = await _wua.ScanAsync(effectivePolicy.IncludeDrivers, cancellationToken);
         var evaluation = UpdatePolicyEvaluator.Evaluate(
             result.Updates.Select(u => u.Info),
-            policy,
+            effectivePolicy,
             _os);
 
         return new ScanReport

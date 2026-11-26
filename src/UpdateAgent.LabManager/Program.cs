@@ -489,7 +489,7 @@ app.MapPost("/api/admin/jobs/start", async (
     LiveEventBus liveEvents,
     CancellationToken cancellationToken) =>
 {
-    if (request.AgentIds.Count == 0)
+    if (request is null || !request.HasTargets)
     {
         return Results.BadRequest(new { error = "대상 PC를 선택하세요." });
     }
@@ -509,7 +509,7 @@ app.MapPost("/api/admin/jobs/start", async (
         }
 
         // Maestro가 설치된 PC와 감지 자체가 실패한 PC는 모두 보호 해제 확인을 건너뛸 수 없다.
-        if ((agent.Agent.MaestroInstalled || agent.Agent.MaestroDetectionFailed) &&
+        if (AgentPolicyService.RequiresMaestroConfirmation(agent) &&
             !request.MaestroConfirmed)
         {
             errors.Add($"{agent.Agent.MachineName}: Maestro 보호 해제 확인이 필요합니다.");
@@ -674,11 +674,7 @@ app.MapPost("/api/admin/jobs/{jobId}/maestro/restored", async (
 
 // 이 엔드포인트들은 /api/admin 아래에 있어 현재 관리자 토큰으로 인증된 사용자만 호출할 수 있다.
 app.MapGet("/api/admin/token", (AdminTokenStore adminTokenStore) =>
-    Results.Ok(new
-    {
-        isPlaceholder = adminTokenStore.IsUsingPlaceholder,
-        hasRuntimeOverride = adminTokenStore.HasRuntimeOverride,
-    }));
+    Results.Ok(adminTokenStore.GetStatus()));
 
 app.MapPost("/api/admin/token", async (
     UpdateAdminTokenRequest request,
@@ -697,11 +693,7 @@ app.MapPost("/api/admin/token", async (
 
     await labStore.AddAuditAsync(
         "teacher", "token-change", "admin", "관리자 토큰 변경", cancellationToken);
-    return Results.Ok(new
-    {
-        isPlaceholder = false,
-        hasRuntimeOverride = true,
-    });
+    return Results.Ok(adminTokenStore.GetStatus());
 });
 
 // ---------------- 정책/감사 ----------------

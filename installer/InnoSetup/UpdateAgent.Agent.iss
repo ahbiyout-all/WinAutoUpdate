@@ -27,7 +27,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.39"
+  #define AppVersion "0.1.40"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -179,6 +179,18 @@ begin
   if Value then Result := 'true' else Result := 'false';
 end;
 
+{ 명령줄에서 "/AgentTokenFile=\"C:\path with spaces\token.txt\"" 처럼 전달하면
+  값 안에 큰따옴표가 남는다. Windows 경로에는 큰따옴표가 올 수 없으므로 모두 제거한다. }
+function StripDoubleQuotes(const Value: String): String;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 1 to Length(Value) do
+    if Value[I] <> '"' then
+      Result := Result + Value[I];
+end;
+
 function RunHidden(const FileName, Params: String): Integer;
 var
   Code: Integer;
@@ -279,16 +291,29 @@ begin
   ServiceRecoveryDisabled := True;
 end;
 
-procedure RestoreServiceRecovery;
+{ 복구 설정 복원은 두 명령이 모두 성공해야 완료된다. 실패하면 플래그를 유지해
+  DeinitializeSetup/제거 경로에서 다시 시도하고, 설치 경로에서는 중단한다. }
+function RestoreServiceRecovery: Boolean;
 var
   Sc: String;
+  FailureCode, FlagCode: Integer;
 begin
-  if not ServiceRecoveryDisabled then Exit;
+  if not ServiceRecoveryDisabled then
+  begin
+    Result := True;
+    Exit;
+  end;
+
   Sc := ExpandConstant('{sys}\sc.exe');
-  RunHidden(Sc, 'failure ' + ServiceName +
+  FailureCode := RunHidden(Sc, 'failure ' + ServiceName +
     ' reset= 86400 actions= restart/60000/restart/60000/restart/60000');
-  RunHidden(Sc, 'failureflag ' + ServiceName + ' 1');
-  ServiceRecoveryDisabled := False;
+  FlagCode := RunHidden(Sc, 'failureflag ' + ServiceName + ' 1');
+  Result := (FailureCode = 0) and (FlagCode = 0);
+  if Result then
+    ServiceRecoveryDisabled := False
+  else
+    Log('Failed to restore UpdateAgentService recovery (failure=' +
+      IntToStr(FailureCode) + ', failureflag=' + IntToStr(FlagCode) + ').');
 end;
 
 function WaitForServiceStopped: Boolean;
@@ -470,7 +495,7 @@ begin
   UpperPrefix := Uppercase(Prefix);
   for I := 1 to ParamCount do
   begin
-    Param := RemoveQuotes(ParamStr(I));
+    Param := StripDoubleQuotes(ParamStr(I));
     if Pos(UpperPrefix, Uppercase(Param)) = 1 then
     begin
       Result := Copy(Param, Length(Prefix) + 1, Length(Param));
@@ -489,6 +514,20 @@ begin
     Result := Trim(Copy(Value, 1, P - 1))
   else
     Result := Trim(Value);
+end;
+
+{ GetIniString은 UTF-8 BOM이 있는 INI의 [Agent] 섹션을 찾지 못해 빈 값을 반환한다.
+  일부 값만 명령줄로 overriding된 경우 이 빈 값이 조용히 무시되면 지정된 토큰 파일이
+  사라지고 내장 토큰으로 설치되므로, BOM은 어떤 경우에도 fail-closed로 중단한다. }
+function FileHasUtf8Bom(const Path: String): Boolean;
+var
+  Lines: TArrayOfString;
+begin
+  Result := False;
+  if not FileExists(Path) then Exit;
+  if not LoadStringsFromFile(Path, Lines) then Exit;
+  Result := (GetArrayLength(Lines) > 0) and (Length(Lines[0]) > 0) and
+    (Lines[0][1] = #65279);
 end;
 
 { 명령줄 값이 우선하고, 없으면 설치 exe와 같은 폴더의 INI에서 읽는다. }
@@ -510,7 +549,7 @@ function ResolveInstallTokenFile(const Value: String): String;
 var
   TokenFile: String;
 begin
-  TokenFile := Trim(RemoveQuotes(Value));
+  TokenFile := Trim(StripDoubleQuotes(Value));
   if Copy(TokenFile, 1, 2) = '.\' then
     TokenFile := Copy(TokenFile, 3, Length(TokenFile) - 2);
 
@@ -540,11 +579,21 @@ end;
 
 function IsValidInstallUrl(const Value: String): Boolean;
 var
-  UpperValue: String;
+  UpperValue, Rest: String;
 begin
   UpperValue := Uppercase(Value);
-  Result := (Copy(UpperValue, 1, 7) = 'HTTP://') or
-    (Copy(UpperValue, 1, 8) = 'HTTPS://');
+  if Copy(UpperValue, 1, 7) = 'HTTP://' then
+    Rest := Copy(Value, 8, Length(Value) - 7)
+  else if Copy(UpperValue, 1, 8) = 'HTTPS://' then
+    Rest := Copy(Value, 9, Length(Value) - 8)
+  else
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  { "http://"만 있으면 agent.json에는 기록되지만 서비스가 Uri 생성에 실패한다. }
+  Result := (Rest <> '') and (Pos(' ', Rest) = 0) and (Copy(Rest, 1, 1) <> '/');
 end;
 
 function IsPlaceholderToken(const Value: String): Boolean;
@@ -598,7 +647,13 @@ begin
 
   Text := '';
   for I := 0 to GetArrayLength(Lines) - 1 do
-    Text := Text + Lines[I];
+  begin
+    { 기존 agent.json에 BOM이 있어도 재사용 판단이 깨지지 않도록 첫 줄에서 제거한다. }
+    if (I = 0) and (Length(Lines[0]) > 0) and (Lines[0][1] = #65279) then
+      Text := Text + Copy(Lines[0], 2, Length(Lines[0]) - 1)
+    else
+      Text := Text + Lines[I];
+  end;
   Text := Trim(Text);
   if Length(Text) < 2 then Exit;
 
@@ -826,9 +881,11 @@ begin
 
   RunHidden(Sc, 'description ' + ServiceName + ' "Windows Update automation agent for computer labs"');
   { Restore the SCM failure recovery disabled before the forced kill. }
-  RunHidden(Sc, 'failure ' + ServiceName + ' reset= 86400 actions= restart/60000/restart/60000/restart/60000');
-  RunHidden(Sc, 'failureflag ' + ServiceName + ' 1');
-  ServiceRecoveryDisabled := False;
+  if not RestoreServiceRecovery then
+  begin
+    Log('UpdateAgentService registration succeeded but recovery is still disabled.');
+    Exit;
+  end;
   Result := True;
 end;
 
@@ -926,6 +983,13 @@ begin
   IniPath := ResolveInstallConfigFile;
   if FileExists(IniPath) then
     Log('Loading agent install settings from: ' + IniPath);
+  if FileHasUtf8Bom(IniPath) then
+  begin
+    AgentConfigWriteFailed := True;
+    AgentConfigError := InstallConfigFileName + '에 UTF-8 BOM이 있습니다. ' +
+      'BOM 없이 저장한 뒤 [Agent] 섹션을 확인하세요.';
+    Exit;
+  end;
 
   { 두 키 중 하나라도 명령줄로 왔으면 재설정 의사로 본다. 부분 overriding도 같다. }
   SettingsFromCmd := CmdParamExists('/LabManagerUrl=') or CmdParamExists('/AgentTokenFile=');
@@ -957,14 +1021,13 @@ begin
 
   if (Url = '') and (not HasExternalToken) then
   begin
-    { BOM이 있는 INI는 Windows API가 섹션을 찾지 못해 조용히 빈 값이 된다. }
-    { 명령줄 키가 있어도 BOM이 깨진 INI는 조용히 무시하지 않고 중단한다. }
+    { BOM은 위에서 이미 중단했다. 여기서는 BOM이 아닌 경우의 누락된 키를 명확히 알린다. }
     if FileExists(IniPath) and
        LoadStringsFromFile(IniPath, IniLines) and (GetArrayLength(IniLines) > 0) then
     begin
       AgentConfigWriteFailed := True;
-      AgentConfigError := InstallConfigFileName + '에 설정 값을 읽을 수 없습니다. ' +
-        'UTF-8 BOM 없이 저장하고 [Agent] 섹션을 확인하세요.';
+      AgentConfigError := InstallConfigFileName + '에 LabManagerUrl/AgentTokenFile 값이 없습니다. ' +
+        '[Agent] 섹션과 키 이름을 확인하세요.';
       Exit;
     end;
 
@@ -1410,7 +1473,7 @@ begin
       RaiseException('UpdateAgentService 등록/설정에 실패해 설치를 중단합니다.');
 
     if not ApplyFirewallRules then
-      RaiseException('UpdateAgent 방화벽 규칙을 등록하지 못해 설치를 중단합니다. ' +
+      RaiseException('기존 UpdateAgent 방화벽 규칙을 정리하지 못해 설치를 중단합니다. ' +
         'Setup 로그와 Windows Defender 방화벽 상태를 확인하세요.');
 
     Code := RunHidden(ExpandConstant('{sys}\sc.exe'), 'start "' + ServiceName + '"');
@@ -1423,20 +1486,35 @@ begin
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Terminated: Boolean;
+  Code: Integer;
 begin
   if CurUninstallStep = usUninstall then
   begin
     { 제거 시작 전에도 같은 종료 절차를 사용한다. }
-    TerminateAgentApps;
+    Terminated := TerminateAgentApps;
     RemoveFirewallRules;
+    if not RestoreServiceRecovery then
+      Log('UpdateAgentService recovery could not be restored during uninstall.');
+    if not Terminated then
+      RaiseException('기존 UpdateAgent 앱을 종료하지 못해 제거를 중단합니다.');
   end;
 
   if CurUninstallStep = usPostUninstall then
-    RunHidden(ExpandConstant('{sys}\sc.exe'), 'delete ' + ServiceName);
+  begin
+    Code := RunHidden(ExpandConstant('{sys}\sc.exe'), 'delete ' + ServiceName);
+    if (Code <> 0) and (Code <> 1060) then
+      RaiseException('UpdateAgentService 삭제에 실패했습니다(sc ' + IntToStr(Code) + ').');
+  end;
 end;
 
 procedure DeinitializeSetup;
+var
+  Restored: Boolean;
 begin
   { Restore SCM recovery if the install aborted before ssPostInstall. }
-  RestoreServiceRecovery;
+  Restored := RestoreServiceRecovery;
+  if not Restored then
+    Log('UpdateAgentService recovery is still disabled; check sc.exe failure settings.');
 end;

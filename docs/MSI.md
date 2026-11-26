@@ -34,24 +34,25 @@
 
 | 항목 | 이유 / 대안 |
 |---|---|
-| LabManager MSI | 현재 콘솔 앱 + `%LOCALAPPDATA%` 저장. 서비스화·설정 재설계가 선행되어야 함 (아래) |
+| LabManager MSI | 교사 PC는 Inno Setup 설치와 `setup-labmanager-lab.ps1` 런북으로 충분하여 별도 MSI를 만들지 않음 (아래) |
 | MSI 제작 UI | 래퍼가 대화형 설치를 담당. MSI는 무인 전용 |
 | 기능 업데이트 / ISO 캐시 | Phase 2 |
 | Maestro 자동 설정 | 앱은 Maestro 설정을 변경하지 않는다는 원칙 유지 |
 | 원격 일괄 배포 자동화 | 1차는 USB/공유 폴더 + 래퍼. GPO/Intune은 2차 |
 | 코드 서명 인증서 발급 | 인증서가 없으면 파일럿은 미서명으로 진행하고 경고 표시 |
 
-### LabManager MSI를 2단계로 미루는 이유
+### LabManager MSI를 만들지 않는 이유
 
-| 선행 작업 | 현재 상태 |
+| 항목 | 현재 상태 |
 |---|---|
-| Windows 서비스/예약 작업 전환 | 콘솔 앱, 교사가 직접 실행 |
-| 데이터 위치 | `%LOCALAPPDATA%\UpdateAgent\LabManager` → ProgramData 필요 |
-| 방화벽 규칙 | `allow-labmanager.ps1` 별도 실행 |
-| 설정/토큰 | `appsettings.json` 직접 수정 |
-| 대시보드 재시작/자동 시작 | 수동 |
+| 서버 실행 방식 | LabManager Inno 설치 + 헤드리스 서버, 런처가 앱 모드 창을 염 |
+| 데이터 위치 | `%LOCALAPPDATA%\UpdateAgent\LabManager` 사용(ProgramData 이전 계획 없음) |
+| 방화벽 규칙 | LabManager Inno 설치 또는 `allow-labmanager.ps1`이 TCP 5080 규칙을 등록 |
+| 설정/토큰 | `configure-labmanager.ps1`/`setup-labmanager-lab.ps1`과 대시보드에서 관리 |
+| 자동 시작 | `setup-labmanager-lab.ps1`이 로그온 시 헤드리스 서버 예약 작업을 등록 |
 
-교사 PC는 랩당 1대이므로 파일럿 단계에서는 현재 런북으로 충분합니다. 에이전트 MSI가 검증된 뒤 같은 방식(서비스화 → ProgramData → MSI)으로 진행합니다.
+교사 PC는 랩당 1대이므로 파일럿 단계에서는 현재 Inno 설치와 런북으로 충분합니다.
+에이전트 MSI가 검증된 뒤에도 교사 PC는 별도 MSI 없이 이 방식을 유지합니다.
 
 ## 2. 현재 방식과 MSI의 차이
 
@@ -330,24 +331,25 @@ sc.exe failureflag UpdateAgentService 1
 
 ### 6-3. 설정 로드 순서
 
-목표 우선순위:
+현재 우선순위:
 
 ```text
-appsettings.json  <  agent.json  <  환경 변수  <  명령줄 인수
+appsettings.json  <  agent.json  <  환경 변수
 ```
 
-`Program.cs`에서 `Host.CreateApplicationBuilder(args)` 직후 다음을 추가합니다.
+`src/UpdateAgent.Service/Program.cs`는 토큰이 프로세스 목록에 노출되지 않도록
+`Host.CreateApplicationBuilder()`를 인자 없이 호출하고 명령줄 구성 공급자를 추가하지 않습니다.
 
 ```csharp
-var machineConfigPath = UpdateAgentConstants.ConfigFilePath; // %ProgramData%\UpdateAgent\agent.json
+var builder = Host.CreateApplicationBuilder();
 builder.Configuration
-    .AddJsonFile(machineConfigPath, optional: true, reloadOnChange: false)
-    .AddEnvironmentVariables()
-    .AddCommandLine(args);
+    .AddJsonFile(UpdateAgentConstants.ConfigFilePath, optional: true, reloadOnChange: false)
+    .AddEnvironmentVariables();
 ```
 
 - `agent.json`이 없으면 기존과 동일하게 동작합니다.
-- 환경 변수/명령줄을 다시 추가하는 이유는, 기본 빌더가 이미 추가한 소스보다 `agent.json`이 뒤에 오기 때문입니다. 마지막 소스가 이깁니다.
+- 환경 변수가 `agent.json`보다 우선하며, 마지막에 추가된 소스가 이깁니다.
+- 명령줄 인자는 서비스 구성에 사용하지 않습니다. CLI 옵션은 별도로 명령줄을 해석합니다.
 - `agent.json`은 서비스 시작 시 한 번만 읽습니다. 변경 후 서비스를 재시작해야 반영됩니다.
 
 ### 6-4. 토큰 취급 원칙
@@ -451,8 +453,8 @@ installer\
 artifacts\
   staging\                    ← build-msi.ps1이 만드는 임시 게시물
   msi\
-    UpdateAgent.Agent-0.1.39-x64.msi
-    UpdateAgent.Agent-0.1.39-x64.msi.sha256
+    UpdateAgent.Agent-0.1.40-x64.msi
+    UpdateAgent.Agent-0.1.40-x64.msi.sha256
     build-info.json
 ```
 
@@ -463,7 +465,7 @@ artifacts\
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
-    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.39</ProductVersion>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.40</ProductVersion>
     <PublishRoot Condition="'$(PublishRoot)' == ''">$(MSBuildThisFileDirectory)..\..\publish</PublishRoot>
     <DefineConstants>ProductVersion=$(ProductVersion);PublishRoot=$(PublishRoot)</DefineConstants>
   </PropertyGroup>
@@ -477,7 +479,7 @@ artifacts\
 
 ### 8-2. `build-msi.ps1` 흐름
 
-1. `publish\agent\service`, `publish\agent\sessionhelper`, `publish\cli` 존재 확인.
+1. `publish\agent\service`, `publish\agent\sessionhelper`, `publish\agent\desktop`, `publish\cli` 존재 확인(공통 `UpdateAgent.Guards.dll`도 검사).
 2. `-ProductVersion` 검증 (`Major.Minor.Build`, 숫자 3자리).
 3. `artifacts\staging`에 `publish`와 같은 구조로 게시물 복사 (원본 `publish`는 건드리지 않음).
 4. `installer\...\payload\appsettings.json`을 스테이징의 서비스 `appsettings.json`에 덮어씀.
@@ -492,7 +494,7 @@ artifacts\
 
 ```powershell
 .\scripts\publish.ps1
-.\scripts\build-msi.ps1 -ProductVersion 0.1.39
+.\scripts\build-msi.ps1 -ProductVersion 0.1.40
 ```
 
 ```powershell
@@ -501,12 +503,12 @@ dotnet build .\installer\UpdateAgent.Agent.Installer\UpdateAgent.Agent.Installer
   -c Release `
   -t:Rebuild `
   -p:Platform=x64 `
-  -p:ProductVersion=0.1.39 `
+  -p:ProductVersion=0.1.40 `
   -p:PublishRoot="$PWD\artifacts\staging"
 
 # 검증 (저장소 루트에서)
 dotnet tool restore
-dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.39-x64.msi
+dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.40-x64.msi
 ```
 
 ### 8-4. 버전 규칙
@@ -589,13 +591,13 @@ $env:UPDATEAGENT_AGENT_TOKEN = Get-Content ".\pilot-agent-token.txt" -Raw
 
 ```powershell
 # 최소 UI (수동 설치)
-msiexec /i ".\UpdateAgent.Agent-0.1.39-x64.msi" /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.40-x64.msi" /norestart /l*v ".\install.log"
 
 # 무인 설치
-msiexec /i ".\UpdateAgent.Agent-0.1.39-x64.msi" /qn /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.40-x64.msi" /qn /norestart /l*v ".\install.log"
 
 # 무인 + CLI
-msiexec /i ".\UpdateAgent.Agent-0.1.39-x64.msi" /qn /norestart ADDLOCAL=CliFeature
+msiexec /i ".\UpdateAgent.Agent-0.1.40-x64.msi" /qn /norestart ADDLOCAL=CliFeature
 ```
 
 - 토큰/URL은 이 명령으로 설정되지 않습니다. 설치 후 래퍼 또는 `configure-agent.ps1`을 실행해야 원격 관리가 활성화됩니다.
@@ -614,7 +616,7 @@ msiexec /i ".\UpdateAgent.Agent-0.1.39-x64.msi" /qn /norestart ADDLOCAL=CliFeatu
 ### 10-4. 제거
 
 ```powershell
-msiexec /x ".\UpdateAgent.Agent-0.1.39-x64.msi" /qn /norestart /l*v ".\uninstall.log"
+msiexec /x ".\UpdateAgent.Agent-0.1.40-x64.msi" /qn /norestart /l*v ".\uninstall.log"
 ```
 
 또는:

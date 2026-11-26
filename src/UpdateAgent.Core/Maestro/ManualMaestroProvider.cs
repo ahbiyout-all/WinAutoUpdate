@@ -155,17 +155,27 @@ public sealed class ManualMaestroProvider : IRestorationProvider
         };
 
         var json = UpdateAgentJson.Serialize(marker);
-        await File.WriteAllTextAsync(_markerPath, json, cancellationToken);
+        // 두 마커는 항상 같은 nonce여야 한다. 동시에 쓰면 파일 간 불일치/-share 오류가
+        // 발생해 재부팅 후 검증이 실패하므로 체크리스트와 같은 잠금으로 직렬화한다.
+        await _lock.WaitAsync(cancellationToken);
         try
         {
-            await File.WriteAllTextAsync(_stableMarkerPath, json, cancellationToken);
-        }
-        catch
-        {
-            // 보조 경로 쓰기 실패는 무시한다. 기본 마커만으로 검증한다.
-        }
+            await File.WriteAllTextAsync(_markerPath, json, cancellationToken);
+            try
+            {
+                await File.WriteAllTextAsync(_stableMarkerPath, json, cancellationToken);
+            }
+            catch
+            {
+                // 보조 경로 쓰기 실패는 무시한다. 기본 마커만으로 검증한다.
+            }
 
-        return marker;
+            return marker;
+        }
+        finally
+        {
+            _lock.Release();
+        }
     }
 
     public async Task<MarkerVerificationResult> VerifyAfterRebootAsync(
@@ -259,8 +269,12 @@ public sealed class ManualMaestroProvider : IRestorationProvider
         try
         {
             var json = await File.ReadAllTextAsync(_checklistPath, cancellationToken);
-            return UpdateAgentJson.Deserialize<Dictionary<string, MaestroChecklist>>(json)
-                   ?? new Dictionary<string, MaestroChecklist>(StringComparer.OrdinalIgnoreCase);
+            var loaded = UpdateAgentJson.Deserialize<Dictionary<string, MaestroChecklist>>(json);
+            // System.Text.Json은 기본 비교자(대소문자 구분)로 사전을 만들므로
+            // 저장된 작업 ID의 대소문자가 달라도 동일한 항목으로 취급하도록 다시 감싼다.
+            return loaded is null
+                ? new Dictionary<string, MaestroChecklist>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, MaestroChecklist>(loaded, StringComparer.OrdinalIgnoreCase);
         }
         catch
         {

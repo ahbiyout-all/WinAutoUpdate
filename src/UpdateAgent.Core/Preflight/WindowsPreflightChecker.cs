@@ -45,7 +45,7 @@ public sealed class WindowsPreflightChecker : IPreflightChecker
             CheckPower(),
             CheckNetwork(),
             CheckWsus(),
-            CheckMaestro(maestro, maestroConfirmed, policy),
+            EvaluateMaestro(maestro, maestroConfirmed, policy),
             CheckBitLocker(),
             CheckSecureBootState(),
         };
@@ -187,11 +187,18 @@ public sealed class WindowsPreflightChecker : IPreflightChecker
         }
     }
 
-    private static PreflightCheck CheckMaestro(
+    /// <summary>마에스트로 감지 결과를 사전 점검 항목으로 변환한다.</summary>
+    public static PreflightCheck EvaluateMaestro(
         MaestroDetectionResult maestro,
         bool maestroConfirmed,
         UpdatePolicy policy)
     {
+        // 감지 자체가 실패했으면 "미설치"라고 단정하지 않는다. 설치되어 있을 수 있으므로
+        // 교사가 복원 설정을 직접 확인하도록 경고한다.
+        if (maestro.DetectionFailed && !maestro.Installed)
+            return PreflightCheck.Warn("Maestro 복원",
+                "Maestro 설치 여부를 확인할 수 없습니다. 설치된 경우 복원 보호를 수동 모드로 전환했는지 확인하세요.");
+
         if (!maestro.Installed)
             return PreflightCheck.Pass("Maestro 복원", "Maestro Network 7이 감지되지 않았습니다.");
 

@@ -54,6 +54,7 @@ Edge를 우선, 없으면 Chrome을 찾아 `--app=http://127.0.0.1:5080/` 창을
 | `docs/MSI.md` | MSI 패키징 설계·구현 상태·검증 매트릭스 |
 | `docs/AI-WORK-INSTRUCTIONS.md` | AI 에이전트용 범용 작업 지시서·자아성찰 검증 게이트 |
 | `docs/PURE-DLL.md` | 순수 창작 Guard DLL의 동작 원리·호출부 연결·기존 DLL 점검 결과 |
+| `docs/NEXT-STAGE-FEATURES.md` | 토큰 수명주기·무인 배포·실시간 모니터링·오프라인 복구 개선 설계 |
 
 ## 지원 범위
 
@@ -118,6 +119,7 @@ build\agent\<버전>\
 작업 이력은 [`docs/WORKLOG.md`](docs/WORKLOG.md)에 있습니다.
 MSI 패키징 설계와 제약은 [`docs/MSI.md`](docs/MSI.md)에 있습니다.
 순수 창작 공통 DLL의 설계와 동작 원리는 [`docs/PURE-DLL.md`](docs/PURE-DLL.md)에 있습니다.
+다음 단계 기능 개선 설계는 [`docs/NEXT-STAGE-FEATURES.md`](docs/NEXT-STAGE-FEATURES.md)에 있습니다.
 
 | 스크립트 | 실행 위치 | 설명 |
 |---|---|---|
@@ -255,7 +257,9 @@ dotnet run --project src/UpdateAgent.Service
 
 운영용 설치는 관리자 PowerShell에서 **Inno Setup 설치 파일**을 사용하는 것을 권장합니다.
 설치 파일은 개별 파일(Unpacked Multi-File) 구조로 `C:\Program Files\UpdateAgent`에 배치하고,
-서비스 등록과 방화벽 규칙(기본 이름/버전 이름)을 설치 단계에서 조용히 처리합니다.
+서비스 등록을 설치 단계에서 조용히 처리합니다. 학생용 설치 파일은 수신 대기 구성 요소가 없으므로
+새 인바운드 규칙을 만들지 않고, 이전 버전이 만든 `UpdateAgent` 그룹 규칙만 제거합니다.
+교사 PC의 TCP 5080 인바운드 규칙(기본/버전 이름)은 LabManager 설치 파일이 등록합니다.
 
 학생 PC 배포는 설치 파일과 **같은 폴더**에 `agent-install.ini`를 두는 방식을 권장합니다.
 토큰 값은 쓰지 않고 토큰 파일 경로만 기록합니다.
@@ -357,7 +361,9 @@ LabManager 대시보드에 업데이트 팝업을 표시합니다. 설치 파일
 
 ## 설정
 
-우선순위: 명령줄 인수 > 환경 변수 > `%ProgramData%\UpdateAgent\agent.json` (MSI) > `appsettings.json` > 코드 기본값.
+우선순위: 환경 변수 > `%ProgramData%\UpdateAgent\agent.json` (MSI) > `appsettings.json` > 코드 기본값.
+학생 서비스는 토큰이 프로세스 목록에 노출되지 않도록 **명령줄 인수를 구성 소스로 사용하지 않습니다.**
+CLI 옵션은 별도로 명령줄 인자를 해석합니다.
 
 ### LabManager (`LabManager` 섹션)
 
@@ -376,7 +382,7 @@ LabManager 대시보드에 업데이트 팝업을 표시합니다. 설치 파일
 | 키 | 기본값 | 설명 |
 |---|---|---|
 | `LabManagerUrl` | `http://localhost:5080` | 교사 PC 주소 |
-| `AgentToken` | (비어 있음) | LabManager와 동일해야 함. 첫 설치는 내장 토큰 또는 `/AgentTokenFile`로 지정하고, 업데이트는 기존 `agent.json`을 유지 |
+| `AgentToken` | `change-me-agent-token` (소스 `appsettings.json`의 플레이스홀더; MSI 템플릿은 빈 값) | LabManager와 동일해야 함. 첫 설치는 내장 토큰 또는 `/AgentTokenFile`로 지정하고, 업데이트는 기존 `agent.json`을 유지 |
 | `PollIntervalSeconds` | `30` | 체크인 주기 (최소 15초) |
 | `CheckInEnabled` | `true` | `false`면 로컬 전용 |
 | `OverlayEnabled` | `true` | 오버레이 사용 여부 |
@@ -403,7 +409,8 @@ $env:Agent__AgentToken = "<강력한-토큰>"
 
 - 에이전트 API는 `X-Agent-Token`, 관리자 API는 `X-Admin-Token` 헤더로 인증합니다.
   토큰 비교는 고정 시간 해시 비교를 사용합니다.
-- `/api/health`만 인증 없이 공개됩니다.
+- API 엔드포인트 중 `/api/health`만 인증 없이 공개됩니다. 대시보드/모니터 정적 페이지
+  (`/`, `/monitor.html`)도 토큰 없이 로드되지만, 모든 `/api/admin/*` 데이터 요청은 관리자 토큰이 필요합니다.
 - **기본 토큰은 파일럿 전 반드시 변경하세요.** 모든 학생 PC에 동일한 에이전트 토큰을 배포합니다.
 - LabManager API와 대시보드는 랩 LAN에서만 사용하고 외부에 노출하지 마세요.
 - 서버 관리자 토큰은 대시보드에서 변경할 수 있습니다. `%LOCALAPPDATA%`의 런타임 override에 저장되어 재시작 후에도 유지되며, 변경 즉시 이전 토큰은 무효가 됩니다.

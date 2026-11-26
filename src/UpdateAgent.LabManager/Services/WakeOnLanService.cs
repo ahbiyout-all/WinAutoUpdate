@@ -143,6 +143,13 @@ public sealed class WakeOnLanService
     private static bool TryParseMac(string text, out byte[] mac)
     {
         mac = [];
+        if (string.IsNullOrWhiteSpace(text)) return false;
+
+        // 12자리 hex가 들어 있기만 하면 통과시키면 "zz11:22:33:44:55:66xx"도 유효한 MAC으로
+        // 취급되어 엉뚱한 대상으로 패킷을 보낸다. 구분자는 콜론/하이픈/점/공백만 허용한다.
+        if (text.Any(c => !Uri.IsHexDigit(c) && c is not (':' or '-' or '.' or ' ')))
+            return false;
+
         var cleaned = new string(text.Where(Uri.IsHexDigit).ToArray());
         if (cleaned.Length != 12) return false;
 

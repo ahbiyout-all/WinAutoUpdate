@@ -23,6 +23,15 @@ public sealed class AgentPolicyService
     private static UpdatePolicy ForceMaestroGate(UpdatePolicy policy) =>
         policy with { RequireMaestroManualConfirmation = true };
 
+    /// <summary>
+    /// 작업 시작 게이트는 저장된 설치 여부뿐 아니라 이번 체크인에서 감지가 실패한 경우도
+    /// Maestro가 있을 수 있으므로 보호 해제 확인을 요구한다.
+    /// </summary>
+    public static bool RequiresMaestroConfirmation(AgentRecord agent) =>
+        agent.Agent.MaestroInstalled ||
+        agent.Agent.MaestroDetectionFailed ||
+        agent.Telemetry.Maestro?.DetectionFailed == true;
+
     public async Task<UpdatePolicy> GetDefaultAsync(CancellationToken cancellationToken = default) =>
         ForceMaestroGate(
             (TryParse(await _store.GetSettingAsync(DefaultSettingKey, cancellationToken)) ?? UpdatePolicy.Default)
@@ -93,11 +102,13 @@ public sealed class AgentPolicyService
         CancellationToken cancellationToken = default)
     {
         var overrides = await _store.GetSettingsByPrefixAsync(AgentKeyPrefix, cancellationToken);
+        // 에이전트 ID는 다른 경로에서 대소문자 무관으로 비교하므로 요약 조회도 동일하게 맞춘다.
+        var overrideLookup = new Dictionary<string, string>(overrides, StringComparer.OrdinalIgnoreCase);
         var agents = await _store.GetAgentsAsync(cancellationToken);
         return agents.Select(agent =>
         {
             // GetEffectiveAsync와 동일하게 파싱 가능한 값만 유효한 개별 정책으로 표시한다.
-            var hasOverride = overrides.TryGetValue(Key(agent.Agent.AgentId), out var json)
+            var hasOverride = overrideLookup.TryGetValue(Key(agent.Agent.AgentId), out var json)
                 && TryParse(json) is not null;
             return new AgentPolicySummary
             {

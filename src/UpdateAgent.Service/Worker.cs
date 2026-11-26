@@ -13,6 +13,7 @@ using UpdateAgent.Service.Configuration;
 using UpdateAgent.Service.Overlay;
 using UpdateAgent.Service.Sessions;
 using UpdateAgent.Shared;
+using UpdateAgent.Shared.Comms;
 using UpdateAgent.Shared.Models;
 using UpdateAgent.Shared.Serialization;
 
@@ -74,6 +75,15 @@ public sealed class Worker : BackgroundService
         _options = options;
         _logger = logger;
     }
+
+    /// <summary>
+    /// 체크인 루프가 사용하는 지연. 실패 횟수에 따라 백오프를 적용하고 상한을 지킨다.
+    /// </summary>
+    public static int ResolveCheckInDelaySeconds(int consecutiveFailures, int effectivePollSeconds) =>
+        CheckInRetryPolicy.NextDelaySeconds(
+            consecutiveFailures,
+            effectivePollSeconds,
+            CheckInRetryPolicy.DefaultMaxDelaySeconds);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -153,6 +163,11 @@ public sealed class Worker : BackgroundService
 
                 if (Volatile.Read(ref _checkInRequested) == 1) continue;
 
+                var options = _options.CurrentValue;
+                var delaySeconds = ResolveCheckInDelaySeconds(
+                    _labManager.ConsecutiveFailures,
+                    options.EffectivePollSeconds);
+
                 using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 _pollDelayCts = delayCts;
                 if (Volatile.Read(ref _checkInRequested) == 1) delayCts.Cancel();
@@ -160,7 +175,7 @@ public sealed class Worker : BackgroundService
                 try
                 {
                     await Task.Delay(
-                        TimeSpan.FromSeconds(_options.CurrentValue.EffectivePollSeconds),
+                        TimeSpan.FromSeconds(delaySeconds),
                         delayCts.Token);
                 }
                 catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)

@@ -9,6 +9,9 @@ public sealed record StartJobsRequest
 {
     public IReadOnlyList<string> AgentIds { get; init; } = [];
 
+    /// <summary>JSON 본문이 null이어도 500 대신 명확한 400으로 거부할 수 있게 한다.</summary>
+    public bool HasTargets => AgentIds is { Count: > 0 };
+
     /// <summary>비어 있으면 서버에 저장된 기본 정책을 사용한다.</summary>
     public UpdatePolicy? Policy { get; init; }
 

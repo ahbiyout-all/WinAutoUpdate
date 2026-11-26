@@ -166,7 +166,7 @@ function Find-Iscc {
     param([string]$Explicit)
 
     if (-not [string]::IsNullOrWhiteSpace($Explicit)) {
-        if (-not (Test-Path -LiteralPath $Explicit)) {
+        if (-not (Test-Path -LiteralPath $Explicit -PathType Leaf)) {
             throw "ISCC.exe not found: $Explicit"
         }
         return [IO.Path]::GetFullPath($Explicit)
@@ -311,12 +311,17 @@ if (-not $NoPublish) {
 
     if ($needsPublish) {
         Write-Host "Publish output is missing. Running scripts\publish.ps1..." -ForegroundColor Cyan
+        # $LASTEXITCODE is only set by native commands; clear the value left by
+        # the earlier ISCC probe before invoking a PowerShell script.
+        $global:LASTEXITCODE = 0
         if ($AgentOnly) {
             & (Join-Path $PSScriptRoot "publish.ps1") -AgentOnly
         } else {
             & (Join-Path $PSScriptRoot "publish.ps1")
         }
-        if ($LASTEXITCODE -ne 0) { throw "publish.ps1 failed (exit code $LASTEXITCODE)." }
+        if (-not $? -or $LASTEXITCODE -ne 0) {
+            throw "publish.ps1 failed (exit code $LASTEXITCODE)."
+        }
     }
 }
 

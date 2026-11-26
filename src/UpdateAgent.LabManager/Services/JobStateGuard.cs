@@ -59,11 +59,29 @@ internal static class JobStateGuard
         AgentIdsMatch(summary.JobId, detailSummary.JobId) &&
         summary.State == detailSummary.State;
 
-    /// <summary>서버 수신 시각을 기록하고 에이전트 보고 시각은 미래값을 잘라 ReportedAt에 보관한다.</summary>
-    public static JobSummary Normalize(JobSummary incoming, DateTimeOffset receivedAt) =>
-        incoming with
+    /// <summary>
+    /// 서버 수신 시각을 기록하고 에이전트 보고 시각은 미래값을 잘라 ReportedAt에 보관한다.
+    /// Dry-run 여부/Maestro 주의 플래그/최대 재부팅 횟수는 서버가 배정한 값이므로
+    /// 에이전트가 이후 체크인에서 임의로 되돌리지 못하게 이전 저장값을 유지한다.
+    /// </summary>
+    public static JobSummary Normalize(
+        JobSummary incoming,
+        DateTimeOffset receivedAt,
+        JobSummary? stored = null)
+    {
+        var merged = stored is null
+            ? incoming
+            : incoming with
+            {
+                IsDryRun = stored.IsDryRun,
+                RequiresMaestroAttention = stored.RequiresMaestroAttention,
+                MaxRebootCount = stored.MaxRebootCount,
+            };
+
+        return merged with
         {
             ReportedAt = ReportedAtOf(incoming, receivedAt),
             UpdatedAt = receivedAt,
         };
+    }
 }
