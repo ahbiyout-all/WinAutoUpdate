@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-11-26 LabManager 토큰 교체 설치 ACL 실패 수정 (v0.1.41)
+
+### 보고
+
+`Runtime error (at 94:1625): 새 LabManager 토큰을 설정에 반영하지 못해 설치를 중단합니다.
+appsettings.json 접근 권한을 제한하지 못했습니다.` 및 "기존 appsettings.json이 언인스톨 과정에서
+강제 삭제된다"는 추가 보고가 있었습니다.
+
+### 원인
+
+- `GetCurrentUserSid`가 `cmd /c "whoami.exe" ... > "파일" 2>&1` 형태로 명령을 만들었습니다.
+  `cmd.exe`는 인용부호가 2쌍이면 첫/마지막 따옴표를 제거하므로 `whoami` 경로가 깨지고 출력 파일이
+  만들어지지 않습니다. 같은 파일의 `IsProcessRunning`은 `/c ""...2>&1"`로 감싸 정상 동작합니다.
+  SID를 얻지 못해 `RestrictLabManagerConfigAcl`이 실패했습니다.
+- v0.1.39의 토큰 교체 경로는 토큰이 든 백업본 **전체를 삭제**해 `appsettings.json`의 다른 설정까지
+  복원되지 않았습니다.
+
+### 수정
+
+| 파일 | 수정 |
+|---|---|
+| `UpdateAgent.LabManager.iss` | `GetCurrentUserSid`의 `cmd /c` 명령을 이중 따옴표로 감싸 SID 추출 정상화 |
+| 위 동일 | `RestrictLabManagerConfigAcl`이 3회 재시도하고, 실패 시 SID/ICACLS 종료 코드를 오류 메시지에 포함 |
+| 위 동일 | `SanitizeTokenBackup` 추가: 백업본의 `AdminToken`/`AgentToken` 값만 비우고 나머지 설정은 보존 |
+| 위 동일 | 토큰 교체 시에도 sanitize된 백업을 복원해 주소·로깅 등 기존 설정 유지, 이전 토큰 값만 제거 |
+| 문서 | `docs/INSTALLER.md`에 ACL 실패 진단·설정 보존 동작 반영 |
+
+### 검증
+
+- 로컬 재현: 기존 형태는 SID 출력 파일이 생성되지 않고, 수정 형태는 SID를 정상 추출
+- 동일 `icacls` 인자 로컬 실행 종료 코드 0
+- `scripts\build-inno.ps1 -NoPublish` 두 인스톨러 컴파일 성공
+
+---
+
 ## 2026-11-26 다음 단계 기능 개선 설계 및 적용
 
 ### 설계

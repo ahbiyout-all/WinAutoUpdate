@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.40"
+  #define AppVersion "0.1.41"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -127,6 +127,7 @@ var
   ExternalAdminToken: String;
   ExternalAgentToken: String;
   LastTokenApplyError: String;
+  LastAclDetail: String;
 
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
@@ -214,8 +215,11 @@ begin
   Result := '';
   OutFile := AddBackslash(GetTempDir) + 'UpdateAgent.LabManager.current-sid.txt';
   DeleteFile(OutFile);
-  Cmd := '/c "' + ExpandConstant('{sys}\whoami.exe') + '" /user /fo csv /nh > "' +
-    OutFile + '" 2>&1';
+  { cmd /c는 첫/마지막 따옴표를 제거하므로 명령 전체를 한 쌍의 따옴표로 감싼다.
+    IsProcessRunning과 같은 형태를 사용하지 않으면 whoami 경로는 깨지고
+    SID를 얻지 못해 appsettings.json ACL 제한이 실패한다. }
+  Cmd := '/c ""' + ExpandConstant('{sys}\whoami.exe') + '" /user /fo csv /nh > "' +
+    OutFile + '" 2>&1"';
   RunHidden(ExpandConstant('{sys}\cmd.exe'), Cmd);
   if not LoadStringsFromFile(OutFile, Lines) then Exit;
   for I := 0 to GetArrayLength(Lines) - 1 do
@@ -229,22 +233,35 @@ end;
   설치를 실행한 교사 계정만 읽도록 제한한다. 실패하면 호출자가 설치를 중단한다. }
 function RestrictLabManagerConfigAcl(const Path: String): Boolean;
 var
-  Sid: String;
+  Sid, Params: String;
+  Code, Attempt: Integer;
 begin
   Result := False;
+  LastAclDetail := '';
   Sid := GetCurrentUserSid;
   if Sid = '' then
   begin
+    LastAclDetail := '현재 사용자 SID를 확인하지 못했습니다.';
     Log('Could not determine the current teacher account SID for appsettings.json ACL.');
     Exit;
   end;
 
+  Params := '"' + Path + '" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(F)" "*' +
+    Sid + ':(F)"';
   Log('Restricting LabManager appsettings.json ACL (values hidden): ' + Path);
-  Result := RunHidden(ExpandConstant('{sys}\icacls.exe'),
-    '"' + Path + '" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(F)" "*' +
-    Sid + ':(F)"') = 0;
-  if not Result then
-    Log('Failed to restrict LabManager appsettings.json ACL (values hidden): ' + Path);
+  { 서버가 설정 파일을 잠깐 열어 두는 경우를 대비해 짧게 재시도한다. }
+  for Attempt := 1 to 3 do
+  begin
+    Code := RunHidden(ExpandConstant('{sys}\icacls.exe'), Params);
+    if Code = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+    LastAclDetail := 'icacls 종료 코드 ' + IntToStr(Code) + ' (시도 ' + IntToStr(Attempt) + ')';
+    Log('Failed to restrict LabManager appsettings.json ACL: ' + LastAclDetail);
+    Sleep(250);
+  end;
 end;
 
 { Non-modal notice with a countdown. The caller's next statement is the step
@@ -819,7 +836,7 @@ begin
   end;
   Result := RestrictLabManagerConfigAcl(Path);
   if not Result then
-    LastTokenApplyError := 'appsettings.json 접근 권한을 제한하지 못했습니다.';
+    LastTokenApplyError := 'appsettings.json 접근 권한을 제한하지 못했습니다. ' + LastAclDetail;
 end;
 
 { 업데이트에서 교체를 선택한 경우에만 실제 토큰 두 개를 설정에 반영한다. }
@@ -888,24 +905,60 @@ begin
   end;
   Result := RestrictLabManagerConfigAcl(Path);
   if not Result then
-    LastTokenApplyError := 'appsettings.json 접근 권한을 제한하지 못했습니다.';
+    LastTokenApplyError := 'appsettings.json 접근 권한을 제한하지 못했습니다. ' + LastAclDetail;
 end;
 
-{ 토큰 교체를 선택하면 언인스톨 직후 기존 토큰을 담고 있던 백업본과
-  런타임 재정의 파일을 모두 삭제한다. 이후에는 릴리스 기본 설정 위에
-  새 토큰만 기록하므로 이전 토큰이 설치 결과에 남지 않는다. }
+{ 기존 appsettings.json은 강제 삭제하지 않고 백업본의 토큰 값만 비운다.
+  언인스톨이 설치 폴더의 파일을 지우더라도 주소·로깅 등 다른 설정은 복원되고,
+  이전 토큰 값은 새 설치에 남지 않는다. }
+function SanitizeTokenBackup: Boolean;
+var
+  Lines: TArrayOfString;
+  Text: String;
+  I: Integer;
+begin
+  Result := False;
+  if (LabManagerConfigBackup = '') or (not FileExists(LabManagerConfigBackup)) then
+  begin
+    Log('No LabManager config backup to sanitize.');
+    Result := True;
+    Exit;
+  end;
+
+  if not LoadStringsFromFile(LabManagerConfigBackup, Lines) then
+  begin
+    Log('Could not read the LabManager config backup for token removal.');
+    Exit;
+  end;
+  Text := '';
+  for I := 0 to GetArrayLength(Lines) - 1 do
+    Text := Text + Lines[I] + #13#10;
+  if (not SetJsonStringValueAnywhere(Text, 'AdminToken', '')) or
+     (not SetJsonStringValueAnywhere(Text, 'AgentToken', '')) then
+  begin
+    Log('Could not clear old token keys in the LabManager config backup.');
+    Exit;
+  end;
+  SetArrayLength(Lines, 1);
+  Lines[0] := Text;
+  if not EnsureWritableConfigFile(LabManagerConfigBackup) then Exit;
+  if not SaveStringsToUTF8File(LabManagerConfigBackup, Lines, False) then
+  begin
+    Log('Could not write the sanitized LabManager config backup.');
+    Exit;
+  end;
+  Log('Old LabManager token values removed from the config backup (values hidden).');
+  Result := True;
+end;
+
+{ 토큰 교체를 선택하면 언인스톨 직후 기존 토큰 값과 런타임 재정의를 삭제한다.
+  설정 파일 자체는 보존하므로 다른 설정은 그대로 복원된다. }
 function RemoveExistingLabManagerTokens: Boolean;
 var
   RuntimeTokenPath: String;
 begin
   Result := False;
-  if LabManagerConfigRestoreNeeded and (LabManagerConfigBackup <> '') and
-     FileExists(LabManagerConfigBackup) and (not DeleteFile(LabManagerConfigBackup)) then
-  begin
-    Log('Could not remove the backup containing old LabManager tokens.');
-    Exit;
-  end;
-  LabManagerConfigRestoreNeeded := False;
+  if LabManagerConfigRestoreNeeded and (not SanitizeTokenBackup) then Exit;
 
   RuntimeTokenPath := ExpandConstant('{localappdata}\UpdateAgent\LabManager\runtime-admin-token.json');
   if FileExists(RuntimeTokenPath) and (not DeleteFile(RuntimeTokenPath)) then
@@ -965,8 +1018,8 @@ begin
   ShowStepNotice('기존 설치 제거',
     '기존 UpdateAgent LabManager 설치를 먼저 완전히 제거합니다.',
     '토큰을 새로 기록할 때는 언인스톨이 끝난 뒤에만 새 설치를 진행하며, ' +
-    '기존 토큰(백업본·런타임 재정의)은 모두 삭제됩니다. ' +
-    '기존 토큰을 재사용할 때만 appsettings.json이 복원됩니다.');
+    '기존 토큰 값과 런타임 재정의는 삭제됩니다. ' +
+    'appsettings.json의 다른 설정은 백업에서 복원됩니다.');
 
   { 이전 제거 프로그램/InstallDelete가 appsettings.json을 지우므로 먼저 백업한다. }
   LabManagerConfigFile := ExpandConstant('{app}\appsettings.json');
@@ -1026,7 +1079,8 @@ begin
   end;
 
   { 설정 복원은 InstallDelete/[Files]가 끝난 뒤 ssPostInstall에서 수행한다.
-    토큰 교체를 선택한 경우에는 복원 대상이 이미 삭제되었으므로 복원하지 않는다. }
+    토큰 교체를 선택한 경우에는 토큰 값만 비운 백업을 복원하므로
+    주소·로깅 등 다른 설정은 유지되고 이전 토큰 값은 남지 않는다. }
 end;
 
 { 교사 PC 방화벽은 TCP 5080만 Domain/Private 프로필로 연다.
