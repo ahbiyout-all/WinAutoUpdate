@@ -114,7 +114,7 @@ C:\Program Files\UpdateAgent\LabManager\
 6. **서비스·방화벽·설정 적용** (Agent)
    - 서비스 등록/갱신, 이전 버전 방화벽 규칙 정리, 선택적 `agent.json` 작성.
 7. **앱 실행**
-   - Agent: 서비스를 시작한 뒤 `sc.exe query` 결과로 실제 `RUNNING` 상태를 확인합니다(v0.1.42).
+   - Agent: 서비스를 시작한 뒤 `sc.exe query` 결과로 실제 `RUNNING` 상태를 확인합니다(v0.1.43).
      확인하지 못하면 설치를 중단합니다. 마지막 화면에서 `UpdateAgent 상태 확인` 데스크톱 앱을 실행할 수 있습니다.
      시작 메뉴/바탕화면 바로가기도 같은 앱(`{app}\Desktop\UpdateAgent.Agent.Desktop.exe`)을 엽니다.
       이 앱은 상태 조회와 함께 메인 화면의 **수동 업데이트 옵션** 버튼을 제공하며, 기존 **업데이트 시작** 버튼도 같은 옵션 창을 엽니다.
@@ -207,7 +207,7 @@ AgentTokenFile=agent-token.txt
 - `agent-token.txt`도 같은 폴더에 두면 됩니다. 상대 경로는 설치 exe가 있는 폴더 기준으로 해석되며,
   `C:\...`, `\\서버\공유\...`, `//서버/공유/...` 같은 절대 경로도 그대로 사용할 수 있습니다.
 - INI는 **UTF-8 BOM 없이** 저장하세요. 원본 바이트로 BOM을 검사해 BOM이 있으면 명령줄 인자가 있어도
-  설치가 중단됩니다(v0.1.42). 값 뒤의 `; 주석`은 무시됩니다.
+  설치가 중단됩니다(v0.1.43). 값 뒤의 `; 주석`은 무시됩니다.
 - 설정 파일이 없으면 명령줄 인자만 사용합니다. 설정 파일도 명령줄 인자도 없으면 **첫 설치**에서는
   기본 URL(`http://labmanager:5080`)과 내장 토큰을 쓰고, **기존 설치의 재사용/무인 설치**에서는
   `agent.json`을 그대로 유지합니다. 다른 DNS 이름/IP를 쓰는 실습실은 반드시 INI나 명령줄로 지정하세요.
@@ -245,7 +245,7 @@ AgentTokenFile=agent-token.txt
 | Agent | 업데이트, 교체 선택 | `/AgentTokenFile` 또는 INI | 외부 토큰으로 교체, 새 URL이 없으면 기존 URL 유지 |
 | LabManager | 첫 설치 | 해당 없음 | 내장 두 줄(1행 AdminToken, 2행 AgentToken)을 `appsettings.json`에 반영 |
 | LabManager | 업데이트, 재사용/무인 | 없음 | 내장 토큰 무시, 기존 `appsettings.json` 유지 |
-| LabManager | 업데이트, 재사용/무인 | `/LabManagerTokenFile` | 명시한 외부 두 줄 토큰으로 교체(v0.1.42: 무인 설치에서도 교체로 처리) |
+| LabManager | 업데이트, 재사용/무인 | `/LabManagerTokenFile` | 명시한 외부 두 줄 토큰으로 교체(v0.1.43: 무인 설치에서도 교체로 처리) |
 | LabManager | 업데이트, 교체 선택 | 없음 | 릴리스 내장 두 줄로 교체, 런타임 관리자 토큰 재정의 제거(v0.1.33 이상) |
 | LabManager | 업데이트, 교체 선택 | `/LabManagerTokenFile` | 외부 두 줄 토큰 파일로 교체, 런타임 관리자 토큰 재정의 제거 |
 

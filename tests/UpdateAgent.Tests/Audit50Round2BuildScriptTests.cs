@@ -128,6 +128,17 @@ public sealed class Audit50Round2BuildScriptTests
     [Fact]
     public void GithubPush_SecretScanContinuesAfterPerFileCap()
     {
+        var root = FindRepoRoot();
+        var scriptPath = Path.Combine(root, "scripts", "github-push.ps1");
+
+        // 로컬 전용 스크립트는 CI 체크아웃에 포함되지 않는다.
+        // CI에서는 저장소에서 제외된 것만 확인하고, 로컬에서는 실제 안전 장치를 검사한다.
+        if (!File.Exists(scriptPath))
+        {
+            Assert.Contains("scripts/github-push.ps1", Read(".gitignore"));
+            return;
+        }
+
         var text = Read("scripts/github-push.ps1");
 
         Assert.Contains("findings capped at 50 for this file; scanning continued", text);

@@ -5,6 +5,36 @@
 
 ---
 
+## 2026-11-27 CI 환경 의존 테스트 수정 (v0.1.43)
+
+### 원인
+
+`v0.1.42` 태그 푸시 후 GitHub Actions `Test` 단계가 실패했습니다.
+`Audit50Round2BuildScriptTests.GithubPush_SecretScanContinuesAfterPerFileCap`이
+`.gitignore`로 저장소에 포함되지 않는 `scripts/github-push.ps1`을 항상 읽어
+CI 체크아웃에서 `Missing repository file`이 발생했습니다.
+
+### 수정
+
+| 파일 | 수정 |
+|---|---|
+| `tests/UpdateAgent.Tests/Audit50Round2BuildScriptTests.cs` | 로컬 스크립트가 없으면 `.gitignore`의 제외 항목만 검증하고, 있으면 시크릿 스캔 안전 장치를 검증 |
+
+이미 푸시된 `v0.1.42` 태그와 실패한 워크플로 실행은 변경하지 않았습니다.
+동일 버전 재게시 대신 빌드 번호를 올려 `v0.1.43`으로 게시했습니다.
+
+### 검증
+
+- 로컬 `dotnet test tests\UpdateAgent.Tests\UpdateAgent.Tests.csproj -c Release`:
+  **363개 통과, 0 실패, 0 건너뜀**
+
+### 게시 상태
+
+`v0.1.43` 커밋·태그·Release를 GitHub Actions로 생성했습니다.
+설치 파일 SHA-256은 해당 Release 노트를 기준으로 합니다.
+
+---
+
 ## 2026-11-26 자아성찰·심층 감사 50회, 2차 (고유 결함 37건 수정, v0.1.42 예정)
 
 ### 방법
@@ -53,7 +83,8 @@ LabManager 서버·웹 / 문서·테스트의 6개 영역을 병렬로 감사했
 
 ### 게시 상태
 
-커밋·태그·Release는 아직 게시하지 않았습니다. 사용자 승인 후 `v0.1.42`로 게시합니다.
+사용자 승인 후 `v0.1.42` 태그를 푸시했으나 CI `Test` 단계가 실패해 Release는 생성되지 않았습니다.
+동일 버전을 재게시하지 않고 위 `v0.1.43` 항목에서 재게시했습니다.
 
 ---
 
