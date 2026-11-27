@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.43"
+  #define AppVersion "0.1.44"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -593,6 +593,24 @@ begin
   Result := True;
 end;
 
+function CmdParamExists(const Prefix: String): Boolean;
+var
+  I: Integer;
+  Param, UpperPrefix: String;
+begin
+  Result := False;
+  UpperPrefix := Uppercase(Prefix);
+  for I := 1 to ParamCount do
+  begin
+    Param := Uppercase(RemoveQuotes(ParamStr(I)));
+    if Pos(UpperPrefix, Param) = 1 then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
 function CmdParamValue(const Prefix: String): String;
 var
   I: Integer;
@@ -682,8 +700,8 @@ begin
   end;
 end;
 
-{ 업데이트에서 토큰 교체를 선택한 경우: 외부 파일이 있으면 그것을,
-  없으면 릴리스에 내장된 토큰을 사용한다. }
+{ 토큰 교체를 선택한 경우(첫 설치에서 외부 파일을 명시한 경우 포함):
+  외부 파일이 있으면 그것을, 없으면 릴리스에 내장된 토큰을 사용한다. }
 function ValidateReplacementLabManagerTokens: String;
 var
   Lines: TArrayOfString;
@@ -692,7 +710,7 @@ begin
   Result := '';
   ExternalAdminToken := '';
   ExternalAgentToken := '';
-  if (not ReplaceExistingToken) or FirstInstall then Exit;
+  if not ReplaceExistingToken then Exit;
 
   ExternalTokenFile := Trim(CmdParamValue(ExternalTokenSwitch));
   if ExternalTokenFile <> '' then
@@ -748,8 +766,9 @@ begin
   ExternalAgentToken := AgentToken;
 end;
 
-{ 첫 설치에서는 내장 토큰만 사용한다. 업데이트는 재사용 시 설정을 그대로 두고,
-  교체 선택 시 위의 ValidateReplacementLabManagerTokens가 토큰을 준비한다. }
+{ 첫 설치에서는 외부 토큰 파일이 없을 때만 내장 토큰을 사용한다.
+  외부 파일을 명시한 첫 설치와 업데이트의 교체 선택은
+  위의 ValidateReplacementLabManagerTokens가 토큰을 준비한다. }
 function ValidateBundledLabManagerTokens: String;
 var
   AdminToken, AgentToken: String;
@@ -758,6 +777,9 @@ begin
   BundledAdminToken := '';
   BundledAgentToken := '';
   if not FirstInstall then Exit;
+  { 첫 설치에서 /LabManagerTokenFile=를 명시하면 외부 토큰이 최우선이므로
+    내장 토큰을 읽지 않는다. }
+  if CmdParamExists(ExternalTokenSwitch) then Exit;
 
   Result := LoadBundledLabManagerTokens(AdminToken, AgentToken);
   if Result <> '' then Exit;
@@ -876,7 +898,7 @@ begin
     LastTokenApplyError := 'appsettings.json 접근 권한을 제한하지 못했습니다. ' + LastAclDetail;
 end;
 
-{ 업데이트에서 교체를 선택한 경우에만 실제 토큰 두 개를 설정에 반영한다. }
+{ 교체를 선택한 경우(첫 설치에서 외부 파일을 명시한 경우 포함) 실제 토큰 두 개를 반영한다. }
 function ApplyReplacementLabManagerTokens: Boolean;
 var
   Path, RuntimeTokenPath, Text: String;
@@ -885,7 +907,7 @@ var
 begin
   Result := False;
   LastTokenApplyError := '';
-  if FirstInstall or (not ReplaceExistingToken) or
+  if (not ReplaceExistingToken) or
      (ExternalAdminToken = '') or (ExternalAgentToken = '') then
   begin
     Result := True;
@@ -1020,15 +1042,23 @@ begin
     레지스트리만 남은 재이미징 PC에서도 설정이 없으면 첫 설치로 취급해 fail closed한다. }
   FirstInstall := not HasUsableLabManagerConfig;
 
+  { 명시적으로 빈 값이 오면 내장 토큰이나 기존 토큰으로 조용히 되돌리지 않는다. }
+  if CmdParamExists(ExternalTokenSwitch) and
+     (Trim(CmdParamValue(ExternalTokenSwitch)) = '') then
+  begin
+    Result := ExternalTokenSwitch + ' 값이 비어 있습니다. 토큰 파일 경로를 지정하거나 인자를 생략하세요.';
+    Exit;
+  end;
+
   { 마법사에서 기존 토큰 교체를 선택하면 새 토큰 파일을 요구한다.
     무인 설치에서 /LabManagerTokenFile=를 명시하면 재사용 기본값을 overriding하여
-    토큰 교체로 처리한다. 명시하지 않으면 기존 토큰을 유지한다. }
+    토큰 교체로 처리한다. 첫 설치에서도 외부 파일은 내장 토큰보다 우선한다. }
   ReplaceExistingToken := ((not WizardSilent) and HasExistingTokenForChoice and
     (TokenChoicePage <> nil) and TokenChoicePage.Values[1]) or
     (Trim(CmdParamValue(ExternalTokenSwitch)) <> '');
 
-  { 어떤 것도 지우기 전에 토큰을 검증한다. 첫 설치는 내장 토큰,
-    업데이트의 교체 선택은 /LabManagerTokenFile= 외부 파일을 쓰고, 없으면 내장 토큰을 쓴다. }
+  { 어떤 것도 지우기 전에 토큰을 검증한다. 외부 파일이 명시되면 첫 설치에서도 그것을 쓰고,
+    그 외 첫 설치는 내장 토큰, 업데이트의 교체 선택은 외부 파일(없으면 내장 토큰)을 쓴다. }
   Result := ValidateBundledLabManagerTokens;
   if Result <> '' then Exit;
   Result := ValidateReplacementLabManagerTokens;
@@ -1147,7 +1177,7 @@ var
   Lines: TArrayOfString;
   Code: Integer;
 begin
-  { 복원된 appsettings.json의 포트를 사용한다. 설정이 없으면 5080. }
+  { 오래된 설정이 임의 포트를 열지 못하도록 복원된 설정과 무관하게 5080으로 고정한다. }
   FirewallPort := GetConfiguredFirewallPort;
   ScriptPath := ExpandConstant('{tmp}\UpdateAgentLabManagerFirewall.ps1');
   SetArrayLength(Lines, 4);
@@ -1282,13 +1312,14 @@ begin
         Log('appsettings.json still contains placeholder tokens; LabManager will refuse to start until real tokens are configured.');
     end;
 
-    { 첫 설치에서만 내장 토큰을 appsettings.json에 반영한다.
-      기존 설치를 업데이트하는 경우 이 함수는 아무 것도 바꾸지 않는다. }
+    { 첫 설치에서 외부 토큰 파일을 명시하지 않은 경우에만 내장 토큰을 반영한다.
+      외부 파일을 명시했거나 기존 설치를 업데이트하는 경우 이 함수는 아무 것도 바꾸지 않는다. }
     if not ApplyBundledLabManagerTokens then
       RaiseException('첫 설치용 내장 LabManager 토큰을 설정에 반영하지 못해 설치를 중단합니다. ' +
         LastTokenApplyError);
 
-    { 업데이트에서 교체를 선택한 경우에만 백업에서 복원된 설정의 토큰을 새 값으로 바꾼다. }
+    { 교체를 선택했거나 첫 설치에서 외부 토큰 파일을 명시한 경우 백업에서 복원된
+      설정의 토큰을 새 값으로 바꾼다. 외부 파일은 내장 토큰보다 우선한다. }
     if not ApplyReplacementLabManagerTokens then
       RaiseException('새 LabManager 토큰을 설정에 반영하지 못해 설치를 중단합니다. ' +
         LastTokenApplyError);

@@ -87,7 +87,10 @@ function Read-TokenFile {
     if (-not (Test-Path -LiteralPath $full -PathType Leaf)) {
         throw "$Label token file not found: $full"
     }
-    $value = (Get-Content -LiteralPath $full -Raw).TrimStart([char]0xFEFF).Trim()
+    # Token files are single-line values; ignore any text after the first line.
+    $lines = @(Get-Content -LiteralPath $full -TotalCount 1)
+    if ($lines.Count -eq 0) { return '' }
+    $value = ([string]$lines[0]).TrimStart([char]0xFEFF).Trim()
     if ([string]::IsNullOrWhiteSpace($value)) {
         throw "$Label token file is empty: $full"
     }

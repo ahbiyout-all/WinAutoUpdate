@@ -19,7 +19,7 @@ to upgrade without prompting.
 Run from an elevated 64-bit PowerShell prompt.
 
 .EXAMPLE
-$env:UPDATEAGENT_AGENT_TOKEN = Get-Content ".\agent-token.txt" -Raw
+$env:UPDATEAGENT_AGENT_TOKEN = Get-Content ".\agent-token.txt" -TotalCount 1
 .\scripts\install-agent-msi.ps1 -LabManagerUrl "http://192.168.0.10:5080" -ConfirmMaestro
 
 .EXAMPLE

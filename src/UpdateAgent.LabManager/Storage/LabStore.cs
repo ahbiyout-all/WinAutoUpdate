@@ -310,6 +310,7 @@ public sealed class LabStore
                              created_at, updated_at, summary_json, detail_json)
             VALUES($id, $agent, $machine, $state, $phase, $progress, $created, $updated, $summary, $detail)
             ON CONFLICT(job_id) DO UPDATE SET
+                machine_name = excluded.machine_name,
                 state = excluded.state,
                 phase = excluded.phase,
                 progress = excluded.progress,
@@ -470,6 +471,15 @@ public sealed class LabStore
             MachineName = reader.GetString(2),
         };
     }
+
+    /// <summary>
+    /// 이 에이전트에 새 비종료 작업을 배정할 수 있는지. 체크인 경로와 교사 작업 배정
+    /// 경로가 같은 상한을 사용하도록 공유 판정으로 둔다.
+    /// </summary>
+    public async Task<bool> CanAcceptNewJobAsync(
+        string agentId,
+        CancellationToken cancellationToken = default) =>
+        await CountActiveJobsAsync(agentId, cancellationToken) < MaxActiveJobs;
 
     /// <summary>단일 에이전트가 현재 남긴 비종료 작업 수. 새 작업 상한을 강제할 때 사용한다.</summary>
     public async Task<int> CountActiveJobsAsync(

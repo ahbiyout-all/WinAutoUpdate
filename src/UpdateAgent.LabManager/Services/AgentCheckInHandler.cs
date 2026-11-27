@@ -210,7 +210,7 @@ public static class AgentCheckInHandler
             {
                 var validated = JobStateGuard.Normalize(summary, receivedAt, previous?.Summary);
                 var activeLimitReached = previous is null && !validated.IsTerminal &&
-                    await labStore.CountActiveJobsAsync(agentId, cancellationToken) >= LabStore.MaxActiveJobs;
+                    !await labStore.CanAcceptNewJobAsync(agentId, cancellationToken);
 
                 if (activeLimitReached)
                 {

@@ -8,7 +8,7 @@
 ;    3) 설치 직전 기존 설치 자동 감지 후 무인 제거(Inno/MSI, 설정 파일은 백업/복원)
 ;    4) 개별 파일(Unpacked Multi-File) 설치
 ;    5) 바탕화면 바로가기 선택
-;    6) 서비스 등록 + 방화벽 규칙(기본 이름/버전 이름) 등록
+;    6) 서비스 등록 + 기존 방화벽 규칙 정리(학생 PC는 인바운드 규칙을 만들지 않음)
 ;    7) 서비스 시작 및 상태 확인 실행
 ;
 ;  무인 설치(/VERYSILENT)에서는 안내 화면과 대기 시간을 생략한다.
@@ -27,7 +27,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.43"
+  #define AppVersion "0.1.44"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -128,6 +128,7 @@ var
   AgentConfigRequested: Boolean;
   AgentConfigSkipWrite: Boolean;
   AgentConfigUrl: String;
+  LastAgentBackupCleanupError: String;
   AgentConfigToken: String;
   RunHiddenStarted: Boolean;
   ServiceRecoveryDisabled: Boolean;
@@ -148,6 +149,8 @@ const
 
 procedure ValidateAgentConfigRequest; forward;
 function IsValidExistingAgentConfig(const Path: String): Boolean; forward;
+function RemoveAgentConfigBackup(const Path: String): Boolean; forward;
+function FailWithAgentBackupCleanup(const Message: String): String; forward;
 
 procedure InitializeWizard;
 begin
@@ -330,7 +333,14 @@ begin
     DeleteFile(StatusFile);
     Cmd := '/c ""' + Sc + '" query ' + ServiceName + ' > "' + StatusFile + '" 2>&1"';
     RunHidden(ExpandConstant('{sys}\cmd.exe'), Cmd);
-    if not LoadStringsFromFile(StatusFile, Lines) then Exit;
+    { 상태 파일을 읽지 못하면 정지 여부를 확인할 수 없으므로 fail-closed로 중단한다. }
+    if not LoadStringsFromFile(StatusFile, Lines) then
+    begin
+      Result := False;
+      Log('UpdateAgentService status could not be read: ' + StatusFile);
+      DeleteFile(StatusFile);
+      Exit;
+    end;
     for J := 0 to GetArrayLength(Lines) - 1 do
     begin
       { Parse the numeric state: labels and state names are localized. }
@@ -787,7 +797,8 @@ begin
     Log('Backing up Agent appsettings.json: ' + AgentConfigFile + ' -> ' + AgentConfigBackup);
     if not CopyFile(AgentConfigFile, AgentConfigBackup, False) then
     begin
-      Result := '기존 Agent appsettings.json 백업에 실패해 설치를 중단합니다: ' + AgentConfigBackup;
+      Result := FailWithAgentBackupCleanup(
+        '기존 Agent appsettings.json 백업에 실패해 설치를 중단합니다: ' + AgentConfigBackup);
       Exit;
     end;
     AgentConfigRestoreNeeded := True;
@@ -801,8 +812,9 @@ begin
         '/x ' + OldMsiProduct + ' /qn /norestart', '',
         SW_HIDE, ewWaitUntilTerminated, Code) then
     begin
-      Result := '기존 WiX MSI UpdateAgent Agent 제거에 실패했습니다. (code ' +
-        IntToStr(Code) + ') 설치를 중단합니다.';
+      Result := FailWithAgentBackupCleanup(
+        '기존 WiX MSI UpdateAgent Agent 제거에 실패했습니다. (code ' +
+        IntToStr(Code) + ') 설치를 중단합니다.');
       Exit;
     end;
 
@@ -814,8 +826,9 @@ begin
       { 0/3010/1641은 모두 성공이다. 3010/1641은 재부팅이 필요함을 의미한다. }
       if not (Code in [0, 3010, 1641]) then
       begin
-        Result := '기존 WiX MSI UpdateAgent Agent 제거에 실패했습니다. (code ' +
-          IntToStr(Code) + ') 설치를 중단합니다.';
+        Result := FailWithAgentBackupCleanup(
+          '기존 WiX MSI UpdateAgent Agent 제거에 실패했습니다. (code ' +
+          IntToStr(Code) + ') 설치를 중단합니다.');
         Exit;
       end;
       if Code in [3010, 1641] then
@@ -842,14 +855,16 @@ begin
       if not Exec(UninstallExe, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '',
           SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
       begin
-        Result := '기존 UpdateAgent Agent 제거에 실패했습니다. (code ' +
-          IntToStr(Code) + ') 설치를 중단합니다.';
+        Result := FailWithAgentBackupCleanup(
+          '기존 UpdateAgent Agent 제거에 실패했습니다. (code ' +
+          IntToStr(Code) + ') 설치를 중단합니다.');
         Exit;
       end;
 
       if not WaitForInnoUninstallComplete then
       begin
-        Result := '기존 UpdateAgent Agent 제거가 완료되지 않아 설치를 중단합니다.';
+        Result := FailWithAgentBackupCleanup(
+          '기존 UpdateAgent Agent 제거가 완료되지 않아 설치를 중단합니다.');
         Exit;
       end;
     end;
@@ -975,6 +990,20 @@ begin
   AgentConfigError := '';
   AgentConfigUrl := '';
   AgentConfigToken := '';
+
+  { 명시적으로 빈 값이 오면 INI/내장 값으로 조용히 되돌리지 않고 fail-closed로 중단한다. }
+  if CmdParamExists('/LabManagerUrl=') and (Trim(CmdParamValue('/LabManagerUrl=')) = '') then
+  begin
+    AgentConfigWriteFailed := True;
+    AgentConfigError := '/LabManagerUrl= 값이 비어 있습니다. URL을 지정하거나 인자를 생략하세요.';
+    Exit;
+  end;
+  if CmdParamExists('/AgentTokenFile=') and (Trim(CmdParamValue('/AgentTokenFile=')) = '') then
+  begin
+    AgentConfigWriteFailed := True;
+    AgentConfigError := '/AgentTokenFile= 값이 비어 있습니다. 토큰 파일 경로를 지정하거나 인자를 생략하세요.';
+    Exit;
+  end;
 
   ReplaceExistingToken := False;
   if (not WizardSilent) and HasExistingTokenForChoice and
@@ -1287,6 +1316,7 @@ var
   Attempt: Integer;
 begin
   Result := False;
+  LastAgentBackupCleanupError := '';
   if (Path = '') or (not FileExists(Path)) then
   begin
     Result := True;
@@ -1302,7 +1332,18 @@ begin
     end;
     Sleep(200);
   end;
+  LastAgentBackupCleanupError := '임시 Agent 설정 백업을 삭제하지 못했습니다: ' + Path;
   Log('Could not remove the temporary Agent config backup: ' + Path);
+end;
+
+{ PrepareToInstall 실패 경로에서도 임시 백업에 남은 설정/토큰을 fail-closed로 정리한다. }
+function FailWithAgentBackupCleanup(const Message: String): String;
+begin
+  Result := Message;
+  if (AgentConfigBackup <> '') and
+     (not RemoveAgentConfigBackup(AgentConfigBackup)) then
+    Result := Result + ' ' + LastAgentBackupCleanupError;
+  AgentConfigRestoreNeeded := False;
 end;
 
 procedure WriteAgentConfigIfRequested;
@@ -1372,16 +1413,16 @@ begin
     임시/백업 파일을 정리하고 기존 agent.json은 그대로 둔 채 설치를 중단한다. }
   TempPath := ConfigPath + '.updateagent.tmp';
   BackupPath := ConfigPath + '.updateagent.bak';
-  if FileExists(TempPath) and (not DeleteFile(TempPath)) then
+  if FileExists(TempPath) and (not RemoveAgentConfigBackup(TempPath)) then
   begin
     AgentConfigWriteFailed := True;
-    AgentConfigError := '임시 에이전트 설정 파일을 정리하지 못했습니다: ' + TempPath;
+    AgentConfigError := '임시 에이전트 설정 파일을 정리하지 못했습니다: ' + LastAgentBackupCleanupError;
     Exit;
   end;
-  if FileExists(BackupPath) and (not DeleteFile(BackupPath)) then
+  if FileExists(BackupPath) and (not RemoveAgentConfigBackup(BackupPath)) then
   begin
     AgentConfigWriteFailed := True;
-    AgentConfigError := '이전 에이전트 설정 백업을 정리하지 못했습니다: ' + BackupPath;
+    AgentConfigError := '이전 에이전트 설정 백업을 정리하지 못했습니다: ' + LastAgentBackupCleanupError;
     Exit;
   end;
 
@@ -1395,14 +1436,19 @@ begin
   if RunHidden(ExpandConstant('{sys}\icacls.exe'),
       '"' + TempPath + '" /inheritance:r /grant:r "*S-1-5-32-544:(F)" "*S-1-5-18:(R)"') <> 0 then
   begin
-    DeleteFile(TempPath);
+    RemoveAgentConfigBackup(TempPath);
     AgentConfigWriteFailed := True;
     AgentConfigError := '임시 에이전트 설정 파일 권한을 제한하지 못했습니다: ' + TempPath;
     Exit;
   end;
   if not SaveStringsToUTF8File(TempPath, Lines, False) then
   begin
-    DeleteFile(TempPath);
+    if not RemoveAgentConfigBackup(TempPath) then
+    begin
+      AgentConfigWriteFailed := True;
+      AgentConfigError := LastAgentBackupCleanupError;
+      Exit;
+    end;
     AgentConfigWriteFailed := True;
     AgentConfigError := '임시 에이전트 설정 파일을 쓸 수 없습니다: ' + TempPath;
     Exit;
@@ -1412,7 +1458,12 @@ begin
   begin
     if not RenameFile(ConfigPath, BackupPath) then
     begin
-      DeleteFile(TempPath);
+      if not RemoveAgentConfigBackup(TempPath) then
+      begin
+        AgentConfigWriteFailed := True;
+        AgentConfigError := LastAgentBackupCleanupError;
+        Exit;
+      end;
       AgentConfigWriteFailed := True;
       AgentConfigError := '기존 에이전트 설정 파일을 백업하지 못했습니다: ' + BackupPath;
       Exit;
@@ -1423,7 +1474,18 @@ begin
   begin
     if FileExists(BackupPath) then
       RenameFile(BackupPath, ConfigPath);
-    DeleteFile(TempPath);
+    if not RemoveAgentConfigBackup(TempPath) then
+    begin
+      AgentConfigWriteFailed := True;
+      AgentConfigError := LastAgentBackupCleanupError;
+      Exit;
+    end;
+    if FileExists(BackupPath) then
+    begin
+      AgentConfigWriteFailed := True;
+      AgentConfigError := '기존 에이전트 설정 백업을 복구하지 못했습니다: ' + BackupPath;
+      Exit;
+    end;
     AgentConfigWriteFailed := True;
     AgentConfigError := '임시 에이전트 설정 파일을 적용하지 못했습니다: ' + ConfigPath;
     Exit;
@@ -1491,7 +1553,9 @@ begin
       { [Files] may have created appsettings.json with onlyifdoesntexist; overwrite with the backup. }
       if not CopyFile(AgentConfigBackup, AgentConfigFile, False) then
         RaiseException('기존 Agent appsettings.json 복원에 실패해 설치를 중단합니다. 백업: ' + AgentConfigBackup);
-      DeleteFile(AgentConfigBackup);
+      if not RemoveAgentConfigBackup(AgentConfigBackup) then
+        RaiseException('임시 Agent 설정 백업을 삭제하지 못해 설치를 중단합니다. ' +
+          LastAgentBackupCleanupError);
       AgentConfigRestoreNeeded := False;
     end;
 

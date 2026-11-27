@@ -5,6 +5,58 @@
 
 ---
 
+## 2026-11-27 자아성찰·심층 감사 50회, 3차 (고유 결함 13건 수정, v0.1.44 예정)
+
+### 방법
+
+인스톨러 / 스크립트·릴리스 워크플로 / Core·Shared / 에이전트 런타임 /
+LabManager 서버·웹 / 문서의 6개 영역을 병렬로 다시 감사했습니다.
+코드 검사와 최소 재현으로 입증된 결함만 수정했고, 추정은 반영하지 않았습니다.
+문서 영역에서는 새로운 결함이 확인되지 않았습니다.
+
+| 영역 | 확인·수정 건수 |
+|---|---:|
+| 인스톨러(.iss) | 5 |
+| 스크립트·릴리스 워크플로 | 3 |
+| Core·Shared | 2 |
+| 에이전트 런타임 | 1 |
+| LabManager 서버·웹 | 2 |
+| 문서 | 0 |
+| **합계** | **13** |
+
+### 주요 수정
+
+| 영역 | 수정 내용 |
+|---|---|
+| 인스톨러 | 서비스 상태 파일 읽기 실패 fail-closed, 토큰 임시 백업 정리 재시도·실패 중단, 명시적 빈 CLI 값 fail-closed, LabManager 첫 설치에서도 외부 토큰 파일 우선, 교사 방화벽 5080 고정 주석 정리 |
+| 스크립트·워크플로 | `setup-labmanager-lab.ps1`의 토큰 파일 첫 줄 읽기, `install-agent-msi.ps1` 도움말 예제 첫 줄 읽기, `github-push.ps1` 시크릿 스캔 상한을 파일별로 변경 |
+| Core·Shared | `MaxPauseHours` 오버플로 시 작업 실패 대신 일시중지 유지, 재개 시 저장된 `PauseUntil`을 마감 시각으로 해석해 최대 일시중지 시간이 연장되던 문제 수정 |
+| 에이전트 런타임 | `sc.exe`의 `WIN32_EXIT_CODE`를 서비스 상태로 오인하던 문제 수정. `STATE` 줄만 파싱해 중지 서비스가 '실행 중'으로 표시되지 않도록 함 |
+| LabManager | 상세 체크인 시 `machine_name` 갱신 누락 수정, 교사 StartJob도 에이전트별 활성 작업 500건 상한을 공유 판정으로 적용 |
+| 문서 | 결함 없음. 현재 버전·동작 설명과 코드가 일치함을 확인 |
+
+### 검증
+
+- `dotnet build UpdateAgent.sln -c Release`: 경고 0, 오류 0
+- `dotnet test tests\UpdateAgent.Tests\UpdateAgent.Tests.csproj -c Release`:
+  **395개 통과, 0 실패, 0 건너뜀**(3차 신규 32건 포함)
+- PowerShell 18개 파일 파서 오류 0, `app.js`/`monitor.js` 구문 검사 0,
+  `.github/workflows/release.yml` YAML 파싱 성공
+- 두 `.iss` 파일 UTF-8 BOM 유지, 샘플 `agent-install.ini` 무-BOM 유지
+- `scripts\publish.ps1` → `scripts\build-inno.ps1 -NoPublish` → `scripts\build-msi.ps1` 성공
+
+| 산출물(로컬 검증 빌드) | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.44-x64.exe` | `e7e720cfc43fb41c119e07b20b4096e6f52078abea08c4f43897fed10c092601` |
+| `UpdateAgent.LabManager-Setup-0.1.44-x64.exe` | `bf06f302516f4214d0b1a4a396be0e8ead7f628c0677c18b276619b0203d03c5` |
+| `UpdateAgent.Agent-0.1.44-x64.msi` | `24b9f8ad056e1f94a1e892d491d8e576244e922122f65a1c1dd0a9f18a2697ec` |
+
+### 게시 상태
+
+커밋·태그·Release는 아직 게시하지 않았습니다. 사용자 승인 후 `v0.1.44`로 게시합니다.
+
+---
+
 ## 2026-11-27 CI 환경 의존 테스트 수정 (v0.1.43)
 
 ### 원인

@@ -501,7 +501,13 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         // 교사가 명시적으로 ResumeJob를 보내기 전까지 대기한다.
         var resumePaused = context.State == UpdateJobState.Paused;
         _pauseReason = resumePaused ? context.PauseReason : PauseReason.None;
-        _pausedSince = resumePaused ? context.PauseUntil ?? UtcClock.Now : null;
+        // PauseUntil은 마감 시각이지 일시중지 시작 시각이 아니다. 저장된 마감을 그대로
+        // _pausedSince로 쓰면 재시작할 때마다 최대 일시중지 시간이 다시 더해진다.
+        _pausedSince = resumePaused
+            ? context.PauseUntil.HasValue && context.Policy.MaxPauseHours > 0
+                ? SubtractHoursSafely(context.PauseUntil.Value, context.Policy.MaxPauseHours)
+                : UtcClock.Now
+            : null;
         _manualPause = resumePaused && context.PauseReason == PauseReason.Manual;
         _runCts = new CancellationTokenSource();
         var token = _runCts.Token;
@@ -843,7 +849,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             : "교사 일시중지";
         context.PauseReason = _pauseReason;
         context.PauseUntil = policy.MaxPauseHours > 0 && _pausedSince.HasValue
-            ? _pausedSince.Value.AddHours(policy.MaxPauseHours)
+            ? AddHoursSafely(_pausedSince.Value, policy.MaxPauseHours)
             : null;
         context.Message = _pauseReason switch
         {
@@ -881,9 +887,11 @@ public sealed class UpdateJobRunner : IAsyncDisposable
                 // 조회 실패는 "사용자 없음"이 아니므로 계속 대기한다(fail closed).
                 if (!probe.ProbeFailed && probe.Sessions.Count == 0) break;
 
+                // TimeSpan.FromHours(int.MaxValue)는 오버플로한다. double 비교로
+                // 매우 큰 값도 안전하게 "아직 만료되지 않음"으로 처리한다.
                 if (policy.MaxPauseHours > 0
                     && _pausedSince.HasValue
-                    && UtcClock.Now - _pausedSince.Value > TimeSpan.FromHours(policy.MaxPauseHours))
+                    && (UtcClock.Now - _pausedSince.Value).TotalHours > policy.MaxPauseHours)
                 {
                     _logger.LogWarning(
                         "사용자 로그온 일시중지가 최대 시간({Hours}시간)을 초과하여 작업을 재개합니다.",
@@ -1109,6 +1117,25 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         {
             context.Message = $"{item.KbArticleIds}은(는) {failureCount}회 실패하여 제외했습니다.";
         }
+    }
+
+    /// <summary>
+    /// DateTimeOffset.AddHours는 int 최댓값처럼 큰 시간에서 오버플로한다.
+    /// 표현 가능한 범위까지만 더해 마감 시각을 안전하게 계산한다.
+    /// </summary>
+    private static DateTimeOffset AddHoursSafely(DateTimeOffset value, int hours)
+    {
+        if (hours <= 0) return value;
+        // double 시간 계산의 반올림으로 경계를 넘지 않도록 1시간 여유를 두고 딱 잘라낸다.
+        var availableHours = (DateTimeOffset.MaxValue - value).TotalHours;
+        return hours >= availableHours - 1 ? DateTimeOffset.MaxValue : value.AddHours(hours);
+    }
+
+    private static DateTimeOffset SubtractHoursSafely(DateTimeOffset value, int hours)
+    {
+        if (hours <= 0) return value;
+        var availableHours = (value - DateTimeOffset.MinValue).TotalHours;
+        return hours >= availableHours - 1 ? DateTimeOffset.MinValue : value.AddHours(-hours);
     }
 
     private void CheckRuntimeLimit(JobContext context)

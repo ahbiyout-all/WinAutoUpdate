@@ -23,6 +23,12 @@ public sealed record AgentStatusSnapshot(
 /// </summary>
 public sealed class AgentStatusReader
 {
+    // sc.exe 출력의 STATE 줄만 읽는다. WIN32_EXIT_CODE 같은 다른 숫자 필드의 값을
+    // 상태 코드로 오인하지 않도록 상태 문구(RUNNING/STOPPED 등)가 붙은 줄만 매칭한다.
+    private static readonly Regex ServiceStateLinePattern = new(
+        @"^[ \t]*[^:\r\n]*:[ \t]*(?<state>[0-9]+)[ \t]+(?:RUNNING|STOPPED|PAUSED|PAUSE_PENDING|CONTINUE_PENDING|START_PENDING|STOP_PENDING)\b",
+        RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     public async Task<AgentStatusSnapshot> ReadAsync(CancellationToken cancellationToken = default)
     {
         JobSummary? active = null;
@@ -74,15 +80,31 @@ public sealed class AgentStatusReader
             var output = process.StandardOutput.ReadToEnd();
             process.WaitForExit();
 
-            if (process.ExitCode != 0) return "설치되지 않음";
-            if (Regex.IsMatch(output, @":\s*4\b")) return "실행 중";
-            if (Regex.IsMatch(output, @":\s*1\b")) return "중지됨";
-            return "상태 확인 필요";
+            return ResolveServiceStatus(output, process.ExitCode);
         }
         catch
         {
             return "확인 불가";
         }
+    }
+
+    /// <summary>
+    /// sc.exe 질의 결과에서 서비스 상태를 해석한다. STATE 줄의 숫자만 사용하므로
+    /// WIN32_EXIT_CODE가 1/4여도 실행/중지 상태가 뒤집히지 않는다.
+    /// </summary>
+    internal static string ResolveServiceStatus(string output, int exitCode)
+    {
+        if (exitCode != 0) return "설치되지 않음";
+
+        var match = ServiceStateLinePattern.Match(output);
+        if (!match.Success) return "상태 확인 필요";
+
+        return match.Groups["state"].Value switch
+        {
+            "4" => "실행 중",
+            "1" => "중지됨",
+            _ => "상태 확인 필요",
+        };
     }
 
     private static string ReadLabManagerUrl() => ReadLabManagerUrl(DefaultCandidatePaths());

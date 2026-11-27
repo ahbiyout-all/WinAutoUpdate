@@ -516,6 +516,15 @@ app.MapPost("/api/admin/jobs/start", async (
             continue;
         }
 
+        // 체크인 경로만 상한을 검사하면 교사가 같은 PC에 작업을 반복 배정할 때
+        // MaxActiveJobs를 무한히 넘어 스냅샷에 "확인 불가" 작업이 계속 쌓인다.
+        // 교사 배정도 체크인과 같은 CanAcceptNewJobAsync 판정을 사용한다.
+        if (!await labStore.CanAcceptNewJobAsync(agentId, cancellationToken))
+        {
+            errors.Add($"{agent.Agent.MachineName}: 활성 작업 {LabStore.MaxActiveJobs}건 상한에 도달했습니다.");
+            continue;
+        }
+
         var os = agent.Agent.Os;
         var (policy, policyWarnings) = await agentPolicies.ResolveForStartAsync(
             agentId, os, request.Policy, request.SaveAsAgentPolicy,

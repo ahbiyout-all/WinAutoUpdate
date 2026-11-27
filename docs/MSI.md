@@ -453,8 +453,8 @@ installer\
 artifacts\
   staging\                    ← build-msi.ps1이 만드는 임시 게시물
   msi\
-    UpdateAgent.Agent-0.1.43-x64.msi
-    UpdateAgent.Agent-0.1.43-x64.msi.sha256
+    UpdateAgent.Agent-0.1.44-x64.msi
+    UpdateAgent.Agent-0.1.44-x64.msi.sha256
     build-info.json
 ```
 
@@ -465,7 +465,7 @@ artifacts\
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
-    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.43</ProductVersion>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.44</ProductVersion>
     <PublishRoot Condition="'$(PublishRoot)' == ''">$(MSBuildThisFileDirectory)..\..\publish</PublishRoot>
     <DefineConstants>ProductVersion=$(ProductVersion);PublishRoot=$(PublishRoot)</DefineConstants>
   </PropertyGroup>
@@ -494,7 +494,7 @@ artifacts\
 
 ```powershell
 .\scripts\publish.ps1
-.\scripts\build-msi.ps1 -ProductVersion 0.1.43
+.\scripts\build-msi.ps1 -ProductVersion 0.1.44
 ```
 
 ```powershell
@@ -503,12 +503,12 @@ dotnet build .\installer\UpdateAgent.Agent.Installer\UpdateAgent.Agent.Installer
   -c Release `
   -t:Rebuild `
   -p:Platform=x64 `
-  -p:ProductVersion=0.1.43 `
+  -p:ProductVersion=0.1.44 `
   -p:PublishRoot="$PWD\artifacts\staging"
 
 # 검증 (저장소 루트에서)
 dotnet tool restore
-dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.43-x64.msi
+dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.44-x64.msi
 ```
 
 ### 8-4. 버전 규칙
@@ -591,13 +591,13 @@ $env:UPDATEAGENT_AGENT_TOKEN = Get-Content ".\pilot-agent-token.txt" -Raw
 
 ```powershell
 # 최소 UI (수동 설치)
-msiexec /i ".\UpdateAgent.Agent-0.1.43-x64.msi" /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.44-x64.msi" /norestart /l*v ".\install.log"
 
 # 무인 설치
-msiexec /i ".\UpdateAgent.Agent-0.1.43-x64.msi" /qn /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.44-x64.msi" /qn /norestart /l*v ".\install.log"
 
 # 무인 + CLI
-msiexec /i ".\UpdateAgent.Agent-0.1.43-x64.msi" /qn /norestart ADDLOCAL=CliFeature
+msiexec /i ".\UpdateAgent.Agent-0.1.44-x64.msi" /qn /norestart ADDLOCAL=CliFeature
 ```
 
 - 토큰/URL은 이 명령으로 설정되지 않습니다. 설치 후 래퍼 또는 `configure-agent.ps1`을 실행해야 원격 관리가 활성화됩니다.
@@ -616,7 +616,7 @@ msiexec /i ".\UpdateAgent.Agent-0.1.43-x64.msi" /qn /norestart ADDLOCAL=CliFeatu
 ### 10-4. 제거
 
 ```powershell
-msiexec /x ".\UpdateAgent.Agent-0.1.43-x64.msi" /qn /norestart /l*v ".\uninstall.log"
+msiexec /x ".\UpdateAgent.Agent-0.1.44-x64.msi" /qn /norestart /l*v ".\uninstall.log"
 ```
 
 또는:
