@@ -195,9 +195,14 @@ public sealed class CommandExecutor
             {
                 var payload = Deserialize<StartJobCommandPayload>(command.PayloadJson)
                               ?? new StartJobCommandPayload();
+                // 원격 페이로드는 신뢰할 수 없다. ApplyPolicy 경로와 같은 실행 규칙으로
+                // 정규화하고 Maestro 수동 확인 게이트를 반드시 다시 켠다.
+                // 확인 여부는 페이로드의 확인 플래그에서만 가져온다(정책 플래그로 우회 불가).
+                var policy = payload.Policy.ForExecution(WindowsOsInfoProvider.GetCurrent())
+                    with { RequireMaestroManualConfirmation = true };
                 var result = await _runner.StartAsync(
-                    payload.Policy,
-                    payload.MaestroConfirmed || !payload.Policy.RequireMaestroManualConfirmation,
+                    policy,
+                    payload.MaestroConfirmed,
                     payload.ConfirmedBy,
                     payload.JobId,
                     cancellationToken);

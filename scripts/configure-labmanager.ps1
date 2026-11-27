@@ -30,12 +30,19 @@ if ([string]::IsNullOrWhiteSpace($PublishDir)) {
 }
 $PublishDir = [IO.Path]::GetFullPath($PublishDir)
 
+function Read-FirstTokenLine {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Secret file not found: $Path" }
+    $lines = @(Get-Content -LiteralPath $Path -TotalCount 1)
+    if ($lines.Count -eq 0) { return '' }
+    return ([string]$lines[0]).TrimStart([char]0xFEFF).Trim()
+}
+
 function Resolve-Secret {
     param([string]$Value, [string]$File, [string]$EnvName, [string]$Prompt)
     if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value.TrimStart([char]0xFEFF).Trim() }
     if (-not [string]::IsNullOrWhiteSpace($File)) {
-        if (-not (Test-Path -LiteralPath $File)) { throw "Secret file not found: $File" }
-        return (Get-Content -LiteralPath $File -Raw).TrimStart([char]0xFEFF).Trim()
+        return Read-FirstTokenLine -Path $File
     }
     if (-not [string]::IsNullOrWhiteSpace($EnvName)) {
         $fromEnv = [Environment]::GetEnvironmentVariable($EnvName, "Process")

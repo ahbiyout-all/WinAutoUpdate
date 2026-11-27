@@ -32,7 +32,13 @@ public static class AgentCheckInHandler
         CancellationToken cancellationToken)
     {
         // 공유 에이전트 토큰으로 임의 ID를 무한 생성해 DB/메모리를 오염시키지 않는다.
-        var agentId = request.Agent.AgentId;
+        // 모든 서버 경로가 같은 정규화 ID를 쓰도록 체크인 진입점에서 한 번만 정규화한다.
+        var agentId = AgentIdGuard.Canonical(request.Agent.AgentId);
+        request = request with
+        {
+            Agent = request.Agent with { AgentId = agentId },
+            Telemetry = request.Telemetry with { AgentId = agentId },
+        };
         if (!TextGuard.IsSafeIdentifier(agentId))
         {
             await labStore.AddAuditAsync(
@@ -53,7 +59,7 @@ public static class AgentCheckInHandler
         var summary = request.Telemetry.CurrentJob;
         var commandResults = request.CommandResults ?? [];
 
-        if (!JobStateGuard.AgentIdsMatch(request.Agent.AgentId, request.Telemetry.AgentId))
+        if (!JobStateGuard.AgentIdsMatch(agentId, request.Telemetry.AgentId))
         {
             await labStore.AddAuditAsync(
                 "agent", "job-state-rejected",
@@ -89,7 +95,7 @@ public static class AgentCheckInHandler
         }
 
         var foreignResults = commandResults
-            .Where(r => !string.Equals(r.AgentId, request.Agent.AgentId, StringComparison.OrdinalIgnoreCase))
+            .Where(r => !string.Equals(r.AgentId, agentId, StringComparison.OrdinalIgnoreCase))
             .ToList();
         if (foreignResults.Count > 0)
         {
@@ -119,7 +125,7 @@ public static class AgentCheckInHandler
         if (commandResults.Count > 0)
         {
             var accepted = await labStore.CompleteCommandResultsAsync(
-                request.Agent.AgentId, commandResults, cancellationToken);
+                agentId, commandResults, cancellationToken);
             var resultOutcomes = new List<CommandResultOutcome>(commandResults.Count);
             var rejectedAuditRows = 0;
             var rejectedTotal = 0;
@@ -176,14 +182,14 @@ public static class AgentCheckInHandler
             foreach (var result in commandResults.Where(r => !r.Success && accepted.Contains(r.CommandId)))
             {
                 await FailJobForRejectedCommandAsync(
-                    labStore, request.Agent.AgentId, result, receivedAt, cancellationToken);
+                    labStore, agentId, result, receivedAt, cancellationToken);
             }
         }
 
         if (summary is not null)
         {
             var previous = await labStore.GetJobAsync(summary.JobId, cancellationToken);
-            if (!JobStateGuard.CanAccept(previous?.Summary, summary, request.Agent.AgentId, receivedAt))
+            if (!JobStateGuard.CanAccept(previous?.Summary, summary, agentId, receivedAt))
             {
                 await labStore.AddAuditAsync(
                     "agent", "job-state-rejected",
@@ -203,48 +209,64 @@ public static class AgentCheckInHandler
             else
             {
                 var validated = JobStateGuard.Normalize(summary, receivedAt, previous?.Summary);
-                if (request.Telemetry.CurrentJobDetail is { } detail)
+                var activeLimitReached = previous is null && !validated.IsTerminal &&
+                    await labStore.CountActiveJobsAsync(agentId, cancellationToken) >= LabStore.MaxActiveJobs;
+
+                if (activeLimitReached)
                 {
-                    // 상세의 요약은 검증된 요약으로 교체해 별도로 위조된 값이 저장되지 않게 한다.
-                    await labStore.SaveJobAsync(
-                        detail with { Summary = validated },
-                        request.Agent.MachineName,
+                    // 공유 토큰으로 새 작업 ID를 무한 생성해 SSE 스냅샷을 키우는 것을 막는다.
+                    // 저장하지 않았으므로 대시보드에는 해당 작업을 "확인 불가"로 표시한다.
+                    await labStore.AddAuditAsync(
+                        "agent", "job-active-cap-rejected",
+                        $"{request.Agent.MachineName}/{validated.JobId}",
+                        $"비종료 작업 {LabStore.MaxActiveJobs}건 상한으로 새 작업은 저장하지 않음(확인 불가)",
                         cancellationToken);
                 }
                 else
                 {
-                    await labStore.SaveJobSummaryAsync(validated, request.Agent.MachineName, cancellationToken);
-                }
-
-                if (validated.RequiresMaestroAttention &&
-                    await labStore.GetChecklistAsync(summary.JobId, cancellationToken) is null)
-                {
-                    // 학생용 앱에서 시작한 작업은 체크인으로 처음 발견된다.
-                    // 서비스가 학생 확인을 받아 시작한 작업이므로 보호 해제 확인을 기록해
-                    // 대시보드에서 재부팅 후 Maestro 단계를 계속 관리할 수 있게 한다.
-                    await labStore.SaveChecklistAsync(new MaestroChecklist
+                    if (request.Telemetry.CurrentJobDetail is { } detail)
                     {
-                        JobId = summary.JobId,
-                        ProtectionSuspendedConfirmed = true,
-                        ProtectionSuspendedConfirmedAt = receivedAt,
-                        ConfirmedBy = "student",
-                        RequiresManualConfirmation = true,
-                    }, cancellationToken);
-                }
+                        // 상세의 요약은 검증된 요약으로 교체해 별도로 위조된 값이 저장되지 않게 한다.
+                        await labStore.SaveJobAsync(
+                            detail with { Summary = validated },
+                            request.Agent.MachineName,
+                            cancellationToken);
+                    }
+                    else
+                    {
+                        await labStore.SaveJobSummaryAsync(validated, request.Agent.MachineName, cancellationToken);
+                    }
 
-                if (previous is null || previous.Summary.State != validated.State)
-                {
-                    await labStore.AddAuditAsync(
-                        "agent", "job-state",
-                        $"{request.Agent.MachineName}/{validated.JobId}",
-                        $"{previous?.Summary.State.ToString() ?? "없음"} → {validated.State} ({validated.Phase})",
-                        cancellationToken);
+                    if (validated.RequiresMaestroAttention &&
+                        await labStore.GetChecklistAsync(summary.JobId, cancellationToken) is null)
+                    {
+                        // 학생용 앱에서 시작한 작업은 체크인으로 처음 발견된다.
+                        // 서비스가 학생 확인을 받아 시작한 작업이므로 보호 해제 확인을 기록해
+                        // 대시보드에서 재부팅 후 Maestro 단계를 계속 관리할 수 있게 한다.
+                        await labStore.SaveChecklistAsync(new MaestroChecklist
+                        {
+                            JobId = summary.JobId,
+                            ProtectionSuspendedConfirmed = true,
+                            ProtectionSuspendedConfirmedAt = receivedAt,
+                            ConfirmedBy = "student",
+                            RequiresManualConfirmation = true,
+                        }, cancellationToken);
+                    }
+
+                    if (previous is null || previous.Summary.State != validated.State)
+                    {
+                        await labStore.AddAuditAsync(
+                            "agent", "job-state",
+                            $"{request.Agent.MachineName}/{validated.JobId}",
+                            $"{previous?.Summary.State.ToString() ?? "없음"} → {validated.State} ({validated.Phase})",
+                            cancellationToken);
+                    }
                 }
             }
         }
 
         var commands = await labStore.TakePendingCommandsAsync(
-            request.Agent.AgentId,
+            agentId,
             MaxCommandsPerCheckIn,
             cancellationToken);
 

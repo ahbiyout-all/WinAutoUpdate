@@ -5,6 +5,58 @@
 
 ---
 
+## 2026-11-26 자아성찰·심층 감사 50회, 2차 (고유 결함 37건 수정, v0.1.42 예정)
+
+### 방법
+
+인스톨러 / 스크립트·릴리스 워크플로 / Core·Shared / 에이전트 런타임 /
+LabManager 서버·웹 / 문서·테스트의 6개 영역을 병렬로 감사했습니다.
+코드 실행·재현으로 입증된 결함만 수정했고, 추정은 반영하지 않았습니다.
+재부팅/세션 조회 실패는 Core와 런타임 양쪽에서 보고되어 하나의 결함으로 합쳤습니다.
+
+| 영역 | 확인·수정 건수 |
+|---|---:|
+| 인스톨러(.iss) | 7 |
+| 스크립트·릴리스 워크플로 | 7 |
+| Core·Shared | 10 |
+| 에이전트 런타임(중복 2건 제외) | 6 |
+| LabManager 서버·웹 | 4 |
+| 문서·테스트 | 3 |
+| **합계** | **37** |
+
+### 주요 수정
+
+| 영역 | 수정 내용 |
+|---|---|
+| 인스톨러 | Agent 서비스 `sc query` 따옴표 수정, INI BOM 원본 바이트 검사, 언인스톨 종료 실패 시 방화벽 변경 전 중단, 토큰 백업 삭제 실패 fail-closed, LabManager 무인 설치에서 `/LabManagerTokenFile=` 교체 인식 |
+| 스크립트·워크플로 | 토큰 파일 첫 줄만 읽기, 빌드 스테이징 토큰 검증 순서·실패 정리, 플레이스홀더 2종 거부, 배포 `-Verify`가 `install-agent.cmd` 해시 검증, 시크릿 스캔 파일 간 계속, 릴리스 노트 절단 표시, 64비트 PowerShell 요구, 명시적 빈 토큰 파일 거부 |
+| Core·Shared | 재시작 시 in-flight 항목 재큐잉, 체크리스트 손상 시 타 작업 확인 보존, 보조 마커 실패 fail-closed, 무진행 카운터 영속화, `MaxRuntimeHours` 오버플로 제거, 재부팅/세션 조회 tri-state, 비수동 일시정지 고정, 종료를 교사 취소로 오기록하지 않음, WUA `LastError` 확인 불가 처리 |
+| 에이전트 런타임 | `--pause-on-user` 정책 반영, 오프라인 백오프 상한 300초, 복구 알림 우선, 오버레이 정지 클라이언트 차단 방지, 설정 확인 실패 시 URL `확인 불가`, StartJob 페이로드의 Maestro 게이트 무효화 차단 |
+| LabManager | 대소문자 중복 정책 키 충돌 제거, 에이전트 ID 단일 정규화, 중복 행 마이그레이션, 활성 작업 상한과 숨은 작업 `확인 불가` 표시 |
+| 문서·테스트 | 고정 테스트 수 제거, Agent/LabManager 언인스톨 차이 명시, 패치 버전 예시 정정 |
+
+### 검증
+
+- `dotnet build UpdateAgent.sln -c Release`: 경고 0, 오류 0
+- `dotnet test tests\UpdateAgent.Tests\UpdateAgent.Tests.csproj -c Release`:
+  **363개 통과, 0 실패, 0 건너뜀**(신규 50건 포함)
+- PowerShell 13개 파일 파서 오류 0, `app.js`/`monitor.js` 구문 검사 0,
+  `.github/workflows/release.yml` YAML 파싱 성공
+- 두 `.iss` 파일 UTF-8 BOM 유지, 샘플 `agent-install.ini` 무-BOM 유지
+- `scripts\publish.ps1` → `scripts\build-inno.ps1 -NoPublish` → `scripts\build-msi.ps1` 성공
+
+| 산출물(로컬 검증 빌드) | SHA-256 |
+|---|---|
+| `UpdateAgent.Agent-Setup-0.1.42-x64.exe` | `a41ff16c52b7c9e6696fecbbe6c7eb2a1a318e899831496147952fad1c89ecc4` |
+| `UpdateAgent.LabManager-Setup-0.1.42-x64.exe` | `8a98dbd71cbfbde2be10b8997dbc6df3882e81e9f8a6d62ba35d0f6ed9883ae9` |
+| `UpdateAgent.Agent-0.1.42-x64.msi` | `da424116dd43cd98c4634cbb21424917b49b2120c9ec3f8e4023fe7faca2126a` |
+
+### 게시 상태
+
+커밋·태그·Release는 아직 게시하지 않았습니다. 사용자 승인 후 `v0.1.42`로 게시합니다.
+
+---
+
 ## 2026-11-26 LabManager 토큰 교체 설치 ACL 실패 수정 (v0.1.41)
 
 ### 보고

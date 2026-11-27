@@ -453,8 +453,8 @@ installer\
 artifacts\
   staging\                    ← build-msi.ps1이 만드는 임시 게시물
   msi\
-    UpdateAgent.Agent-0.1.41-x64.msi
-    UpdateAgent.Agent-0.1.41-x64.msi.sha256
+    UpdateAgent.Agent-0.1.42-x64.msi
+    UpdateAgent.Agent-0.1.42-x64.msi.sha256
     build-info.json
 ```
 
@@ -465,7 +465,7 @@ artifacts\
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
-    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.41</ProductVersion>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.42</ProductVersion>
     <PublishRoot Condition="'$(PublishRoot)' == ''">$(MSBuildThisFileDirectory)..\..\publish</PublishRoot>
     <DefineConstants>ProductVersion=$(ProductVersion);PublishRoot=$(PublishRoot)</DefineConstants>
   </PropertyGroup>
@@ -494,7 +494,7 @@ artifacts\
 
 ```powershell
 .\scripts\publish.ps1
-.\scripts\build-msi.ps1 -ProductVersion 0.1.41
+.\scripts\build-msi.ps1 -ProductVersion 0.1.42
 ```
 
 ```powershell
@@ -503,12 +503,12 @@ dotnet build .\installer\UpdateAgent.Agent.Installer\UpdateAgent.Agent.Installer
   -c Release `
   -t:Rebuild `
   -p:Platform=x64 `
-  -p:ProductVersion=0.1.41 `
+  -p:ProductVersion=0.1.42 `
   -p:PublishRoot="$PWD\artifacts\staging"
 
 # 검증 (저장소 루트에서)
 dotnet tool restore
-dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.41-x64.msi
+dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.42-x64.msi
 ```
 
 ### 8-4. 버전 규칙
@@ -591,13 +591,13 @@ $env:UPDATEAGENT_AGENT_TOKEN = Get-Content ".\pilot-agent-token.txt" -Raw
 
 ```powershell
 # 최소 UI (수동 설치)
-msiexec /i ".\UpdateAgent.Agent-0.1.41-x64.msi" /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.42-x64.msi" /norestart /l*v ".\install.log"
 
 # 무인 설치
-msiexec /i ".\UpdateAgent.Agent-0.1.41-x64.msi" /qn /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.42-x64.msi" /qn /norestart /l*v ".\install.log"
 
 # 무인 + CLI
-msiexec /i ".\UpdateAgent.Agent-0.1.41-x64.msi" /qn /norestart ADDLOCAL=CliFeature
+msiexec /i ".\UpdateAgent.Agent-0.1.42-x64.msi" /qn /norestart ADDLOCAL=CliFeature
 ```
 
 - 토큰/URL은 이 명령으로 설정되지 않습니다. 설치 후 래퍼 또는 `configure-agent.ps1`을 실행해야 원격 관리가 활성화됩니다.
@@ -616,7 +616,7 @@ msiexec /i ".\UpdateAgent.Agent-0.1.41-x64.msi" /qn /norestart ADDLOCAL=CliFeatu
 ### 10-4. 제거
 
 ```powershell
-msiexec /x ".\UpdateAgent.Agent-0.1.41-x64.msi" /qn /norestart /l*v ".\uninstall.log"
+msiexec /x ".\UpdateAgent.Agent-0.1.42-x64.msi" /qn /norestart /l*v ".\uninstall.log"
 ```
 
 또는:
@@ -723,7 +723,7 @@ msiexec /x ".\UpdateAgent.Agent-0.1.41-x64.msi" /qn /norestart /l*v ".\uninstall
 
 ### 파일럿 전 추가 확인
 
-- [ ] `dotnet test` 전체 통과 (252개)
+- [ ] `dotnet test` 전체 통과 (실패 0, 건너뜀 0; 통과 수는 실행 출력 기준)
 - [ ] `dotnet build UpdateAgent.sln` 경고 0/오류 0
 - [ ] MSI SHA-256 기록
 - [ ] 서명 검증 (`signtool verify /pa /all`)
@@ -765,7 +765,7 @@ msiexec /x ".\UpdateAgent.Agent-0.1.41-x64.msi" /qn /norestart /l*v ".\uninstall
 
 | # | 항목 | 상태 |
 |---|---|---|
-| 1 | 코드 변경 (`agent.json`, `AgentVersion`, SessionHelper 폴백) + 단위 테스트 | 완료 (테스트 252개 통과) |
+| 1 | 코드 변경 (`agent.json`, `AgentVersion`, SessionHelper 폴백) + 단위 테스트 | 완료 (`dotnet test` 실패 0, 건너뜀 0) |
 | 2 | WiX 프로젝트 + `Package.wxs` | 완료 |
 | 3 | 정제된 `appsettings.json` 템플릿, `notice.ko.rtf` | 완료 |
 | 3-1 | `ko-KR.wxl` 한국어 WixUI 번역 (Control 테이블 검증) | 완료 |

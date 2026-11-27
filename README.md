@@ -92,7 +92,7 @@ dotnet build UpdateAgent.sln
 dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj
 ```
 
-현재 기준: 빌드 경고 0 / 오류 0, 테스트 252개 통과.
+현재 기준: 빌드 경고 0 / 오류 0, `dotnet test` 출력의 통과 수 확인(고정 숫자는 갱신 지연을 막기 위해 명시하지 않음).
 
 MSI는 솔루션 빌드에 포함되지 않습니다(일반 빌드에 WiX 복원을 강제하지 않기 위해).
 설치 프로그램이 필요하면 `publish.ps1` 후 `build-inno.ps1`(권장) 또는 `build-msi.ps1`을 실행합니다.

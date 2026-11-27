@@ -239,12 +239,15 @@ function renderStats(data) {
 function renderActiveJobs(jobs) {
   const tbody = $('#active-jobs-body');
   tbody.innerHTML = '';
+  const hiddenCount = Number(snapshot?.hiddenActiveJobCount || 0);
   const active = jobs.filter((job) =>
     !isTerminal(job.state) && matchesFilter(`${job.machineName} ${job.jobId}`) &&
     matchesStateFilter(job, 'job'));
 
   if (active.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty">조건에 맞는 진행 중인 작업이 ${ABSENT}.</td></tr>`;
+    const hiddenText = hiddenCount > 0
+      ? ` 표시되지 않은 활성 작업 ${hiddenCount}건은 확인 불가.` : '';
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">조건에 맞는 진행 중인 작업이 ${ABSENT}.${hiddenText}</td></tr>`;
     return;
   }
 
@@ -289,6 +292,12 @@ function renderActiveJobs(jobs) {
       <td>
         <button class="btn btn-mini" data-job-id="${escapeHtml(job.jobId)}">상세</button>
       </td>`;
+    tbody.appendChild(tr);
+  }
+
+  if (hiddenCount > 0) {
+    const tr = el('tr');
+    tr.innerHTML = `<td colspan="6" class="empty">표시되지 않은 활성 작업 ${hiddenCount}건은 확인 불가.</td>`;
     tbody.appendChild(tr);
   }
 }

@@ -85,18 +85,24 @@ public sealed class AgentStatusReader
         }
     }
 
-    private static string ReadLabManagerUrl()
-    {
-        var candidates = new[]
-        {
-            UpdateAgent.Shared.UpdateAgentConstants.ConfigFilePath,
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                "UpdateAgent", "Service", "appsettings.json"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-                "UpdateAgent", "Service", "appsettings.json"),
-        };
+    private static string ReadLabManagerUrl() => ReadLabManagerUrl(DefaultCandidatePaths());
 
-        foreach (var path in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+    private static IEnumerable<string> DefaultCandidatePaths() =>
+    [
+        UpdateAgent.Shared.UpdateAgentConstants.ConfigFilePath,
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            "UpdateAgent", "Service", "appsettings.json"),
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            "UpdateAgent", "Service", "appsettings.json"),
+    ];
+
+    /// <summary>
+    /// 설정 파일에서 실제 LabManager URL을 읽는다. 후보를 하나도 읽지 못하면 기본값을
+    /// 추측해 보여주지 않고 "확인 불가"로 표시한다.
+    /// </summary>
+    internal static string ReadLabManagerUrl(IEnumerable<string> candidatePaths)
+    {
+        foreach (var path in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             try
             {
@@ -116,6 +122,6 @@ public sealed class AgentStatusReader
             }
         }
 
-        return UpdateAgent.Shared.UpdateAgentConstants.DefaultLabManagerUrl;
+        return "확인 불가";
     }
 }

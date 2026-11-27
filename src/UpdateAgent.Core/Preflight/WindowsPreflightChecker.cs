@@ -53,17 +53,8 @@ public sealed class WindowsPreflightChecker : IPreflightChecker
         try
         {
             var status = await _wua.GetSystemStatusAsync(cancellationToken);
-            checks.Add(status.InstallerBusy
-                ? PreflightCheck.Block(
-                    "Windows Update 사용 중",
-                    "다른 Windows Update/Maestro 업데이트 설치가 진행 중입니다. 완료 후 다시 시도하세요.")
-                : PreflightCheck.Pass("Windows Update 상태", "다른 설치 작업이 없습니다."));
-
-            checks.Add(status.RebootRequired
-                ? PreflightCheck.Warn(
-                    "재부팅 대기",
-                    "이전 업데이트 설치로 재부팅이 필요합니다. 작업이 재부팅을 포함해 진행됩니다.")
-                : PreflightCheck.Pass("재부팅 상태", "대기 중인 재부팅이 없습니다."));
+            checks.Add(EvaluateWuaStatus(status));
+            checks.Add(EvaluateRebootStatus(status));
         }
         catch (Exception ex)
         {
@@ -71,6 +62,42 @@ public sealed class WindowsPreflightChecker : IPreflightChecker
         }
 
         return new PreflightResult { Checks = checks };
+    }
+
+    /// <summary>
+    /// WUA 상태를 점검한다. LastError가 있으면 WU 서비스/설치 상태를 신뢰할 수 없으므로
+    /// "다른 설치 작업이 없습니다"라고 단정하지 않는다.
+    /// </summary>
+    public static PreflightCheck EvaluateWuaStatus(WuaSystemStatus status)
+    {
+        if (!string.IsNullOrWhiteSpace(status.LastError))
+        {
+            return PreflightCheck.Block(
+                "Windows Update 상태",
+                $"다른 설치 작업 여부를 확인할 수 없습니다: {status.LastError}. 완료 후 다시 시도하세요.");
+        }
+
+        return status.IsBusy
+            ? PreflightCheck.Block(
+                "Windows Update 사용 중",
+                "다른 Windows Update/Maestro 업데이트 설치가 진행 중입니다. 완료 후 다시 시도하세요.")
+            : PreflightCheck.Pass("Windows Update 상태", "다른 설치 작업이 없습니다.");
+    }
+
+    public static PreflightCheck EvaluateRebootStatus(WuaSystemStatus status)
+    {
+        if (!string.IsNullOrWhiteSpace(status.LastError))
+        {
+            return PreflightCheck.Warn(
+                "재부팅 상태",
+                $"재부팅 대기 여부를 확인할 수 없습니다: {status.LastError}");
+        }
+
+        return status.RebootRequired
+            ? PreflightCheck.Warn(
+                "재부팅 대기",
+                "이전 업데이트 설치로 재부팅이 필요합니다. 작업이 재부팅을 포함해 진행됩니다.")
+            : PreflightCheck.Pass("재부팅 상태", "대기 중인 재부팅이 없습니다.");
     }
 
     private static PreflightCheck CheckAdministrator(bool dryRun)

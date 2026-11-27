@@ -27,7 +27,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.41"
+  #define AppVersion "0.1.42"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -521,13 +521,14 @@ end;
   사라지고 내장 토큰으로 설치되므로, BOM은 어떤 경우에도 fail-closed로 중단한다. }
 function FileHasUtf8Bom(const Path: String): Boolean;
 var
-  Lines: TArrayOfString;
+  Raw: AnsiString;
 begin
   Result := False;
   if not FileExists(Path) then Exit;
-  if not LoadStringsFromFile(Path, Lines) then Exit;
-  Result := (GetArrayLength(Lines) > 0) and (Length(Lines[0]) > 0) and
-    (Lines[0][1] = #65279);
+  { LoadStringsFromFile은 UTF-8 BOM을 제거하므로 원본 바이트를 직접 확인한다. }
+  if not LoadStringFromFile(Path, Raw) then Exit;
+  Result := (Length(Raw) >= 3) and (Ord(Raw[1]) = $EF) and
+    (Ord(Raw[2]) = $BB) and (Ord(Raw[3]) = $BF);
 end;
 
 { 명령줄 값이 우선하고, 없으면 설치 exe와 같은 폴더의 INI에서 읽는다. }
@@ -1279,6 +1280,31 @@ begin
   Result := True;
 end;
 
+{ 임시 백업에는 에이전트 토큰 원문이 들어 있다. 복원 성공 후에는 반드시 삭제하고,
+  읽기 전용 속성이나 일시적 잠금으로 실패하면 짧게 재시도한 뒤 설치를 중단한다. }
+function RemoveAgentConfigBackup(const Path: String): Boolean;
+var
+  Attempt: Integer;
+begin
+  Result := False;
+  if (Path = '') or (not FileExists(Path)) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  RunHidden(ExpandConstant('{sys}\attrib.exe'), '-R "' + Path + '"');
+  for Attempt := 1 to 3 do
+  begin
+    if DeleteFile(Path) and (not FileExists(Path)) then
+    begin
+      Result := True;
+      Exit;
+    end;
+    Sleep(200);
+  end;
+  Log('Could not remove the temporary Agent config backup: ' + Path);
+end;
+
 procedure WriteAgentConfigIfRequested;
 var
   ConfigPath, SessionHelper, ConfigText, TempPath, BackupPath: String;
@@ -1403,8 +1429,12 @@ begin
     Exit;
   end;
 
-  if FileExists(BackupPath) then
-    DeleteFile(BackupPath);
+  if FileExists(BackupPath) and (not RemoveAgentConfigBackup(BackupPath)) then
+  begin
+    AgentConfigWriteFailed := True;
+    AgentConfigError := '이전 에이전트 설정 백업을 삭제하지 못했습니다: ' + BackupPath;
+    Exit;
+  end;
 end;
 
 { 서비스가 실제로 RUNNING 상태에 도달했는지 확인한다(최대 30초). }
@@ -1419,9 +1449,10 @@ begin
   for I := 0 to 30 do
   begin
     DeleteFile(OutputFile);
+    { 다른 cmd /c 호출과 같이 명령 전체를 한 쌍의 따옴표로 감싸야 한다. }
     RunHidden(ExpandConstant('{sys}\cmd.exe'),
-      '/c "' + ExpandConstant('{sys}\sc.exe') + '" query "' + ServiceName +
-      '" > "' + OutputFile + '" 2>&1');
+      '/c ""' + ExpandConstant('{sys}\sc.exe') + '" query "' + ServiceName +
+      '" > "' + OutputFile + '" 2>&1"');
     if FileExists(OutputFile) and LoadStringsFromFile(OutputFile, Strings) then
     begin
       Output := '';
@@ -1492,13 +1523,14 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
-    { 제거 시작 전에도 같은 종료 절차를 사용한다. }
+    { 제거 시작 전에도 같은 종료 절차를 사용한다. 종료 실패 시 방화벽 규칙이나
+      서비스 복구 설정을 변경하지 않고 중단한다. }
     Terminated := TerminateAgentApps;
+    if not Terminated then
+      RaiseException('기존 UpdateAgent 앱을 종료하지 못해 제거를 중단합니다.');
     RemoveFirewallRules;
     if not RestoreServiceRecovery then
       Log('UpdateAgentService recovery could not be restored during uninstall.');
-    if not Terminated then
-      RaiseException('기존 UpdateAgent 앱을 종료하지 못해 제거를 중단합니다.');
   end;
 
   if CurUninstallStep = usPostUninstall then

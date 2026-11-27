@@ -55,7 +55,9 @@ public sealed class UpdateJobRunner : IAsyncDisposable
     private volatile bool _manualPause;
     private volatile bool _cancelRequested;
     private volatile bool _forceCancelled;
-    private volatile PauseReason _pauseReason;    private DateTimeOffset? _pausedSince;
+    private volatile bool _shutdownRequested;
+    private volatile PauseReason _pauseReason;
+    private DateTimeOffset? _pausedSince;
 
     public UpdateJobRunner(
         IWuaClient wua,
@@ -272,6 +274,27 @@ public sealed class UpdateJobRunner : IAsyncDisposable
                 _logger.LogInformation("복원 마커 검증 통과: {Message}", verification.Message);
             }
 
+            // 크래시/재부팅 직후 Downloading/Installing으로 남은 항목은 완료되었는지 알 수 없다.
+            // 건너뛰면 작업이 100% 완료로 보고되므로 재시도 큐로 되돌린 뒤 저장한다.
+            var requeued = 0;
+            for (var i = 0; i < context.Items.Count; i++)
+            {
+                var item = context.Items[i];
+                if (item.State is not (UpdateItemState.Downloading or UpdateItemState.Installing)) continue;
+
+                context.Items[i] = item with
+                {
+                    State = UpdateItemState.Pending,
+                    CompletedAt = null,
+                };
+                requeued++;
+            }
+
+            if (requeued > 0)
+            {
+                _logger.LogWarning("중단된 작업 항목 {Count}건을 재시도 큐로 되돌립니다.", requeued);
+            }
+
             context.State = context.State == UpdateJobState.Paused ? UpdateJobState.Paused : UpdateJobState.Pending;
             context.Phase = context.State == UpdateJobState.Paused ? "일시중지" : "재개 준비";
             context.Message = "중단된 업데이트 작업을 재개합니다.";
@@ -443,6 +466,30 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         context.CompletedAt = UtcClock.Now;
     }
 
+    /// <summary>
+    /// 서비스 종료로 인한 취소는 사용자 취소가 아니다. 완료 처리하지 않고 재개 가능한 상태로 남긴다.
+    /// </summary>
+    private void LeaveResumableOnShutdown(JobContext context)
+    {
+        context.CompletedAt = null;
+        context.LastError = null;
+
+        if (context.State == UpdateJobState.Paused || _pauseReason != PauseReason.None)
+        {
+            context.State = UpdateJobState.Paused;
+            context.Phase = "일시중지";
+            context.PauseReason = _pauseReason == PauseReason.None ? PauseReason.Manual : _pauseReason;
+            context.Message = "서비스 종료로 중단되었습니다. 다시 시작하면 이어서 진행합니다.";
+            return;
+        }
+
+        context.State = UpdateJobState.Pending;
+        context.Phase = "재개 대기";
+        context.PauseReason = PauseReason.None;
+        context.PauseUntil = null;
+        context.Message = "서비스 종료로 중단되었습니다. 다시 시작하면 이어서 진행합니다.";
+    }
+
     private void StartRunLoop(JobContext context)
     {
         _activeContext = context;
@@ -505,6 +552,9 @@ public sealed class UpdateJobRunner : IAsyncDisposable
 
                 if (pending.Count == 0)
                 {
+                    // 검색 중 들어온 일시중지 요청이 완료/재부팅을 가로지르지 않도록 확인한다.
+                    await WaitForResumeAsync(context, cancellationToken);
+
                     // 시뮬레이션은 실제 설치가 없으므로 실제 WU 재부팅 요구를 근거로
                     // shutdown.exe를 예약하지 않는다. 검색 결과의 상태도 같은 이유로 무시한다.
                     var rebootRequiredAfterScan = false;
@@ -629,6 +679,9 @@ public sealed class UpdateJobRunner : IAsyncDisposable
                     rebootRequired |= systemStatus.RebootRequired;
                 }
 
+                // 설치 직후의 일시중지 요청도 재부팅 예약 전에 반영한다.
+                await WaitForResumeAsync(context, cancellationToken);
+
                 if (rebootRequired)
                 {
                     if (context.Policy.RebootPolicy != RebootPolicy.Auto)
@@ -670,7 +723,15 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _forceCancelled)
         {
-            MarkCancelled(context);
+            if (_shutdownRequested && !_forceCancelled && !_cancelRequested)
+            {
+                LeaveResumableOnShutdown(context);
+            }
+            else
+            {
+                MarkCancelled(context);
+            }
+
             await PersistSafeAsync(context);
         }
         catch (JobFailureException ex)
@@ -748,10 +809,19 @@ public sealed class UpdateJobRunner : IAsyncDisposable
     {
         var policy = context.Policy;
 
-        if (!_manualPause && policy.PauseOnUserLogon && _sessions.HasInteractiveUser())
+        if (!_manualPause && _pauseReason == PauseReason.None && policy.PauseOnUserLogon)
         {
-            _pauseReason = PauseReason.UserLoggedOn;
-            _pausedSince ??= UtcClock.Now;
+            var probe = _sessions.Probe();
+            if (probe.ProbeFailed || probe.Sessions.Count > 0)
+            {
+                _pauseReason = PauseReason.UserLoggedOn;
+                _pausedSince ??= UtcClock.Now;
+                if (probe.ProbeFailed)
+                {
+                    _logger.LogWarning(
+                        "사용자 세션을 확인할 수 없어 일시중지합니다: {Error}", probe.Error);
+                }
+            }
         }
 
         if (!_manualPause && _pauseReason == PauseReason.None)
@@ -775,9 +845,20 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         context.PauseUntil = policy.MaxPauseHours > 0 && _pausedSince.HasValue
             ? _pausedSince.Value.AddHours(policy.MaxPauseHours)
             : null;
-        context.Message = _pauseReason == PauseReason.UserLoggedOn
-            ? "사용자가 로그온하여 업데이트를 일시중지했습니다. 로그오프하면 자동 재개됩니다."
-            : "교사가 작업을 일시중지했습니다.";
+        context.Message = _pauseReason switch
+        {
+            PauseReason.UserLoggedOn =>
+                "사용자가 로그온하여 업데이트를 일시중지했습니다. 로그오프하면 자동 재개됩니다.",
+            PauseReason.WuBusy =>
+                "Windows Update가 사용 중이어서 일시중지했습니다. 교사가 재개할 때까지 대기합니다.",
+            PauseReason.RestoreRisk =>
+                "복원 위험이 감지되어 일시중지했습니다. 교사가 확인한 뒤 재개하세요.",
+            PauseReason.PreflightBlocked =>
+                "사전 점검에서 차단되어 일시중지했습니다. 교사가 확인한 뒤 재개하세요.",
+            PauseReason.WaitingForNetwork =>
+                "네트워크를 확인할 수 없어 일시중지했습니다. 교사가 확인한 뒤 재개하세요.",
+            _ => "교사가 작업을 일시중지했습니다.",
+        };
         await PersistAsync(context, cancellationToken);
 
         while (true)
@@ -791,12 +872,14 @@ public sealed class UpdateJobRunner : IAsyncDisposable
                 continue;
             }
 
+            // ResumeFromPauseAsync가 이유를 지울 때까지 여기서 대기한다.
+            if (_pauseReason == PauseReason.None) break;
+
             if (_pauseReason == PauseReason.UserLoggedOn)
             {
-                if (!_sessions.HasInteractiveUser())
-                {
-                    break;
-                }
+                var probe = _sessions.Probe();
+                // 조회 실패는 "사용자 없음"이 아니므로 계속 대기한다(fail closed).
+                if (!probe.ProbeFailed && probe.Sessions.Count == 0) break;
 
                 if (policy.MaxPauseHours > 0
                     && _pausedSince.HasValue
@@ -812,7 +895,8 @@ public sealed class UpdateJobRunner : IAsyncDisposable
                 continue;
             }
 
-            break;
+            // WuBusy/RestoreRisk/PreflightBlocked/WaitingForNetwork 등은 자동 재개하지 않는다.
+            await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
         }
 
         _pauseReason = PauseReason.None;
@@ -947,12 +1031,30 @@ public sealed class UpdateJobRunner : IAsyncDisposable
         }
 
         // WUA 검색 결과에서 사라진 항목을 설치 성공으로 기록하면 실제 실패가 은폐된다.
-        // 숨김/거부/메타데이터 변경 등 원인을 알 수 없으므로 건너뜀으로 표시한다.
         for (var i = 0; i < context.Items.Count; i++)
         {
             var item = context.Items[i];
-            if (item.State is not (UpdateItemState.Pending or UpdateItemState.Downloaded)) continue;
             if (selectedIds.Contains(item.UpdateId)) continue;
+
+            if (item.State is UpdateItemState.Downloading or UpdateItemState.Installing)
+            {
+                // 진행 중이던 항목이 사라진 경우 성공으로 처리하지 않는다. 설치 여부를
+                // 확인할 수 없으므로 재시도하고, 계속 사라지면 확인 불가로 격리한다.
+                var failureCount = item.FailureCount + 1;
+                var retry = failureCount < Math.Max(1, context.Policy.MaxItemFailureCount);
+                context.Items[i] = item with
+                {
+                    FailureCount = failureCount,
+                    State = retry ? UpdateItemState.Pending : UpdateItemState.Skipped,
+                    CompletedAt = retry ? null : now,
+                    Error = "WUA 검색 결과에서 항목이 사라져 설치 여부를 확인할 수 없습니다. " +
+                            (retry ? "재시도합니다." : "확인할 수 없어 제외했습니다."),
+                };
+                continue;
+            }
+
+            // 숨김/거부/메타데이터 변경 등 원인을 알 수 없는 대기 항목은 건너뜀으로 표시한다.
+            if (item.State is not (UpdateItemState.Pending or UpdateItemState.Downloaded)) continue;
 
             context.Items[i] = item with
             {
@@ -1012,8 +1114,10 @@ public sealed class UpdateJobRunner : IAsyncDisposable
     private void CheckRuntimeLimit(JobContext context)
     {
         if (context.Policy.MaxRuntimeHours <= 0) return;
-        var elapsed = UtcClock.Now - context.StartedAt;
-        if (elapsed > TimeSpan.FromHours(context.Policy.MaxRuntimeHours))
+        // TimeSpan.FromHours(int.MaxValue)는 오버플로 예외를 던져 정상 작업을 실패시킨다.
+        // 시간 제한이 없는 매우 큰 값은 double 비교로 안전하게 처리한다.
+        var elapsedHours = (UtcClock.Now - context.StartedAt).TotalHours;
+        if (elapsedHours > context.Policy.MaxRuntimeHours)
         {
             throw new JobFailureException(
                 $"작업 제한 시간({context.Policy.MaxRuntimeHours}시간)을 초과했습니다.");
@@ -1084,6 +1188,9 @@ public sealed class UpdateJobRunner : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // 서비스 종료는 사용자 취소가 아니다. 플래그를 먼저 세팅해 런루프가
+        // 재개 가능한 상태로 저장하도록 구분한다.
+        _shutdownRequested = true;
         try
         {
             _runCts?.Cancel();
@@ -1174,6 +1281,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             FailedItems = FailedItems,
             RebootCount = RebootCount,
             MaxRebootCount = MaxRebootCount,
+            PassesWithoutProgress = PassesWithoutProgress,
             CurrentKb = CurrentKb,
             Message = Message,
             PauseReason = PauseReason,
@@ -1212,6 +1320,7 @@ public sealed class UpdateJobRunner : IAsyncDisposable
             PauseUntil = detail.Summary.PauseUntil,
             RebootCount = detail.Summary.RebootCount,
             MaxRebootCount = detail.Summary.MaxRebootCount,
+            PassesWithoutProgress = detail.Summary.PassesWithoutProgress,
             StartedAt = detail.Summary.StartedAt,
             UpdatedAt = detail.Summary.UpdatedAt,
             CompletedAt = detail.Summary.CompletedAt,

@@ -14,10 +14,34 @@ public sealed record InteractiveSession
         : $"{DomainName}\\{UserName}";
 }
 
+/// <summary>
+/// 사용자 세션 조회 결과. ProbeFailed이면 세션이 없는 것이 아니라 확인 불가를 뜻한다.
+/// </summary>
+public sealed record UserSessionProbeResult
+{
+    public IReadOnlyList<InteractiveSession> Sessions { get; init; } = [];
+    public bool ProbeFailed { get; init; }
+    public string? Error { get; init; }
+
+    public static UserSessionProbeResult Success(IReadOnlyList<InteractiveSession> sessions) => new()
+    {
+        Sessions = sessions,
+    };
+
+    public static UserSessionProbeResult Failed(string error) => new()
+    {
+        ProbeFailed = true,
+        Error = error,
+    };
+}
+
 public interface IUserSessionProbe
 {
     IReadOnlyList<InteractiveSession> GetInteractiveSessions();
     bool HasInteractiveUser();
+
+    /// <summary>기존 구현/목은 실패 여부를 모르므로 기본 구현으로 호환을 유지한다.</summary>
+    UserSessionProbeResult Probe() => UserSessionProbeResult.Success(GetInteractiveSessions());
 }
 
 /// <summary>WTS API로 현재 로그온한 대화형 사용자를 확인한다.</summary>
@@ -30,7 +54,7 @@ public sealed class UserSessionProbe : IUserSessionProbe
     private const int WtsActive = 0;
     private const int WtsConnected = 1;
 
-    public IReadOnlyList<InteractiveSession> GetInteractiveSessions()
+    public UserSessionProbeResult Probe()
     {
         var results = new List<InteractiveSession>();
         IntPtr buffer = IntPtr.Zero;
@@ -39,7 +63,10 @@ public sealed class UserSessionProbe : IUserSessionProbe
         try
         {
             if (!WTSEnumerateSessions((IntPtr)WtsCurrentServerHandle, 0, 1, out buffer, out count))
-                return results;
+            {
+                return UserSessionProbeResult.Failed(
+                    $"WTS 세션을 확인할 수 없습니다 (오류 코드 {Marshal.GetLastWin32Error()}).");
+            }
 
             var size = Marshal.SizeOf<WtsSessionInfo>();
             for (var i = 0; i < count; i++)
@@ -48,6 +75,12 @@ public sealed class UserSessionProbe : IUserSessionProbe
                 var info = Marshal.PtrToStructure<WtsSessionInfo>(infoPtr);
 
                 var state = QueryInt(info.SessionID, WtsConnectState);
+                if (state < 0)
+                {
+                    return UserSessionProbeResult.Failed(
+                        $"WTS 세션 {info.SessionID}의 연결 상태를 확인할 수 없습니다.");
+                }
+
                 if (state is not (WtsActive or WtsConnected)) continue;
 
                 var user = QueryString(info.SessionID, WtsUserName);
@@ -61,20 +94,27 @@ public sealed class UserSessionProbe : IUserSessionProbe
                     IsActive = state == WtsActive,
                 });
             }
+
+            return UserSessionProbeResult.Success(results);
         }
-        catch
+        catch (Exception ex)
         {
-            // WTS 조회 실패는 "사용자 없음"으로 처리한다. 서비스 환경에서 발생할 수 있다.
+            // 조회 실패를 "사용자 없음"으로 보고하면 PauseOnUserLogon이 무력화된다.
+            return UserSessionProbeResult.Failed($"WTS 세션을 확인할 수 없습니다: {ex.Message}");
         }
         finally
         {
             if (buffer != IntPtr.Zero) WTSFreeMemory(buffer);
         }
-
-        return results;
     }
 
-    public bool HasInteractiveUser() => GetInteractiveSessions().Count > 0;
+    public IReadOnlyList<InteractiveSession> GetInteractiveSessions() => Probe().Sessions;
+
+    public bool HasInteractiveUser()
+    {
+        var probe = Probe();
+        return probe.ProbeFailed || probe.Sessions.Count > 0;
+    }
 
     private static string QueryString(int sessionId, int infoClass)
     {

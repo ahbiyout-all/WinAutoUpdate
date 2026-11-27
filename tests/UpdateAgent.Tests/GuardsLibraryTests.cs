@@ -74,7 +74,7 @@ public sealed class GuardsLibraryTests : IDisposable
         Assert.False(UrlGuard.IsAllowedExternalUrl("https://example.test/app.exe", requireGitHubHost: true));
         Assert.False(UrlGuard.IsAllowedExternalUrl("file:///C:/Windows/System32/cmd.exe"));
         Assert.False(UrlGuard.IsAllowedExternalUrl("javascript:alert(1)"));
-        Assert.False(UrlGuard.IsAllowedExternalUrl("https://user:password@github.com/org/repo", requireGitHubHost: true));
+        Assert.False(UrlGuard.IsAllowedExternalUrl("https://user:password@example.test/org/repo"));
     }
 
     [Fact]

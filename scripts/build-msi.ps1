@@ -221,8 +221,8 @@ $stagedServiceAppSettings = Join-Path $StagingRoot "agent\service\appsettings.js
 Copy-Item -LiteralPath $payloadAppSettings -Destination $stagedServiceAppSettings -Force
 
 $template = Get-Content -LiteralPath $stagedServiceAppSettings -Raw
-if ($template -match 'change-me-') {
-    throw "The MSI appsettings template still contains a default token."
+if ($template -match '(?i)(change-me-|sample-[^\r\n]*-replace-before-pilot)') {
+    throw "The MSI appsettings template still contains a default or sample token."
 }
 
 Get-ChildItem -LiteralPath $StagingRoot -Recurse -File -Filter "appsettings.Development.json" |

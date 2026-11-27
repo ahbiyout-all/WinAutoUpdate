@@ -1,6 +1,6 @@
 # 순수 창작 공통 Guard DLL 설계와 동작 원리
 
-작성일: 2026-11-24 · 적용 버전: `0.1.41`
+작성일: 2026-11-24 · 적용 버전: `0.1.42`
 
 이 문서는 프로젝트가 **직접 작성한** 공통 라이브러리 `UpdateAgent.Guards.dll`의 존재 이유,
 동작 원리, 호출부 연결, 그리고 기존 DLL 산출물 점검 결과를 기록합니다.
@@ -32,7 +32,7 @@
 | 타깃 프레임워크 | `net10.0` |
 | NuGet `PackageReference` | **없음** |
 | OS 전용 API | 없음(`System.Security.Cryptography.SHA256`은 관리형 BCL) |
-| 버전 | `Directory.Build.props`의 `<Version>` 단일 소스(현재 `0.1.41`) |
+| 버전 | `Directory.Build.props`의 `<Version>` 단일 소스(현재 `0.1.42`) |
 | 테스트 접근 | `InternalsVisibleTo UpdateAgent.Tests` |
 
 프로젝트 참조를 통해 각 실행 파일의 게시 폴더로 DLL이 자동 복사됩니다.
@@ -181,7 +181,7 @@ v0.1.36 작업(5회 반복 감사)에서 확인·수정한 항목:
 ## 6. 검증과 한계
 
 - `dotnet build UpdateAgent.sln -c Release --nologo`: 경고 0, 오류 0.
-- `dotnet test tests\UpdateAgent.Tests\UpdateAgent.Tests.csproj -c Release --nologo`: **252개 통과**, 실패 0.
+- `dotnet test tests\UpdateAgent.Tests\UpdateAgent.Tests.csproj -c Release --nologo`: 실패 0, 건너뜀 0(통과 수는 실행 출력 기준).
 - 테스트에는 DLL 규칙뿐 아니라 토큰 충돌/내부 BOM/짧은 override/동일 크기 재기록/안전하지 않은 브라우저 URL,
   체크인 ack·감사 절단, 미래 시각 clamp, 대량 배치 ack 회귀가 포함되어 있습니다.
 - `scripts\publish.ps1`, `scripts\build-inno.ps1 -NoPublish`, `scripts\build-msi.ps1`로 게시/패키징을 확인합니다.

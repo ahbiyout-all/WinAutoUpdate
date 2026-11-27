@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.41"
+  #define AppVersion "0.1.42"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -128,6 +128,7 @@ var
   ExternalAgentToken: String;
   LastTokenApplyError: String;
   LastAclDetail: String;
+  LastBackupCleanupError: String;
 
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
@@ -778,6 +779,42 @@ begin
   end;
 end;
 
+{ 백업본에는 이전 토큰 원문이 들어 있다. 성공 경로와 중단 경로 모두에서
+  읽기 전용 속성을 해제하고 여러 번 시도해 반드시 정리한다. }
+function RemoveLabManagerConfigBackup(const Path: String): Boolean;
+var
+  Attempt: Integer;
+begin
+  Result := False;
+  LastBackupCleanupError := '';
+  if (Path = '') or (not FileExists(Path)) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  EnsureWritableConfigFile(Path);
+  for Attempt := 1 to 3 do
+  begin
+    if DeleteFile(Path) and (not FileExists(Path)) then
+    begin
+      Result := True;
+      Exit;
+    end;
+    Sleep(200);
+  end;
+  LastBackupCleanupError := '임시 LabManager 설정 백업을 삭제하지 못했습니다: ' + Path;
+  Log(LastBackupCleanupError);
+end;
+
+function FailWithLabManagerBackupCleanup(const Message: String): String;
+begin
+  Result := Message;
+  if (LabManagerConfigBackup <> '') and
+     (not RemoveLabManagerConfigBackup(LabManagerConfigBackup)) then
+    Result := Result + ' ' + LastBackupCleanupError;
+  LabManagerConfigRestoreNeeded := False;
+end;
+
 { 첫 설치에서만 appsettings.json의 토큰을 내장 값으로 교체한다. }
 function ApplyBundledLabManagerTokens: Boolean;
 var
@@ -984,9 +1021,11 @@ begin
   FirstInstall := not HasUsableLabManagerConfig;
 
   { 마법사에서 기존 토큰 교체를 선택하면 새 토큰 파일을 요구한다.
-    무인 설치에서는 선택지가 표시되지 않으므로 기본값(기존 토큰 재사용)을 유지한다. }
-  ReplaceExistingToken := (not WizardSilent) and HasExistingTokenForChoice and
-    (TokenChoicePage <> nil) and TokenChoicePage.Values[1];
+    무인 설치에서 /LabManagerTokenFile=를 명시하면 재사용 기본값을 overriding하여
+    토큰 교체로 처리한다. 명시하지 않으면 기존 토큰을 유지한다. }
+  ReplaceExistingToken := ((not WizardSilent) and HasExistingTokenForChoice and
+    (TokenChoicePage <> nil) and TokenChoicePage.Values[1]) or
+    (Trim(CmdParamValue(ExternalTokenSwitch)) <> '');
 
   { 어떤 것도 지우기 전에 토큰을 검증한다. 첫 설치는 내장 토큰,
     업데이트의 교체 선택은 /LabManagerTokenFile= 외부 파일을 쓰고, 없으면 내장 토큰을 쓴다. }
@@ -1044,8 +1083,9 @@ begin
     begin
       { 언인스톨을 건너뛰고 새 파일을 덮어쓰면 이전 설치 잔해가 남는다.
         특히 토큰 교체를 선택했다면 반드시 제거를 먼저 수행해야 하므로 중단한다. }
-      Result := '기존 UpdateAgent LabManager 제거 프로그램을 찾지 못해 설치를 중단합니다: ' +
-        OldInnoUninstall;
+      Result := FailWithLabManagerBackupCleanup(
+        '기존 UpdateAgent LabManager 제거 프로그램을 찾지 못해 설치를 중단합니다: ' +
+        OldInnoUninstall);
       Exit;
     end;
 
@@ -1053,14 +1093,16 @@ begin
     if not Exec(UninstallExe, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '',
         SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
     begin
-      Result := '기존 UpdateAgent LabManager 제거에 실패했습니다. (code ' +
-        IntToStr(Code) + ') 설치를 중단합니다.';
+      Result := FailWithLabManagerBackupCleanup(
+        '기존 UpdateAgent LabManager 제거에 실패했습니다. (code ' +
+        IntToStr(Code) + ') 설치를 중단합니다.');
       Exit;
     end;
 
     if not WaitForInnoUninstallComplete then
     begin
-      Result := '기존 UpdateAgent LabManager 제거가 완료되지 않아 설치를 중단합니다.';
+      Result := FailWithLabManagerBackupCleanup(
+        '기존 UpdateAgent LabManager 제거가 완료되지 않아 설치를 중단합니다.');
       Exit;
     end;
     Log('Existing LabManager uninstall completed before installing new files (tokens replaced: ' +
@@ -1073,7 +1115,8 @@ begin
   begin
     if not RemoveExistingLabManagerTokens then
     begin
-      Result := '기존 LabManager 토큰을 삭제하지 못해 설치를 중단합니다.';
+      Result := FailWithLabManagerBackupCleanup(
+        '기존 LabManager 토큰을 삭제하지 못해 설치를 중단합니다.');
       Exit;
     end;
   end;
@@ -1251,12 +1294,13 @@ begin
         LastTokenApplyError);
 
     { 두 토큰 적용이 모두 성공한 뒤에만 백업을 삭제한다. 토큰 저장이 실패하면
-      복원본을 남겨 두어 이전 단계의 실패에서도 되돌릴 수 있게 한다. }
+      복원본을 남겨 두어 이전 단계의 실패에서도 되돌릴 수 있게 한다.
+      삭제 자체가 실패하면 이전 토큰이 임시 폴더에 남으므로 fail closed한다. }
     if LabManagerConfigRestoreNeeded then
     begin
-      if not DeleteFile(LabManagerConfigBackup) then
-        Log('Could not remove the temporary LabManager appsettings.json backup: ' +
-          LabManagerConfigBackup);
+      if not RemoveLabManagerConfigBackup(LabManagerConfigBackup) then
+        RaiseException('임시 LabManager 설정 백업을 삭제하지 못해 설치를 중단합니다. ' +
+          LastBackupCleanupError);
       LabManagerConfigRestoreNeeded := False;
     end;
 
@@ -1281,8 +1325,8 @@ begin
   if CurUninstallStep = usUninstall then
   begin
     Terminated := TerminateLabManagerApps;
-    RemoveFirewallRules;
     if not Terminated then
       RaiseException('기존 UpdateAgent LabManager 앱을 종료하지 못해 제거를 중단합니다.');
+    RemoveFirewallRules;
   end;
 end;

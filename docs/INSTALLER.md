@@ -98,10 +98,13 @@ C:\Program Files\UpdateAgent\LabManager\
 3. **기존 설치 자동 제거 (설치 직전)**
    - Inno Setup 설치 키와 MSI 등록 정보를 모두 검사합니다.
    - 기존 설치가 있으면 **묻지 않고** 이전 제거 프로그램을 무인 실행해 먼저 제거합니다.
-   - 레지스트리 등록 정보만 남고 제거 프로그램 파일이 없거나, MSI가 `1605`(이미 설치되지 않은 제품)를 반환하면
-     이미 제거된 설치로 보고 경고(로그) 후 **계속 설치합니다.**
+   - Agent: 레지스트리 등록 정보만 남고 제거 프로그램 파일이 없거나, MSI가 `1605`(이미 설치되지 않은 제품)를
+     반환하면 이미 제거된 설치로 보고 경고(로그) 후 **계속 설치합니다.**
+   - LabManager: 제거 프로그램을 찾지 못하면 **설치를 중단합니다**(fail-closed).
    - 제거 전 `appsettings.json`을 임시 폴더에 백업하고, 제거 후 복원합니다.
+     백업 삭제가 실패하면 이전 토큰이 임시 폴더에 남으므로 설치를 중단합니다.
    - 실제 제거 실행이 실패하면 새 설치를 중단하고 오류를 표시합니다.
+     종료 대상 앱을 끝내지 못하면 방화벽 규칙이나 서비스 복구 설정을 바꾸지 않고 중단합니다.
 4. **설치**
    - 개별 파일을 `Program Files`에 복사합니다.
    - Agent는 `[InstallDelete]`로 이전 버전의 Desktop/Service/SessionHelper/Cli 폴더를 정리한 뒤 복사합니다.
@@ -111,7 +114,8 @@ C:\Program Files\UpdateAgent\LabManager\
 6. **서비스·방화벽·설정 적용** (Agent)
    - 서비스 등록/갱신, 이전 버전 방화벽 규칙 정리, 선택적 `agent.json` 작성.
 7. **앱 실행**
-   - Agent: 서비스를 시작하고 마지막 화면에서 `UpdateAgent 상태 확인` 데스크톱 앱을 실행할 수 있습니다.
+   - Agent: 서비스를 시작한 뒤 `sc.exe query` 결과로 실제 `RUNNING` 상태를 확인합니다(v0.1.42).
+     확인하지 못하면 설치를 중단합니다. 마지막 화면에서 `UpdateAgent 상태 확인` 데스크톱 앱을 실행할 수 있습니다.
      시작 메뉴/바탕화면 바로가기도 같은 앱(`{app}\Desktop\UpdateAgent.Agent.Desktop.exe`)을 엽니다.
       이 앱은 상태 조회와 함께 메인 화면의 **수동 업데이트 옵션** 버튼을 제공하며, 기존 **업데이트 시작** 버튼도 같은 옵션 창을 엽니다.
        로컬 제어 파이프(`UpdateAgent.LocalControl.v1`)로
@@ -131,7 +135,8 @@ C:\Program Files\UpdateAgent\LabManager\
 |---|---|
 | Inno Setup Agent/LabManager 설치됨 | 이전 제거 프로그램을 무인 실행해 제거한 뒤 새로 설치 |
 | WiX MSI Agent 설치됨 | MSI 제품을 `msiexec /x ... /qn`으로 자동 제거한 뒤 Inno 설치 |
-| 등록 정보만 남고 제거 프로그램 파일이 없음 / MSI `1605` | 이미 제거된 설치로 보고 건너뛴 뒤 새로 설치(경고/로그만 기록) |
+| Agent: 등록 정보만 남고 제거 프로그램 파일이 없음 / MSI `1605` | 이미 제거된 설치로 보고 건너뛴 뒤 새로 설치(경고/로그만 기록) |
+| LabManager: 등록 정보만 남고 제거 프로그램 파일이 없음 | 설치 중단(fail-closed). 정리 후 다시 실행 |
 | 레거시 스크립트 설치(`C:\ProgramData\UpdateAgent\app`) | 감지 후 안내만 표시, 필요 시 수동 제거 |
 | 모든 경우(대화형/무인) | 제거가 필요한 경우 묻지 않고 제거한 뒤 설치(설정 데이터는 보존) |
 
@@ -158,8 +163,10 @@ C:\Program Files\UpdateAgent\LabManager\
     이후 새 토큰만 기록됩니다. 런타임 관리자 토큰 재정의 파일 삭제가 실패하면 설치를 중단합니다(fail-closed).
 - `C:\ProgramData\UpdateAgent\agent.json`은 제거 대상이 아니므로 그대로 유지됩니다.
 - 이전 버전 제거가 **실제로 실패하면** 오류를 표시하고 **새 설치를 중단합니다.** 덮어쓰기로 이어가지 않습니다.
-  제거 프로그램을 찾지 못해 건너뛰는 경로도 없습니다. 등록 정보만 남고 `unins000.exe`가 없으면
-  설치를 중단하므로(v0.1.38 이상, fail-closed) 정리 후 다시 실행하세요.
+  설치 관리자별 차이:
+  - **Agent**: 등록 정보만 남고 `unins000.exe`가 없거나 MSI `1605`이면 경고/로그 후 계속합니다.
+  - **LabManager**: `unins000.exe`를 찾지 못하면 중단합니다(v0.1.38 이상, fail-closed).
+    정리 후 다시 실행하세요.
 
 ## 6. 무인 설치
 
@@ -199,8 +206,8 @@ AgentTokenFile=agent-token.txt
 
 - `agent-token.txt`도 같은 폴더에 두면 됩니다. 상대 경로는 설치 exe가 있는 폴더 기준으로 해석되며,
   `C:\...`, `\\서버\공유\...`, `//서버/공유/...` 같은 절대 경로도 그대로 사용할 수 있습니다.
-- INI는 **UTF-8 BOM 없이** 저장하세요. BOM이 있으면 Windows API가 `[Agent]` 섹션을 읽지 못해
-  설치가 중단됩니다. 값 뒤의 `; 주석`은 무시됩니다.
+- INI는 **UTF-8 BOM 없이** 저장하세요. 원본 바이트로 BOM을 검사해 BOM이 있으면 명령줄 인자가 있어도
+  설치가 중단됩니다(v0.1.42). 값 뒤의 `; 주석`은 무시됩니다.
 - 설정 파일이 없으면 명령줄 인자만 사용합니다. 설정 파일도 명령줄 인자도 없으면 **첫 설치**에서는
   기본 URL(`http://labmanager:5080`)과 내장 토큰을 쓰고, **기존 설치의 재사용/무인 설치**에서는
   `agent.json`을 그대로 유지합니다. 다른 DNS 이름/IP를 쓰는 실습실은 반드시 INI나 명령줄로 지정하세요.
@@ -238,7 +245,7 @@ AgentTokenFile=agent-token.txt
 | Agent | 업데이트, 교체 선택 | `/AgentTokenFile` 또는 INI | 외부 토큰으로 교체, 새 URL이 없으면 기존 URL 유지 |
 | LabManager | 첫 설치 | 해당 없음 | 내장 두 줄(1행 AdminToken, 2행 AgentToken)을 `appsettings.json`에 반영 |
 | LabManager | 업데이트, 재사용/무인 | 없음 | 내장 토큰 무시, 기존 `appsettings.json` 유지 |
-| LabManager | 업데이트, 재사용/무인 | `/LabManagerTokenFile` | 명시한 외부 두 줄 토큰으로 교체 |
+| LabManager | 업데이트, 재사용/무인 | `/LabManagerTokenFile` | 명시한 외부 두 줄 토큰으로 교체(v0.1.42: 무인 설치에서도 교체로 처리) |
 | LabManager | 업데이트, 교체 선택 | 없음 | 릴리스 내장 두 줄로 교체, 런타임 관리자 토큰 재정의 제거(v0.1.33 이상) |
 | LabManager | 업데이트, 교체 선택 | `/LabManagerTokenFile` | 외부 두 줄 토큰 파일로 교체, 런타임 관리자 토큰 재정의 제거 |
 

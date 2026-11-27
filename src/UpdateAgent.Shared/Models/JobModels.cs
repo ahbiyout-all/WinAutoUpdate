@@ -18,6 +18,10 @@ public sealed record JobSummary
     public int FailedItems { get; init; }
     public int RebootCount { get; init; }
     public int MaxRebootCount { get; init; } = 5;
+
+    /// <summary>진행 없이 검색을 반복한 횟수. 작업 재시작 후에도 유지한다.</summary>
+    public int PassesWithoutProgress { get; init; }
+
     public string? CurrentKb { get; init; }
     public string Message { get; init; } = "";
 
@@ -112,6 +116,10 @@ public sealed record AgentTelemetry
     public JobDetail? CurrentJobDetail { get; init; }
     public string? CurrentPhase { get; init; }
     public bool UserLoggedOn { get; init; }
+
+    /// <summary>WTS 세션 조회 실패 여부. false를 "사용자 없음"으로 단정하지 않는다.</summary>
+    public bool UserSessionProbeFailed { get; init; }
+
     public IReadOnlyList<string> LoggedOnUsers { get; init; } = [];
     public bool WuBusy { get; init; }
 
@@ -119,6 +127,10 @@ public sealed record AgentTelemetry
     public bool WuBusyProbeFailed { get; init; }
 
     public bool RebootPending { get; init; }
+
+    /// <summary>재부팅 대기 여부를 확인하지 못했는지. false를 "대기 아님"으로 단정하지 않는다.</summary>
+    public bool RebootPendingProbeFailed { get; init; }
+
     public MaestroDetectionResult? Maestro { get; init; }
     public int FreeDiskMb { get; init; }
     public bool OnAcPower { get; init; } = true;

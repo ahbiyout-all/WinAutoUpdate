@@ -34,6 +34,12 @@ public sealed record AuditEntry
 /// <summary>교사 PC의 LabManager SQLite 저장소. 작업 상태의 원본이다.</summary>
 public sealed class LabStore
 {
+    /// <summary>
+    /// 실시간 스냅샷과 단일 에이전트가 만들 수 있는 비종료 작업의 상한.
+    /// 상한을 넘으면 최신 작업만 표시하고 나머지는 "확인 불가"로 처리한다.
+    /// </summary>
+    public const int MaxActiveJobs = 500;
+
     private readonly int _onlineThresholdSeconds;
     private readonly string _connectionString;
 
@@ -156,6 +162,32 @@ public sealed class LabStore
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            -- 이전 릴리스에서 대소문자만 다른 에이전트/정책 키가 저장될 수 있었다.
+            -- 최신 행 하나만 남기고 모두 소문자로 정규화해 중복 PC와 정책 키 충돌을 제거한다.
+            WITH ranked AS (
+                SELECT agent_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY lower(agent_id)
+                           ORDER BY last_seen DESC, agent_id) AS rn
+                FROM agents
+            )
+            DELETE FROM agents WHERE agent_id IN (SELECT agent_id FROM ranked WHERE rn > 1);
+            UPDATE agents SET agent_id = lower(agent_id) WHERE agent_id <> lower(agent_id);
+
+            WITH ranked AS (
+                SELECT key,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY lower(key)
+                           ORDER BY updated_at DESC, key) AS rn
+                FROM settings WHERE key LIKE 'agent-policy:%'
+            )
+            DELETE FROM settings WHERE key IN (SELECT key FROM ranked WHERE rn > 1);
+            UPDATE settings SET key = lower(key)
+                WHERE key LIKE 'agent-policy:%' AND key <> lower(key);
+
+            UPDATE jobs SET agent_id = lower(agent_id) WHERE agent_id <> lower(agent_id);
+            UPDATE commands SET agent_id = lower(agent_id) WHERE agent_id <> lower(agent_id);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -167,6 +199,11 @@ public sealed class LabStore
         AgentTelemetry telemetry,
         CancellationToken cancellationToken = default)
     {
+        // 대소문자만 다른 hostname 재등록은 별도 PC가 아니라 같은 PC로 저장한다.
+        var canonicalId = AgentIdGuard.Canonical(agent.AgentId);
+        agent = agent with { AgentId = canonicalId };
+        telemetry = telemetry with { AgentId = canonicalId };
+
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
@@ -179,7 +216,7 @@ public sealed class LabStore
                 info_json = excluded.info_json,
                 telemetry_json = excluded.telemetry_json;
             """;
-        command.Parameters.AddWithValue("$id", agent.AgentId);
+        command.Parameters.AddWithValue("$id", canonicalId);
         command.Parameters.AddWithValue("$name", agent.MachineName);
         command.Parameters.AddWithValue("$state", (int)telemetry.State);
         command.Parameters.AddWithValue("$seen", UtcTimestamps.FormatNow());
@@ -193,15 +230,16 @@ public sealed class LabStore
     /// <summary>재이미징/폐기된 PC를 목록에서 제거한다. 작업 이력은 보존한다.</summary>
     public async Task<bool> DeleteAgentAsync(string agentId, CancellationToken cancellationToken = default)
     {
+        var canonicalId = AgentIdGuard.Canonical(agentId);
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM agents WHERE agent_id = $id;";
-        command.Parameters.AddWithValue("$id", agentId);
+        command.Parameters.AddWithValue("$id", canonicalId);
         var deleted = await command.ExecuteNonQueryAsync(cancellationToken) > 0;
 
         await using var settingCommand = connection.CreateCommand();
         settingCommand.CommandText = "DELETE FROM settings WHERE key = $key;";
-        settingCommand.Parameters.AddWithValue("$key", "agent-policy:" + agentId);
+        settingCommand.Parameters.AddWithValue("$key", "agent-policy:" + canonicalId);
         await settingCommand.ExecuteNonQueryAsync(cancellationToken);
         return deleted;
     }
@@ -243,9 +281,10 @@ public sealed class LabStore
 
     public async Task<AgentRecord?> GetAgentAsync(string agentId, CancellationToken cancellationToken = default)
     {
+        var canonicalId = AgentIdGuard.Canonical(agentId);
         var agents = await GetAgentsAsync(cancellationToken);
         return agents.FirstOrDefault(a =>
-            string.Equals(a.Agent.AgentId, agentId, StringComparison.OrdinalIgnoreCase));
+            string.Equals(a.Agent.AgentId, canonicalId, StringComparison.OrdinalIgnoreCase));
     }
 
     public async Task<int> CountAgentsAsync(CancellationToken cancellationToken = default)
@@ -261,8 +300,9 @@ public sealed class LabStore
 
     public async Task SaveJobAsync(JobDetail detail, string machineName, CancellationToken cancellationToken = default)
     {
-        var summary = ToUtc(detail.Summary);
-        detail = ToUtc(detail);
+        var canonicalId = AgentIdGuard.Canonical(detail.Summary.AgentId);
+        var summary = ToUtc(detail.Summary with { AgentId = canonicalId });
+        detail = ToUtc(detail with { Summary = detail.Summary with { AgentId = canonicalId } });
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
@@ -295,7 +335,7 @@ public sealed class LabStore
         string machineName,
         CancellationToken cancellationToken = default)
     {
-        summary = ToUtc(summary);
+        summary = ToUtc(summary with { AgentId = AgentIdGuard.Canonical(summary.AgentId) });
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
@@ -359,8 +399,8 @@ public sealed class LabStore
     }
 
     /// <summary>
-    /// 실시간 모니터가 "진행 중인 작업"을 누락 없이 보여주도록 활성 작업 전체를 반환한다.
-    /// 최근 N건 목록에는 오래 정지된 작업이 밀려날 수 있다.
+    /// 실시간 모니터에 보여줄 활성 작업을 최신순 상한까지만 반환한다.
+    /// 전체 개수는 CountActiveJobsAsync가 별도로 제공하므로 누락된 작업은 "확인 불가"로 표시할 수 있다.
     /// </summary>
     public async Task<IReadOnlyList<LabJobRecord>> GetActiveJobsAsync(
         CancellationToken cancellationToken = default)
@@ -370,11 +410,12 @@ public sealed class LabStore
         command.CommandText = """
             SELECT summary_json, detail_json, machine_name FROM jobs
             WHERE state NOT IN ($completed, $failed, $cancelled)
-            ORDER BY updated_at DESC;
+            ORDER BY updated_at DESC LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$completed", (int)UpdateJobState.Completed);
         command.Parameters.AddWithValue("$failed", (int)UpdateJobState.Failed);
         command.Parameters.AddWithValue("$cancelled", (int)UpdateJobState.Cancelled);
+        command.Parameters.AddWithValue("$limit", MaxActiveJobs);
 
         var results = new List<LabJobRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -428,6 +469,26 @@ public sealed class LabStore
             Detail = detail,
             MachineName = reader.GetString(2),
         };
+    }
+
+    /// <summary>단일 에이전트가 현재 남긴 비종료 작업 수. 새 작업 상한을 강제할 때 사용한다.</summary>
+    public async Task<int> CountActiveJobsAsync(
+        string agentId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*) FROM jobs
+            WHERE agent_id = $agent COLLATE NOCASE
+              AND state NOT IN ($completed, $failed, $cancelled);
+            """;
+        command.Parameters.AddWithValue("$agent", AgentIdGuard.Canonical(agentId));
+        command.Parameters.AddWithValue("$completed", (int)UpdateJobState.Completed);
+        command.Parameters.AddWithValue("$failed", (int)UpdateJobState.Failed);
+        command.Parameters.AddWithValue("$cancelled", (int)UpdateJobState.Cancelled);
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt32(result ?? 0);
     }
 
     public async Task<int> CountActiveJobsAsync(CancellationToken cancellationToken = default)
@@ -504,6 +565,7 @@ public sealed class LabStore
 
     public async Task AddCommandAsync(AgentCommand command, CancellationToken cancellationToken = default)
     {
+        command = command with { AgentId = AgentIdGuard.Canonical(command.AgentId) };
         await using var connection = await OpenAsync(cancellationToken);
         await using var command2 = connection.CreateCommand();
         command2.CommandText = """
@@ -537,12 +599,12 @@ public sealed class LabStore
                 SELECT command_id, agent_id, type, status, payload_json, issued_by,
                        created_at, expires_at
                 FROM commands
-                WHERE agent_id = $agent
+                WHERE agent_id = $agent COLLATE NOCASE
                   AND status IN ($pending, $delivered)
                   AND expires_at > $now
                 ORDER BY created_at LIMIT $max;
                 """;
-            select.Parameters.AddWithValue("$agent", agentId);
+            select.Parameters.AddWithValue("$agent", AgentIdGuard.Canonical(agentId));
             select.Parameters.AddWithValue("$pending", (int)CommandStatus.Pending);
             select.Parameters.AddWithValue("$delivered", (int)CommandStatus.Delivered);
             select.Parameters.AddWithValue("$now", now);
@@ -593,7 +655,7 @@ public sealed class LabStore
         // 공유 에이전트 토큰을 가진 다른 PC의 결과, 이미 종료된 명령, 만료된 명령은 거부한다.
         command.CommandText = """
             UPDATE commands SET status = $status, result_message = $message, completed_at = $ts
-            WHERE command_id = $id AND agent_id = $agent
+            WHERE command_id = $id AND agent_id = $agent COLLATE NOCASE
               AND status IN ($pending, $delivered)
               AND expires_at > $now;
             """;
@@ -605,7 +667,7 @@ public sealed class LabStore
         var pendingParam = command.Parameters.Add("$pending", SqliteType.Integer);
         var deliveredParam = command.Parameters.Add("$delivered", SqliteType.Integer);
         var nowParam = command.Parameters.Add("$now", SqliteType.Text);
-        agentParam.Value = agentId;
+        agentParam.Value = AgentIdGuard.Canonical(agentId);
         pendingParam.Value = (int)CommandStatus.Pending;
         deliveredParam.Value = (int)CommandStatus.Delivered;
         // 만료 비교와 완료 시각 모두 서버 UTC 시계만 사용한다. 에이전트 보고 시각은 신뢰하지 않는다.
@@ -663,7 +725,8 @@ public sealed class LabStore
         int limit = 200,
         CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken);        await using var command = connection.CreateCommand();
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
         command.CommandText = agentId is null
             ? """
               SELECT command_id, agent_id, type, status, payload_json, issued_by,
@@ -673,10 +736,10 @@ public sealed class LabStore
             : """
               SELECT command_id, agent_id, type, status, payload_json, issued_by,
                      created_at, expires_at, result_message, completed_at
-              FROM commands WHERE agent_id = $agent ORDER BY created_at DESC LIMIT $limit;
+              FROM commands WHERE agent_id = $agent COLLATE NOCASE ORDER BY created_at DESC LIMIT $limit;
               """;
         command.Parameters.AddWithValue("$limit", limit);
-        if (agentId is not null) command.Parameters.AddWithValue("$agent", agentId);
+        if (agentId is not null) command.Parameters.AddWithValue("$agent", AgentIdGuard.Canonical(agentId));
 
         var results = new List<AgentCommand>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);

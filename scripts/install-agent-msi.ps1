@@ -63,6 +63,14 @@ function Assert-64BitProcess {
     }
 }
 
+function Read-FirstTokenLine {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Secret file not found: $Path" }
+    $lines = @(Get-Content -LiteralPath $Path -TotalCount 1)
+    if ($lines.Count -eq 0) { return '' }
+    return ([string]$lines[0]).TrimStart([char]0xFEFF).Trim()
+}
+
 function Resolve-Secret {
     param(
         [string]$Value,
@@ -76,8 +84,7 @@ function Resolve-Secret {
 
     # An explicitly supplied file always wins over a stale session/CI environment token.
     if ($PreferFile -and -not [string]::IsNullOrWhiteSpace($File)) {
-        if (-not (Test-Path -LiteralPath $File)) { throw "Secret file not found: $File" }
-        return (Get-Content -LiteralPath $File -Raw).TrimStart([char]0xFEFF).Trim()
+        return Read-FirstTokenLine -Path $File
     }
 
     if (-not [string]::IsNullOrWhiteSpace($EnvName)) {
@@ -86,8 +93,7 @@ function Resolve-Secret {
     }
 
     if (-not [string]::IsNullOrWhiteSpace($File)) {
-        if (-not (Test-Path -LiteralPath $File)) { throw "Secret file not found: $File" }
-        return (Get-Content -LiteralPath $File -Raw).TrimStart([char]0xFEFF).Trim()
+        return Read-FirstTokenLine -Path $File
     }
 
     $secure = Read-Host -AsSecureString $Prompt
@@ -347,6 +353,11 @@ $uri = $null
 if (-not [Uri]::TryCreate($LabManagerUrl, [UriKind]::Absolute, [ref]$uri) -or
     ($uri.Scheme -ne 'http' -and $uri.Scheme -ne 'https')) {
     throw "LabManagerUrl must be an absolute http/https URL: $LabManagerUrl"
+}
+
+if ($PSBoundParameters.ContainsKey('AgentTokenFile') -and
+    [string]::IsNullOrWhiteSpace($AgentTokenFile)) {
+    throw "AgentTokenFile was explicitly empty. Supply a token file path or omit the parameter."
 }
 
 $tokenProvided =

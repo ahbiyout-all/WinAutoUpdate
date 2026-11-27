@@ -161,15 +161,9 @@ public sealed class ManualMaestroProvider : IRestorationProvider
         try
         {
             await File.WriteAllTextAsync(_markerPath, json, cancellationToken);
-            try
-            {
-                await File.WriteAllTextAsync(_stableMarkerPath, json, cancellationToken);
-            }
-            catch
-            {
-                // 보조 경로 쓰기 실패는 무시한다. 기본 마커만으로 검증한다.
-            }
-
+            // 보조 마커 쓰기는 선택 사항이 아니다. 실패를 숨기면 재부팅 후 검증이
+            // 오래된 마커를 근거로 통과할 수 있으므로 호출자에게 실패를 전달한다.
+            await File.WriteAllTextAsync(_stableMarkerPath, json, cancellationToken);
             return marker;
         }
         finally
@@ -210,23 +204,30 @@ public sealed class ManualMaestroProvider : IRestorationProvider
         }
 
         // 보조 마커가 있으면 nonce를 비교해 위조/부분 복원 여부를 확인한다.
-        try
+        // 손상되었거나 읽을 수 없는 보조 마커는 확인 불가이므로 통과시키지 않는다.
+        if (File.Exists(_stableMarkerPath))
         {
-            if (File.Exists(_stableMarkerPath))
+            try
             {
                 var stableJson = await File.ReadAllTextAsync(_stableMarkerPath, cancellationToken);
                 var stable = UpdateAgentJson.Deserialize<RestoreMarker>(stableJson);
-                if (stable is not null
-                    && !string.Equals(stable.Nonce, marker.Nonce, StringComparison.Ordinal))
+                if (stable is null)
+                {
+                    return MarkerVerificationResult.Failed(
+                        "보조 마커를 읽을 수 없습니다. 마커 파일이 손상되었습니다.");
+                }
+
+                if (!string.Equals(stable.Nonce, marker.Nonce, StringComparison.Ordinal))
                 {
                     return MarkerVerificationResult.Failed(
                         "보조 마커와 기본 마커의 내용이 다릅니다. 복원/상태 불일치가 의심됩니다.");
                 }
             }
-        }
-        catch
-        {
-            // 보조 마커 오류는 무시한다.
+            catch (Exception ex)
+            {
+                return MarkerVerificationResult.Failed(
+                    $"보조 마커를 읽을 수 없습니다: {ex.Message}");
+            }
         }
 
         return MarkerVerificationResult.Ok(marker);
@@ -266,20 +267,19 @@ public sealed class ManualMaestroProvider : IRestorationProvider
     private async Task<Dictionary<string, MaestroChecklist>> LoadChecklistsAsync(CancellationToken cancellationToken)
     {
         if (!File.Exists(_checklistPath)) return new Dictionary<string, MaestroChecklist>(StringComparer.OrdinalIgnoreCase);
-        try
+
+        var json = await File.ReadAllTextAsync(_checklistPath, cancellationToken);
+        var loaded = UpdateAgentJson.Deserialize<Dictionary<string, MaestroChecklist>>(json);
+        // 손상된 파일을 빈 사전으로 바꾸면 이후 확인 저장이 다른 작업의 확인을 지운다.
+        // 읽기/파싱 실패는 그대로 전달해 파일을 덮어쓰지 않도록 한다.
+        if (loaded is null)
         {
-            var json = await File.ReadAllTextAsync(_checklistPath, cancellationToken);
-            var loaded = UpdateAgentJson.Deserialize<Dictionary<string, MaestroChecklist>>(json);
-            // System.Text.Json은 기본 비교자(대소문자 구분)로 사전을 만들므로
-            // 저장된 작업 ID의 대소문자가 달라도 동일한 항목으로 취급하도록 다시 감싼다.
-            return loaded is null
-                ? new Dictionary<string, MaestroChecklist>(StringComparer.OrdinalIgnoreCase)
-                : new Dictionary<string, MaestroChecklist>(loaded, StringComparer.OrdinalIgnoreCase);
+            throw new InvalidDataException("Maestro 확인 목록 파일이 비어 있거나 손상되었습니다.");
         }
-        catch
-        {
-            return new Dictionary<string, MaestroChecklist>(StringComparer.OrdinalIgnoreCase);
-        }
+
+        // System.Text.Json은 기본 비교자(대소문자 구분)로 사전을 만들므로
+        // 저장된 작업 ID의 대소문자가 달라도 동일한 항목으로 취급하도록 다시 감싼다.
+        return new Dictionary<string, MaestroChecklist>(loaded, StringComparer.OrdinalIgnoreCase);
     }
 
     private async Task SaveChecklistsAsync(

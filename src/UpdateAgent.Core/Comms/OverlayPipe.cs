@@ -12,6 +12,10 @@ namespace UpdateAgent.Core.Comms;
 /// <summary>서비스가 호스팅하는 오버레이 파이프 서버. 연결된 모든 SessionHelper로 메시지를 보낸다.</summary>
 public sealed class OverlayPipeServer : IAsyncDisposable
 {
+    // 정체된 helper 한 곳이 Hide/긴급 중단이나 진행 상태 저장을 막지 않도록
+    // 클라이언트별 쓰기에 짧은 상한을 둔다.
+    private static readonly TimeSpan ClientWriteTimeout = TimeSpan.FromMilliseconds(400);
+
     private readonly string _pipeName;
     private readonly ConcurrentDictionary<Guid, ClientConnection> _clients = new();
     private readonly CancellationTokenSource _cts = new();
@@ -131,19 +135,86 @@ public sealed class OverlayPipeServer : IAsyncDisposable
         if (_clients.IsEmpty) return;
 
         var json = UpdateAgentJson.Serialize(message);
-        foreach (var (id, client) in _clients)
+        await BroadcastWithTimeoutAsync(
+            _clients,
+            static (client, line, token) => client.WriteAsync(line, token),
+            RemoveClient,
+            json,
+            ClientWriteTimeout,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private void RemoveClient(Guid id)
+    {
+        if (_clients.TryRemove(id, out var client)) client.Dispose();
+    }
+
+    /// <summary>
+    /// 클라이언트 한 곳의 쓰기가 끝나지 않아도 다음 클라이언트로 진행하는 브로드캐스트.
+    /// 시간 초과된 연결은 제거해 이후 메시지가 정상 클라이언트에게 계속 전달되게 한다.
+    /// </summary>
+    internal static async Task BroadcastWithTimeoutAsync<TClient>(
+        IEnumerable<KeyValuePair<Guid, TClient>> clients,
+        Func<TClient, string, CancellationToken, Task> writeAsync,
+        Action<Guid> removeClient,
+        string line,
+        TimeSpan writeTimeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(clients);
+        ArgumentNullException.ThrowIfNull(writeAsync);
+        ArgumentNullException.ThrowIfNull(removeClient);
+        if (writeTimeout <= TimeSpan.Zero || writeTimeout == Timeout.InfiniteTimeSpan)
         {
+            throw new ArgumentOutOfRangeException(nameof(writeTimeout));
+        }
+
+        foreach (var (id, client) in clients)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(writeTimeout);
+
+            Task write;
             try
             {
-                await client.WriteAsync(json, cancellationToken);
+                write = writeAsync(client, line, timeout.Token);
             }
             catch
             {
-                _clients.TryRemove(id, out _);
-                client.Dispose();
+                removeClient(id);
+                continue;
+            }
+
+            var completed = await Task.WhenAny(write, Task.Delay(writeTimeout, timeout.Token))
+                .ConfigureAwait(false);
+            timeout.Cancel();
+
+            if (completed != write)
+            {
+                // 쓰기가 취소를 무시해도 무한정 기다리지 않는다. 연결을 닫아
+                // 남은 쓰기를 깨우고 예외는 관측해 미처리 예외로 남지 않게 한다.
+                removeClient(id);
+                ObserveFault(write);
+                continue;
+            }
+
+            try
+            {
+                await write.ConfigureAwait(false);
+            }
+            catch
+            {
+                removeClient(id);
             }
         }
     }
+
+    private static void ObserveFault(Task task) =>
+        _ = task.ContinueWith(
+            static t => _ = t.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 
     public async ValueTask DisposeAsync()
     {

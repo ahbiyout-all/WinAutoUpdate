@@ -1,3 +1,4 @@
+using UpdateAgent.Guards;
 using UpdateAgent.LabManager.Models;
 using UpdateAgent.LabManager.Storage;
 using UpdateAgent.Shared.Models;
@@ -102,8 +103,11 @@ public sealed class AgentPolicyService
         CancellationToken cancellationToken = default)
     {
         var overrides = await _store.GetSettingsByPrefixAsync(AgentKeyPrefix, cancellationToken);
-        // 에이전트 ID는 다른 경로에서 대소문자 무관으로 비교하므로 요약 조회도 동일하게 맞춘다.
-        var overrideLookup = new Dictionary<string, string>(overrides, StringComparer.OrdinalIgnoreCase);
+        // 과거 릴리스에서 대소문자만 다른 키가 저장될 수 있다. dictionary 생성자로 한 번에 넣으면
+        // 정규화된 키가 중복될 때 예외가 나 대시보드 전체가 멈추므로 TryAdd로 충돌을 흡수한다.
+        var overrideLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in overrides)
+            overrideLookup.TryAdd(pair.Key, pair.Value);
         var agents = await _store.GetAgentsAsync(cancellationToken);
         return agents.Select(agent =>
         {
@@ -119,7 +123,7 @@ public sealed class AgentPolicyService
         }).ToList();
     }
 
-    private static string Key(string agentId) => AgentKeyPrefix + agentId;
+    private static string Key(string agentId) => AgentKeyPrefix + AgentIdGuard.Canonical(agentId);
 
     /// <summary>파싱할 수 없으면 null을 돌려 기본 정책 폴백과 구분한다.</summary>
     private static UpdatePolicy? TryParse(string? json)

@@ -49,7 +49,9 @@ public sealed record LiveSnapshot(
     /// <summary>마지막 체크인이 기준 시각보다 90초 이상 오래된 에이전트 수.</summary>
     int StaleCount = 0,
     /// <summary>오래됨 판정과 표시에 사용한 스냅샷 기준 시각(UTC). 구 버전 호환을 위해 null 허용.</summary>
-    DateTimeOffset? SnapshotAt = null)
+    DateTimeOffset? SnapshotAt = null,
+    /// <summary>활성 작업 상한 때문에 스냅샷에 포함하지 못한 작업 수. 0이면 누락 없음.</summary>
+    int HiddenActiveJobCount = 0)
 {
     /// <summary>오래됨 판정 기준(초). 90초를 넘기면 오래된 체크인으로 본다.</summary>
     public const int StaleThresholdSeconds = 90;
@@ -140,6 +142,7 @@ public static class LiveSnapshotBuilder
             agentViews,
             jobViews,
             agentViews.Count(a => LiveSnapshot.IsStale(a.LastSeen, snapshotAt)),
-            snapshotAt);
+            snapshotAt,
+            Math.Max(0, activeJobCount - activeJobs.Count));
     }
 }

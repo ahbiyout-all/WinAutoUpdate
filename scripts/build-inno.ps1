@@ -58,6 +58,15 @@ $PublishRoot = [IO.Path]::GetFullPath($PublishRoot)
 $OutputRoot  = [IO.Path]::GetFullPath($OutputRoot)
 $StagingRoot = [IO.Path]::GetFullPath($StagingRoot)
 
+# Any terminating failure removes the staging tree so embedded token files never
+# remain on disk. -KeepStaging explicitly opts out for debugging.
+trap {
+    if (-not $KeepStaging -and (Test-Path -LiteralPath $StagingRoot)) {
+        Remove-Item -LiteralPath $StagingRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    throw
+}
+
 $innoDir = Join-Path $repoRoot "installer\InnoSetup"
 $agentIss = Join-Path $innoDir "UpdateAgent.Agent.iss"
 $labManagerIss = Join-Path $innoDir "UpdateAgent.LabManager.iss"
@@ -395,12 +404,17 @@ if ($removed.Count -gt 0) {
 $agentTokenFromEnv = $env:UPDATEAGENT_AGENT_TOKEN
 $labAgentTokenFromEnv = $env:UPDATEAGENT_LABMANAGER_AGENT_TOKEN
 $agentTokenLines = @()
-if (-not [string]::IsNullOrWhiteSpace($agentTokenFromEnv)) {
-    $agentTokenLines = @(Assert-BundledTokenValue -Value $agentTokenFromEnv -Name 'UPDATEAGENT_AGENT_TOKEN')
-    Write-Host 'Embedded first-install agent token file (value hidden).'
-}
-Write-BundledTokenFile -Path (Join-Path $agentStage $bundledAgentTokenName) -Lines $agentTokenLines
+$labManagerTokenLines = @()
 
+# Validate every secret before writing any token file into staging. A failed
+# validation must never leave real token values on the build machine.
+$agentToken = ''
+if (-not [string]::IsNullOrWhiteSpace($agentTokenFromEnv)) {
+    $agentToken = Assert-BundledTokenValue -Value $agentTokenFromEnv -Name 'UPDATEAGENT_AGENT_TOKEN'
+}
+
+$adminToken = ''
+$labAgentToken = ''
 if (-not $AgentOnly) {
     $adminTokenFromEnv = $env:UPDATEAGENT_LABMANAGER_ADMIN_TOKEN
     $hasAdminToken = -not [string]::IsNullOrWhiteSpace($adminTokenFromEnv)
@@ -408,25 +422,33 @@ if (-not $AgentOnly) {
     if ($hasAdminToken -ne $hasLabAgentToken) {
         throw 'Set both UPDATEAGENT_LABMANAGER_ADMIN_TOKEN and UPDATEAGENT_LABMANAGER_AGENT_TOKEN, or neither.'
     }
-    $labManagerTokenLines = @()
+    # Both variables name the same student-facing token. A mismatch would ship a
+    # LabManager installer whose embedded token the server rejects (401).
+    if ((-not [string]::IsNullOrWhiteSpace($agentTokenFromEnv)) -and $hasLabAgentToken) {
+        $normalizedAgentToken = $agentToken.TrimStart([char]0xFEFF).Trim()
+        $normalizedLabAgentToken = (Get-FirstLine $labAgentTokenFromEnv).TrimStart([char]0xFEFF).Trim()
+        if ($normalizedAgentToken -cne $normalizedLabAgentToken) {
+            throw 'UPDATEAGENT_AGENT_TOKEN and UPDATEAGENT_LABMANAGER_AGENT_TOKEN must match when both are set.'
+        }
+    }
     if ($hasAdminToken) {
         $adminToken = Assert-BundledTokenValue -Value $adminTokenFromEnv -Name 'UPDATEAGENT_LABMANAGER_ADMIN_TOKEN'
         $labAgentToken = Assert-BundledTokenValue -Value $labAgentTokenFromEnv -Name 'UPDATEAGENT_LABMANAGER_AGENT_TOKEN'
+    }
+}
+
+if ($agentToken -ne '') {
+    $agentTokenLines = @($agentToken)
+    Write-Host 'Embedded first-install agent token file (value hidden).'
+}
+Write-BundledTokenFile -Path (Join-Path $agentStage $bundledAgentTokenName) -Lines $agentTokenLines
+
+if (-not $AgentOnly) {
+    if ($adminToken -ne '') {
         $labManagerTokenLines = @($adminToken, $labAgentToken)
         Write-Host 'Embedded first-install LabManager token file (values hidden).'
     }
     Write-BundledTokenFile -Path (Join-Path $labManagerStage $bundledLabManagerTokenName) -Lines $labManagerTokenLines
-}
-
-# Both variables name the same student-facing token. A mismatch would ship an
-# installer whose embedded token the LabManager rejects (401). Values stay hidden.
-if (-not [string]::IsNullOrWhiteSpace($agentTokenFromEnv) -and
-    -not [string]::IsNullOrWhiteSpace($labAgentTokenFromEnv)) {
-    $normalizedAgentToken = $agentTokenFromEnv.TrimStart([char]0xFEFF).Trim()
-    $normalizedLabAgentToken = $labAgentTokenFromEnv.TrimStart([char]0xFEFF).Trim()
-    if ($normalizedAgentToken -cne $normalizedLabAgentToken) {
-        throw 'UPDATEAGENT_AGENT_TOKEN and UPDATEAGENT_LABMANAGER_AGENT_TOKEN must match when both are set.'
-    }
 }
 
 # 빌드 메타데이터에 실제 시크릿 내장 여부를 정확히 기록한다.

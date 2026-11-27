@@ -47,12 +47,19 @@ function Assert-Administrator {
     }
 }
 
+function Read-FirstTokenLine {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Secret file not found: $Path" }
+    $lines = @(Get-Content -LiteralPath $Path -TotalCount 1)
+    if ($lines.Count -eq 0) { return '' }
+    return ([string]$lines[0]).TrimStart([char]0xFEFF).Trim()
+}
+
 function Resolve-Secret {
     param([string]$Value, [string]$File)
     if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value.Trim() }
     if (-not [string]::IsNullOrWhiteSpace($File)) {
-        if (-not (Test-Path -LiteralPath $File)) { throw "Secret file not found: $File" }
-        return (Get-Content -LiteralPath $File -Raw).TrimStart([char]0xFEFF).Trim()
+        return Read-FirstTokenLine -Path $File
     }
     $secure = Read-Host -AsSecureString "Agent token (must match LabManager AgentToken)"
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)

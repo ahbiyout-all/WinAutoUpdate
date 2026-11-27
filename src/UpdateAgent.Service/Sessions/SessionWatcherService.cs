@@ -75,7 +75,19 @@ public sealed class SessionWatcherService : BackgroundService
         // 이름이 바뀐 헬퍼도 같은 프로세스로 인식해야 중복 실행되지 않는다.
         var processName = Path.GetFileNameWithoutExtension(executable);
 
-        foreach (var session in _probe.GetInteractiveSessions())
+        var probe = _probe.Probe();
+        if (probe.ProbeFailed)
+        {
+            // 세션이 없는 것이 아니라 확인하지 못한 것이므로 다음 주기에 다시 시도한다.
+            // 여기서 목록을 비우면 실행 중인 헬퍼를 모두 정리해 버린다.
+            _logger.LogWarning(
+                "사용자 세션을 확인할 수 없어 헬퍼 상태를 유지하고 다시 시도합니다: {Error}",
+                probe.Error);
+            return;
+        }
+
+        var sessions = probe.Sessions;
+        foreach (var session in sessions)
         {
             if (IsHelperAlive(session.SessionId, processName))
             {
@@ -114,7 +126,7 @@ public sealed class SessionWatcherService : BackgroundService
 
         foreach (var sessionId in _launched.Keys.ToList())
         {
-            if (!_probe.GetInteractiveSessions().Any(s => s.SessionId == sessionId))
+            if (!sessions.Any(s => s.SessionId == sessionId))
             {
                 _launched.Remove(sessionId);
                 _lastAttempt.Remove(sessionId);

@@ -320,8 +320,18 @@ internal static class Program
             runnerOptions);
     }
 
-    private static UpdatePolicy BuildPolicy(Dictionary<string, string?> options)
+    /// <summary>명령줄 옵션을 실행 정책으로 변환한다. 테스트에서도 호출할 수 있도록 internal로 둔다.</summary>
+    internal static UpdatePolicy BuildPolicy(Dictionary<string, string?> options)
     {
+        var pauseOnUser = options.ContainsKey("pause-on-user");
+        var noUserPause = options.ContainsKey("no-user-pause");
+        if (pauseOnUser && noUserPause)
+        {
+            // 모순된 옵션은 추측하지 않고 거부한다(페일 클로즈).
+            throw new InvalidOperationException(
+                "--pause-on-user와 --no-user-pause는 동시에 지정할 수 없습니다.");
+        }
+
         var policy = UpdatePolicy.Default;
 
         if (options.TryGetValue("max-reboots", out var maxReboots)
@@ -336,9 +346,13 @@ internal static class Program
         if (options.ContainsKey("drivers"))
             policy = policy with { IncludeDrivers = true };
 
-        if (options.ContainsKey("no-user-pause") || !options.ContainsKey("pause-on-user"))
+        if (noUserPause)
         {
             policy = policy with { PauseOnUserLogon = false };
+        }
+        else if (pauseOnUser)
+        {
+            policy = policy with { PauseOnUserLogon = true };
         }
 
         if (options.ContainsKey("no-overlay"))
@@ -447,7 +461,7 @@ internal static class Program
               UpdateAgent.Cli preflight  [--confirm-maestro]
               UpdateAgent.Cli run        [--confirm-maestro] [--max-reboots 5] [--dry-run]
                                          [--optional] [--drivers] [--pause-on-user]
-                                         [--no-overlay] [--reboot-never] [--shutdown]
+                                         [--no-user-pause] [--no-overlay] [--reboot-never] [--shutdown]
               UpdateAgent.Cli resume
               UpdateAgent.Cli status
               UpdateAgent.Cli maestro
@@ -458,6 +472,8 @@ internal static class Program
               - Windows Update 설치는 관리자 권한이 필요합니다.
               - Maestro 사용 시 작업 전 '보호 중지/수동 복구' 전환 후 --confirm-maestro를 지정하세요.
               - run은 재부팅이 예약되면 종료됩니다. 부팅 후 서비스 또는 resume으로 이어집니다.
+              - --pause-on-user는 사용자 로그온 시 작업을 일시중지하고, --no-user-pause는 기본값(일시중지 안 함)을 명시합니다.
+              - 두 플래그는 함께 지정할 수 없습니다.
             """);
         return 0;
     }

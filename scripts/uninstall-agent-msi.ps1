@@ -35,6 +35,12 @@ function Assert-Administrator {
     }
 }
 
+function Assert-64BitProcess {
+    if (-not [Environment]::Is64BitProcess) {
+        throw "Run the 64-bit PowerShell. The x64 MSI registers in the 64-bit uninstall view."
+    }
+}
+
 function Get-UpdateAgentProductCode {
     $root = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
     $entry = Get-ItemProperty -Path $root -ErrorAction SilentlyContinue |
@@ -46,6 +52,7 @@ function Get-UpdateAgentProductCode {
 }
 
 Assert-Administrator
+Assert-64BitProcess
 $DataRoot = [IO.Path]::GetFullPath($DataRoot)
 
 $uninstallTarget = $null

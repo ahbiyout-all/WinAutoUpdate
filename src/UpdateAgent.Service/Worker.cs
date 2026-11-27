@@ -79,11 +79,25 @@ public sealed class Worker : BackgroundService
     /// <summary>
     /// 체크인 루프가 사용하는 지연. 실패 횟수에 따라 백오프를 적용하고 상한을 지킨다.
     /// </summary>
-    public static int ResolveCheckInDelaySeconds(int consecutiveFailures, int effectivePollSeconds) =>
-        CheckInRetryPolicy.NextDelaySeconds(
+    public static int ResolveCheckInDelaySeconds(int consecutiveFailures, int effectivePollSeconds)
+    {
+        // 기본 지연이 상한보다 크면 NextDelaySeconds의 max>=base 보정 때문에 상한이 무력화된다.
+        var baseSeconds = Math.Min(effectivePollSeconds, CheckInRetryPolicy.DefaultMaxDelaySeconds);
+        return CheckInRetryPolicy.NextDelaySeconds(
             consecutiveFailures,
-            effectivePollSeconds,
+            baseSeconds,
             CheckInRetryPolicy.DefaultMaxDelaySeconds);
+    }
+
+    /// <summary>
+    /// 오프라인 복구 메시드는 이전 작업의 오류에 가려지지 않도록 우선 표시한다.
+    /// </summary>
+    public static string? ResolveTelemetryLastError(string? jobError, string? recoveryError) =>
+        !string.IsNullOrWhiteSpace(recoveryError)
+            ? recoveryError
+            : !string.IsNullOrWhiteSpace(jobError)
+                ? jobError
+                : null;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -296,7 +310,8 @@ public sealed class Worker : BackgroundService
         var options = _options.CurrentValue;
         var os = _runner.Os ?? WindowsOsInfoProvider.GetCurrent();
         var hardware = HardwareInfo.GetSnapshot();
-        var sessions = _sessions.GetInteractiveSessions();
+        var sessionProbe = _sessions.Probe();
+        var rebootProbe = _reboot.ProbeRebootPending();
 
         MaestroDetectionResult maestro;
         try
@@ -351,14 +366,16 @@ public sealed class Worker : BackgroundService
             CurrentJob = current?.Summary,
             CurrentJobDetail = current,
             CurrentPhase = current?.Summary.Phase,
-            UserLoggedOn = sessions.Count > 0,
+            UserLoggedOn = sessionProbe.Sessions.Count > 0,
+            UserSessionProbeFailed = sessionProbe.ProbeFailed,
             WuBusy = wuBusy,
             WuBusyProbeFailed = wuBusyProbeFailed,
-            RebootPending = _reboot.IsRebootPending(),
+            RebootPending = rebootProbe.Pending ?? false,
+            RebootPendingProbeFailed = rebootProbe.ProbeFailed,
             Maestro = maestro,
             FreeDiskMb = hardware.FreeDiskMb,
             OnAcPower = hardware.OnAcPower,
-            LastError = current?.Summary.LastError ?? _labManager.LastError,
+            LastError = ResolveTelemetryLastError(current?.Summary.LastError, _labManager.LastError),
         };
 
         return new AgentCheckInRequest

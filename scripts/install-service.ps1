@@ -55,8 +55,10 @@ function Resolve-Secret {
     if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value.TrimStart([char]0xFEFF).Trim() }
 
     if (-not [string]::IsNullOrWhiteSpace($File)) {
-        if (-not (Test-Path -LiteralPath $File)) { throw "Secret file not found: $File" }
-        return (Get-Content -LiteralPath $File -Raw).TrimStart([char]0xFEFF).Trim()
+        if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { throw "Secret file not found: $File" }
+        $lines = @(Get-Content -LiteralPath $File -TotalCount 1)
+        if ($lines.Count -eq 0) { return '' }
+        return ([string]$lines[0]).TrimStart([char]0xFEFF).Trim()
     }
 
     if (-not [string]::IsNullOrWhiteSpace($EnvName)) {

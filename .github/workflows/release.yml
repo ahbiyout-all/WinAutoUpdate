@@ -251,11 +251,16 @@ jobs:
               }
             }
           }
+          $changeLimit = 30
           if ($changeLines.Count -eq 0) {
             $lines.Add('- 변경 내역은 저장소의 docs/WORKLOG.md에서 해당 버전 항목을 확인하세요.')
           }
           else {
-            foreach ($change in @($changeLines | Select-Object -First 30)) { $lines.Add($change) }
+            foreach ($change in @($changeLines | Select-Object -First $changeLimit)) { $lines.Add($change) }
+            if ($changeLines.Count -gt $changeLimit) {
+              $hiddenCount = $changeLines.Count - $changeLimit
+              $lines.Add(("- 표시되지 않은 변경 {0}건은 이 릴리스 노트에서 확인 불가: docs/WORKLOG.md 참조" -f $hiddenCount))
+            }
             $lines.Add('- 전체 변경 내역: https://github.com/ahbiyout-all/WinAutoUpdate/blob/master/docs/WORKLOG.md')
           }
           $lines.Add('')

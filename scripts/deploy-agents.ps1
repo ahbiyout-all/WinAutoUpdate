@@ -277,6 +277,16 @@ function Invoke-DeploymentVerification {
             throw "$context config SHA-256 mismatch: $configName"
         }
 
+        $cmdName = [string](Get-RequiredReportValue -Object $entry -Name 'CmdName' -Context $context)
+        if (-not [string]::Equals($cmdName, 'install-agent.cmd', [StringComparison]::Ordinal)) {
+            throw "$context has an unsafe CmdName: $cmdName"
+        }
+        $cmdSha = ([string](Get-RequiredReportValue -Object $entry -Name 'CmdSha256' -Context $context)).ToLowerInvariant()
+        $actualCmdSha = Get-FileSha256 -Path (Join-Path $packageDir $cmdName)
+        if (-not [string]::Equals($actualCmdSha, $cmdSha, [StringComparison]::Ordinal)) {
+            throw "$context install wrapper SHA-256 mismatch: $cmdName"
+        }
+
         $tokenPresentRaw = Get-RequiredReportValue -Object $entry -Name 'TokenPresent' -Context $context
         $tokenPresent = $false
         if (-not [bool]::TryParse([string]$tokenPresentRaw, [ref]$tokenPresent)) {
@@ -576,6 +586,8 @@ foreach ($target in $targets) {
         InstallerSha256 = $packageInstallerSha
         ConfigName      = 'agent-install.ini'
         ConfigSha256    = $configSha
+        CmdName         = 'install-agent.cmd'
+        CmdSha256       = Get-FileSha256 -Path (Join-Path $fullPackageDir 'install-agent.cmd')
         TokenName       = $tokenName
         TokenSha256     = $tokenSha256
         TokenPresent    = $tokenPresent

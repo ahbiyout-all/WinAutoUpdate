@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using UpdateAgent.Guards;
 using UpdateAgent.Shared;
+using UpdateAgent.Shared.Comms;
 
 namespace UpdateAgent.Service.Configuration;
 
@@ -15,6 +16,13 @@ public sealed class AgentOptionsValidator : IValidateOptions<AgentOptions>
         if (options is null)
         {
             return ValidateOptionsResult.Fail("Agent 설정이 없습니다.");
+        }
+
+        // 체크인 백오프 상한(300초)보다 큰 폴링 간격은 Worker의 지연 계산을 무력화한다.
+        if (options.PollIntervalSeconds > CheckInRetryPolicy.DefaultMaxDelaySeconds)
+        {
+            return ValidateOptionsResult.Fail(
+                $"PollIntervalSeconds는 {CheckInRetryPolicy.DefaultMaxDelaySeconds}초 이하여야 합니다.");
         }
 
         // 로컬 전용 모드(CheckInEnabled=false)에서는 토큰이 필요하지 않다.
