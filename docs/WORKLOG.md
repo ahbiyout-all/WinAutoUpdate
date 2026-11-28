@@ -5,12 +5,18 @@
 
 ---
 
-## 2026-11-28 릴리스 후보 v0.1.45 준비 (게시 승인 대기)
+## 2026-11-28 게시 완료 v0.1.45
 
 `docs/IMPROVEMENT-ROADMAP.md`의 개선 1~10을 정해진 순서대로 모두 완료했고,
-각 개선마다 자아성찰 10회를 마쳤습니다. 모든 변경은 로컬 작업 트리에만 있으며
-**커밋·태그·푸시·Release·게시는 사용자 명시적 승인을 기다리고 있습니다.**
+각 개선마다 자아성찰 10회를 마쳤습니다. 게시 전 최종 검증을 통과한 뒤
+**사용자 명시 승인을 받아 커밋·태그·푸시·Release·게시를 완료했습니다.**
 
+- 게시 결과: 커밋 `53a9d88`, 태그 `v0.1.45`, CI 실행 `46118328743`(`success`, 5분 42초),
+  Release <https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.45>
+- Release 자산 3개(인스톨러 EXE 2개 + MSI 1개)와 SHA-256:
+  - `UpdateAgent.Agent-Setup-0.1.45-x64.exe`: `780d6de6adcf2bd87ee2b3617406c7c9316a67ae58f9d1f0fd5109f9c26ce33d`
+  - `UpdateAgent.LabManager-Setup-0.1.45-x64.exe`: `02da437fbeed4891c889618cc34e220919dacc0daa38854519af2c573787a4f0`
+  - `UpdateAgent.Agent-0.1.45-x64.msi`: `7205b24a71676775841e3acbb2df9be6fd962694cbe8038c5e0055be6118a2dc`
 - 개선 1~10 누적 신규 회귀 테스트: 411 → 425 → 451 → 464 → 475 → 493 → 514 → 523 → 532 → 546
 - 버전 단일 소스(`Directory.Build.props`)와 Inno/MSI 폴백 버전, 문서 예제를 `0.1.45`로 갱신했습니다.
 - 이미 게시된 `v0.1.44`(커밋 `c88b65f`, 태그, Release, 산출물 SHA-256)는 변경하지 않았습니다.
@@ -19,7 +25,8 @@
   `.iss` 2개 BOM 유지, 샘플 INI 무-BOM 유지, 변경 59개 파일 예상 외 BOM 0,
   `git diff --check` 공백 오류 0(기존 LF→CRLF 안내만 존재).
 - 미해결 블로커: 실 PC 50대 동시 재부팅 검증, 실제 코드 서명 인증서/signtool,
-  실제 교사 PC 설치 재현은 수행하지 못했습니다(각 개선 문서에 명시).
+  실제 교사 PC 설치 재현은 수행하지 못했습니다(각 개선 문서에 명시). 게시된 빌드에는
+  코드 서명이 적용되지 않았으므로 SmartScreen 경고가 나타날 수 있습니다.
 
 ---
 
