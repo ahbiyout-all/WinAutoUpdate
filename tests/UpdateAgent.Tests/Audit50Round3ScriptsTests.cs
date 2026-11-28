@@ -183,6 +183,13 @@ public sealed class Audit50Round3ScriptsTests
         var notesStep = text.Substring(notesStart, notesEnd - notesStart);
         Assert.DoesNotContain("$lines.Add($env:", notesStep);
         Assert.DoesNotContain("$lines.Add(('{0}' -f $env:", notesStep);
+
+        // Release notes must follow the IP-based deployment and embedded-token flow.
+        Assert.Contains("$lines.Add('LabManagerUrl=http://<교사-PC-IP>:5080')", notesStep);
+        Assert.Contains("-DiscoverLabManager", notesStep);
+        Assert.Contains("위 INI만으로 첫 설치가 가능합니다", notesStep);
+        Assert.DoesNotContain("$lines.Add('LabManagerUrl=http://labmanager:5080')", notesStep);
+        Assert.DoesNotContain("`agent-install.ini`와 토큰 파일을 둡니다", notesStep);
     }
 
     [Fact]
