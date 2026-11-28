@@ -34,8 +34,24 @@
 
 ### 검증과 게시 결과
 
-- 게시 결과와 최종 산출물 해시는 아래 게시 완료 항목에 기록합니다.
-- 토큰 값은 CI 로그에도 숨김으로만 기록됩니다.
+- 커밋 `ddf0470`, 태그 `v0.1.47`, CI 실행 `46128702177`(`success`, 3분 57초),
+  Release <https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.47>
+- CI 로그에 첫 설치용 에이전트 토큰·LabManager 토큰 파일 내장(값 숨김)이 기록됐고,
+  두 에이전트 토큰 동일성과 관리자/에이전트 토큰 별개성 검증을 통과했습니다.
+- 토큰 원문은 CI 로그와 저장소 소스 파일 모두에서 검색 결과 0건입니다.
+- 전체 테스트 550/550 통과, 빌드 경고 0/오류 0, PowerShell 파서 오류 0, `git diff --check` 오류 0.
+- Release 자산 3개(인스톨러 EXE 2개 + MSI 1개)와 SHA-256:
+  - `UpdateAgent.Agent-Setup-0.1.47-x64.exe`: `006364cddc9c9563017aa5a713872ff9e5dc1ff27347cf3e1e483310c99299b8`
+  - `UpdateAgent.LabManager-Setup-0.1.47-x64.exe`: `d8ef23dea144385930a806b9031015717a611e1a526ef7d11487abea590dc769`
+  - `UpdateAgent.Agent-0.1.47-x64.msi`: `c5cf9785c6b79487c4eee86b71a988214f9907ce1ed31d39eace45397eae1320`
+
+### 실 PC 확인 사항
+
+- 교사 PC: TCP 5080 Domain/Private 인바운드 허용, LabManager 서비스 자동 시작, 대시보드 로그인은
+  관리자 토큰(내장 파일 1행) 사용.
+- 학생 PC: 같은 서브넷에서 `-DiscoverLabManager`로 검색하거나 `-LabManagerUrl`로 IP 명시.
+  첫 설치 후 `agent.json`의 `LabManagerUrl`이 `http://<교사-PC-IP>:5080`인지 확인.
+- 실제 50대 동시 설치·재부팅 E2E는 이 환경에서 수행하지 못했습니다.
 
 ---
 
