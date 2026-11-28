@@ -307,7 +307,20 @@ SHA-256이 들어갑니다. **토큰 원문은 기록하지 않습니다.**
 .\scripts\deploy-agents.ps1 -Verify -OutputDir ".\deploy\agents"
 ```
 
-보고서가 없거나 파일이 없거나 해시가 다르면 오류 코드로 종료합니다.
+보고서가 없거나 파일이 없거나 해시가 다르면 오류 코드로 종료합니다. INI의 `LabManagerUrl`이 보고서의
+주소와 다르거나 `DiscoveryMode` 값이 `explicit`/`discovered`/`default`가 아니어도 중단합니다(v0.1.48).
+
+### 자동 검색 문제 해결 (v0.1.48)
+
+- `LabManager discovery found no matching host`: 교사 PC 방화벽 TCP 5080 인바운드(Domain/Private)을
+  확인하고, 배포 실행 PC와 학생 PC가 같은 브로드캐스트 도메인에 있는지 확인하세요. 라우터/ VLAN으로
+  분리됐다면 `-LabManagerUrl http://<교사-PC-IP>:5080`을 명시하세요.
+- `LabManager discovery found N candidates`: 교사 PC가 2대 이상 응답하면 자동 선택하지 않습니다.
+  `-LabManagerUrl`로 대상 IP를 지정하세요.
+- `Subnet ... is too large to scan`: /15 이하의 광범위 서브넷은 검색하지 않습니다. 명시적 IP를 사용하세요.
+- `must not contain userinfo`: URL에 `user:password@`를 넣을 수 없습니다. 자격증명은 INI에 기록되지 않습니다.
+- 고정 내장 토큰은 설치 파일에서 추출 가능하므로 파일럿 검증 후 반드시 교체하세요. 교사 PC 로컬 토큰
+  파일(`%LOCALAPPDATA%\UpdateAgent\secrets`)은 Administrators/SYSTEM/현재 계정만 읽을 수 있어야 합니다.
 
 토큰 파일이 삭제된 뒤 같은 폴더로 업그레이드하려면 `install-agent.cmd /Upgrade`를 실행하세요.
 이 모드는 토큰 파일 검사를 건너뛰고, 기존 설치가 감지되면 `agent.json`을 유지합니다.

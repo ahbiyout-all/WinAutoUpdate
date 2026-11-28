@@ -258,7 +258,8 @@ function Get-SubnetScanAddresses {
         [Array]::Reverse($bytes)
         $value = [uint64][BitConverter]::ToUInt32($bytes, 0)
         $hostMask = (([uint64]1 -shl $hostBits) - 1)
-        $network = $value -band ([uint64]0xFFFFFFFF -bxor $hostMask)
+        # PowerShell parses 0xFFFFFFFF as Int32 -1; use the decimal form for UInt64.
+        $network = $value -band ([uint64]4294967295 -bxor $hostMask)
         for ($offset = 1; $offset -lt ($size - 1); $offset++) {
             $candidateBytes = [BitConverter]::GetBytes([uint32]($network + $offset))
             [Array]::Reverse($candidateBytes)
@@ -376,6 +377,13 @@ function Invoke-DeploymentVerification {
     $reportInstallerName = [string](Get-RequiredReportValue -Object $report -Name 'InstallerName' -Context 'Deployment report')
     $reportInstallerSha = ([string](Get-RequiredReportValue -Object $report -Name 'InstallerSha256' -Context 'Deployment report')).ToLowerInvariant()
     $reportLabManagerUrl = [string](Get-RequiredReportValue -Object $report -Name 'LabManagerUrl' -Context 'Deployment report')
+    $discoveryProperty = $report.PSObject.Properties['DiscoveryMode']
+    if ($null -ne $discoveryProperty -and $null -ne $discoveryProperty.Value) {
+        $reportDiscoveryMode = [string]$discoveryProperty.Value
+        if (@('explicit', 'discovered', 'default') -notcontains $reportDiscoveryMode) {
+            throw "Deployment report has an invalid DiscoveryMode: $reportDiscoveryMode"
+        }
+    }
 
     foreach ($entry in $reportPackages) {
         $computerName = [string](Get-RequiredReportValue -Object $entry -Name 'ComputerName' -Context 'Deployment report package')
@@ -407,6 +415,15 @@ function Invoke-DeploymentVerification {
         $actualConfigSha = Get-FileSha256 -Path (Join-Path $packageDir $configName)
         if (-not [string]::Equals($actualConfigSha, $configSha, [StringComparison]::Ordinal)) {
             throw "$context config SHA-256 mismatch: $configName"
+        }
+        $urlLines = @(Get-Content -LiteralPath (Join-Path $packageDir $configName) |
+            Where-Object { $_ -match '^\s*LabManagerUrl\s*=' } | Select-Object -First 1)
+        if ($urlLines.Count -eq 0) {
+            throw "$context config has no LabManagerUrl: $configName"
+        }
+        $configUrl = (([regex]::Replace($urlLines[0], '^\s*LabManagerUrl\s*=\s*', '') -split ';', 2)[0]).Trim().TrimEnd('/')
+        if (-not [string]::Equals($configUrl, $reportLabManagerUrl, [StringComparison]::Ordinal)) {
+            throw "$context config LabManagerUrl mismatch: $configName"
         }
 
         $cmdName = [string](Get-RequiredReportValue -Object $entry -Name 'CmdName' -Context $context)
@@ -514,7 +531,7 @@ if ($DiscoverLabManager -and -not $PSBoundParameters.ContainsKey('LabManagerUrl'
     Write-Host "  Found LabManager: $LabManagerUrl" -ForegroundColor Green
 }
 elseif ($DiscoverLabManager) {
-    $discoveryMode = 'explicit (discovery skipped)'
+    $discoveryMode = 'explicit'
     Write-Host 'Explicit -LabManagerUrl supplied; skipping discovery.' -ForegroundColor Yellow
 }
 elseif (-not $PSBoundParameters.ContainsKey('LabManagerUrl')) {
@@ -526,6 +543,9 @@ $uri = $null
 if (-not [Uri]::TryCreate($LabManagerUrl, [UriKind]::Absolute, [ref]$uri) -or
     ($uri.Scheme -ne 'http' -and $uri.Scheme -ne 'https')) {
     throw "LabManagerUrl must be an absolute http/https URL: $LabManagerUrl"
+}
+if (-not [string]::IsNullOrEmpty($uri.UserInfo)) {
+    throw 'LabManagerUrl must not contain userinfo (user:password@host); credentials are never written to agent-install.ini.'
 }
 $safeLabManagerUrl = Get-SafeLabManagerUrl -Url $LabManagerUrl
 

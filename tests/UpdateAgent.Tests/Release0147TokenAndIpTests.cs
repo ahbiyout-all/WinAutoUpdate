@@ -41,6 +41,28 @@ public sealed class Release0147TokenAndIpTests
     }
 
     [Fact]
+    public void DeployAgents_UsesDecimalMaskAndRejectsUrlCredentials()
+    {
+        var text = Read("scripts/deploy-agents.ps1");
+
+        Assert.Contains("([uint64]4294967295 -bxor $hostMask)", text);
+        Assert.DoesNotContain("([uint64]0xFFFFFFFF -bxor $hostMask)", text);
+        Assert.Contains("must not contain userinfo (user:password@host)", text);
+        Assert.Contains("credentials are never written to agent-install.ini", text);
+    }
+
+    [Fact]
+    public void DeployAgents_VerifyChecksConfigUrlAndDiscoveryMode()
+    {
+        var text = Read("scripts/deploy-agents.ps1");
+
+        Assert.Contains("config LabManagerUrl mismatch", text);
+        Assert.Contains("config has no LabManagerUrl", text);
+        Assert.Contains("@('explicit', 'discovered', 'default') -notcontains", text);
+        Assert.DoesNotContain("explicit (discovery skipped)", text);
+    }
+
+    [Fact]
     public void Docs_DescribeIpDeploymentAndAutoDiscovery()
     {
         var deployment = Read("docs/DEPLOYMENT.md");
@@ -55,20 +77,39 @@ public sealed class Release0147TokenAndIpTests
     }
 
     [Fact]
-    public void Version_IsRaisedTo0147Everywhere()
+    public void Version_IsRaisedTo0148Everywhere()
     {
-        Assert.Contains("<Version>0.1.47</Version>", Read("Directory.Build.props"));
+        Assert.Contains("<Version>0.1.48</Version>", Read("Directory.Build.props"));
         foreach (var relative in new[]
         {
             "installer/InnoSetup/UpdateAgent.Agent.iss",
             "installer/InnoSetup/UpdateAgent.LabManager.iss",
         })
         {
-            Assert.Contains("#define AppVersion \"0.1.47\"", Read(relative));
+            Assert.Contains("#define AppVersion \"0.1.48\"", Read(relative));
         }
         Assert.Contains(
-            "<ProductVersion Condition=\"'$(ProductVersion)' == ''\">0.1.47</ProductVersion>",
+            "<ProductVersion Condition=\"'$(ProductVersion)' == ''\">0.1.48</ProductVersion>",
             Read("installer/UpdateAgent.Agent.Installer/UpdateAgent.Agent.Installer.wixproj"));
+    }
+
+    [Fact]
+    public void Docs_RecordDeepAuditAndFixes()
+    {
+        var worklog = Read("docs/WORKLOG.md");
+        Assert.Contains("v0.1.48 — 자아성찰·심층 감사와 오류 수정", worklog);
+        Assert.Contains("`0xFFFFFFFF` 리터럴이 PowerShell에서 `-1`로 해석", worklog);
+        Assert.Contains("PowerShell parses 0xFFFFFFFF as Int32 -1", Read("scripts/deploy-agents.ps1"));
+
+        var deployment = Read("docs/DEPLOYMENT.md");
+        Assert.Contains("자동 검색 문제 해결 (v0.1.48)", deployment);
+        Assert.Contains("must not contain userinfo", deployment);
+
+        var installer = Read("docs/INSTALLER.md");
+        Assert.Contains("TCP 5080 헬스체크 응답을 자동 검색합니다", installer);
+
+        var pilot = Read("docs/PILOT.md");
+        Assert.Contains("IP를 직접 입력하거나 자동 검색해 각 패키지의 INI에 기록합니다", pilot);
     }
 
     private static string Read(string relativePath)

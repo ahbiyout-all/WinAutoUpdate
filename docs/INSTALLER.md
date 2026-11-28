@@ -191,6 +191,10 @@ C:\Program Files\UpdateAgent\LabManager\
   내장 토큰을 사용합니다(v0.1.30 이상). **업그레이드의 재사용/무인 설치**에서는 내장 토큰을 무시하고
   기존 `agent.json`을 유지합니다. **교체 선택** 시에는 릴리스 내장 토큰(또는 명시한 외부 토큰 파일)으로
   교체하며, 새 URL을 지정하지 않으면 기존 URL을 유지합니다.
+- v0.1.47부터 `scripts\deploy-agents.ps1`이 만드는 기본 `agent-install.ini`는 **IP 주소**를 기록합니다.
+  `-LabManagerUrl http://<교사-PC-IP>:5080`으로 명시하거나 `-DiscoverLabManager`로 같은 서브넷의
+  TCP 5080 헬스체크 응답을 자동 검색합니다. DNS 별칭을 쓰려면 `-LabManagerUrl http://labmanager:5080`을
+  명시해야 합니다. URL에 `user:password@` 형태의 자격증명은 사용할 수 없습니다(fail-closed).
 
 #### 설치 파일과 같은 폴더의 설정 파일 사용 (학생 PC 배포 권장)
 
@@ -200,7 +204,7 @@ C:\Program Files\UpdateAgent\LabManager\
 
 ```ini
 [Agent]
-LabManagerUrl=http://labmanager:5080
+LabManagerUrl=http://192.168.0.10:5080
 AgentTokenFile=agent-token.txt
 ```
 
@@ -279,6 +283,9 @@ AgentTokenFile=agent-token.txt
   `C:\Program Files\UpdateAgent\LabManager\appsettings.json`의 `LabManager:AdminToken`에서 확인합니다.
 - 재사용/무인 업데이트는 내장 토큰을 적용하지 않습니다. 새로 발급한 내장 토큰을 쓰려면
   **기존 토큰을 삭제하고 새 토큰 기록**을 선택하거나 `/LabManagerTokenFile`을 지정하세요.
+- v0.1.47 릴리스에는 요청된 고정 토큰(에이전트 공용 1개, 관리자 별도 1개)이 내장되어 있습니다.
+  두 값은 CI 검증을 통과했지만 설치 파일에서 추출 가능하므로 **파일럿용**으로만 취급하고,
+  검증 완료 직후 대시보드의 **서버 토큰 변경**과 재배포로 교체하세요.
 - secret이 없는 로컬/사설 빌드에서는 내장 파일이 비어 있습니다. 에이전트 첫 설치는 외부 토큰 파일을
   지정해야 하고, LabManager 첫 설치도 실제 토큰 secret을 설정해 다시 빌드해야 합니다(v0.1.27 fail-closed).
   재사용 업데이트는 내장 토큰이 없어도 정상 동작하지만, 교체를 선택하려면 실제 내장 토큰이 필요합니다.

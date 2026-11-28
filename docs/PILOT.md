@@ -277,6 +277,16 @@ Set-Location "<복사한 폴더>"
 .\UpdateAgent.Agent-Setup-<버전>-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
+v0.1.47 배포 스크립트를 쓰면 IP를 직접 입력하거나 자동 검색해 각 패키지의 INI에 기록합니다.
+
+```powershell
+# 같은 서브넷에서 TCP 5080 헬스체크로 교사 PC 검색
+.\scripts\deploy-agents.ps1 -InventoryCsv .\inventory.csv -UseEmbeddedToken -DiscoverLabManager
+
+# IP를 직접 지정
+.\scripts\deploy-agents.ps1 -InventoryCsv .\inventory.csv -UseEmbeddedToken -LabManagerUrl "http://192.168.0.10:5080"
+```
+
 - 토큰 값은 설정 파일에 쓰지 않고 `AgentTokenFile`이 가리키는 파일의 첫 줄에만 둡니다.
 - 명령줄 `/LabManagerUrl`, `/AgentTokenFile`도 계속 지원하지만 배포에는 INI를 권장합니다.
 - 기존 Inno 설치가 있으면 무인 설치에서는 자동으로 제거 후 설치합니다.
@@ -287,12 +297,14 @@ Set-Location "<복사한 폴더>"
 - INI/BOM, URL, 토큰 검증은 기존 설치 제거 전에 수행되며 실패 시 설치가 중단됩니다.
   원인은 `%TEMP%\Setup Log <날짜>.txt`에서 확인하세요.
 - 릴리스 설치 exe에는 첫 설치와 교체 선택 업데이트에 사용하는 내장 토큰이 들어 있습니다.
-  외부 `agent-token.txt` 없이도 초기 설치가 가능하고, 설정 파일/명령줄이 없으면
-  `http://labmanager:5080`이 기본값입니다(v0.1.30 이상). 다른 주소를 쓰면 위 INI를 반드시 사용하세요.
+  외부 `agent-token.txt` 없이도 초기 설치가 가능합니다. **수동으로 exe만 실행할 때** 설정 파일/명령줄이
+  없으면 `http://labmanager:5080`이 기본값입니다(v0.1.30 이상). 배포 스크립트로 생성한 패키지는
+  v0.1.47부터 위 INI에 **IP 주소**를 기록하므로 DNS 별칭이 없어도 연결됩니다.
+  보다 자세한 내용은 [`DEPLOYMENT.md`](DEPLOYMENT.md)의 IP 자동 검색 절차를 참고하세요.
   명시한 토큰 파일이 항상 우선합니다. 업데이트의 재사용/무인 설치는 내장 토큰을 무시하고 기존
   토큰과 URL을 유지합니다. `기존 토큰을 삭제하고 새 토큰 기록`을 선택하면 릴리스 내장 토큰으로
   교체하고(외부 토큰 파일 지정 시 그것이 우선), 새 URL을 지정하지 않으면 기존 URL을 유지합니다.
-  내장 관리자 토큰은 추출 가능하므로 파일럿 직후 대시보드에서 교체하세요.
+  v0.1.47의 고정 내장 토큰은 추출 가능하므로 파일럿 검증 직후 대시보드와 재배포로 교체하세요.
 - 토큰 파일이 삭제된 뒤 재설치할 때는 `install-agent.cmd /Upgrade`를 사용하거나 새 패키지를 생성하세요.
 
 ### 4-B. MSI 설치 (대안)
