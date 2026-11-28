@@ -23,13 +23,24 @@ public static class AgentCheckInHandler
     private const int MaxRejectedAuditRowsPerCheckIn = 20;
     private const int MaxKnownAgents = 200;
 
+    /// <summary>기존 호출부용. 무결성 관찰 없이 체크인만 처리한다.</summary>
+    public static Task<CheckInProcessingResult> ProcessAsync(
+        AgentCheckInRequest request,
+        LabStore labStore,
+        AgentPolicyService agentPolicies,
+        LiveEventBus liveEvents,
+        CheckinGateRegistry gates,
+        CancellationToken cancellationToken) =>
+        ProcessAsync(request, labStore, agentPolicies, liveEvents, gates, cancellationToken, null);
+
     public static async Task<CheckInProcessingResult> ProcessAsync(
         AgentCheckInRequest request,
         LabStore labStore,
         AgentPolicyService agentPolicies,
         LiveEventBus liveEvents,
         CheckinGateRegistry gates,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        AgentIntegrityService? integrity)
     {
         // 공유 에이전트 토큰으로 임의 ID를 무한 생성해 DB/메모리를 오염시키지 않는다.
         // 모든 서버 경로가 같은 정규화 ID를 쓰도록 체크인 진입점에서 한 번만 정규화한다.
@@ -120,6 +131,20 @@ public static class AgentCheckInHandler
         }
 
         await labStore.UpsertAgentAsync(request.Agent, request.Telemetry, cancellationToken);
+
+        // 무결성 관찰은 탐지 보조 기능이므로 실패해도 체크인/명령 흐름을 막지 않는다.
+        // 실패하면 기준선이 없으므로 화면에는 확인 불가로 표시된다.
+        if (integrity is not null)
+        {
+            try
+            {
+                await integrity.ObserveAsync(agentId, request.Agent, cancellationToken);
+            }
+            catch
+            {
+                // 토큰/지문 원문을 남기지 않고 조용히 확인 불가로 처리한다.
+            }
+        }
 
         IReadOnlyList<CommandResultOutcome> outcomes = [];
         if (commandResults.Count > 0)
@@ -255,11 +280,27 @@ public static class AgentCheckInHandler
 
                     if (previous is null || previous.Summary.State != validated.State)
                     {
+                        var fromState = previous?.Summary.State.ToString();
                         await labStore.AddAuditAsync(
                             "agent", "job-state",
                             $"{request.Agent.MachineName}/{validated.JobId}",
-                            $"{previous?.Summary.State.ToString() ?? "없음"} → {validated.State} ({validated.Phase})",
-                            cancellationToken);
+                            $"{fromState ?? "없음"} → {validated.State} ({validated.Phase})",
+                            cancellationToken,
+                            previous?.CorrelationId);
+                        await labStore.AddJobTransitionAsync(new JobTransition
+                        {
+                            JobId = validated.JobId,
+                            Timestamp = validated.UpdatedAt,
+                            Event = "agent-state",
+                            FromState = fromState,
+                            ToState = validated.State.ToString(),
+                            Phase = validated.Phase,
+                            Message = validated.Message,
+                            Actor = "agent",
+                            CorrelationId = previous?.CorrelationId,
+                            DedupeKey = $"agent-state:{validated.JobId}:{fromState}:{validated.State}:" +
+                                        UtcTimestamps.Format(validated.UpdatedAt),
+                        }, cancellationToken);
                     }
                 }
             }
@@ -344,6 +385,20 @@ public static class AgentCheckInHandler
             "job-failed",
             $"{job.MachineName}/{jobId}",
             $"시작 명령 거부: {TextGuard.Truncate(result.Message, TextGuard.MaxAuditTextLength)}",
-            cancellationToken);
+            cancellationToken,
+            job.CorrelationId);
+        await store.AddJobTransitionAsync(new JobTransition
+        {
+            JobId = jobId,
+            Timestamp = now,
+            Event = "job-failed",
+            FromState = job.Summary.State.ToString(),
+            ToState = UpdateJobState.Failed.ToString(),
+            Phase = failed.Phase,
+            Message = failed.Message,
+            Actor = "system",
+            CorrelationId = job.CorrelationId,
+            DedupeKey = $"job-failed:{jobId}:{result.CommandId}",
+        }, cancellationToken);
     }
 }

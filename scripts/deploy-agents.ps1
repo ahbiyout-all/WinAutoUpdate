@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Generates self-contained silent-install packages for student PCs from an inventory CSV.
 
@@ -24,6 +24,17 @@ that report and checks the generated files without changing or regenerating
 anything. -SkipPreflight bypasses only the network health check; the token file
 is always validated for every generated deployment.
 
+The generated report records the installer runtime mode. Default packages expect
+a self-contained installer. Pass -FrameworkDependent only when the setup exe was
+built with scripts\build-inno.ps1 -FrameworkDependent and the matching Microsoft
+.NET Desktop Runtime (win-x64) is installed on every target PC; a mismatch fails
+closed. If build-info.json is absent, the mode is reported as unavailable in
+the Korean output and is never treated as verified self-contained.
+
+.PARAMETER FrameworkDependent
+Require a framework-dependent Agent installer and record that prerequisite in
+README.txt and deployment-report.json. This is strictly opt-in.
+
 .EXAMPLE
 .\scripts\deploy-agents.ps1 -InventoryCsv .\scripts\agents.sample.csv -AgentTokenFile .\secure\agent-token.txt
 
@@ -47,6 +58,9 @@ param(
     [string]$AgentTokenFile,
 
     [switch]$UseEmbeddedToken,
+
+    # Requires a framework-dependent installer and records the runtime prerequisite.
+    [switch]$FrameworkDependent,
 
     # Skips the LabManager /api/health check only; token validation still runs.
     [switch]$SkipPreflight,
@@ -110,6 +124,23 @@ function Resolve-Installer {
         @{Expression = { $_.Version }; Descending = $true}, `
         @{Expression = { $_.File.LastWriteTime }; Descending = $true})
     return $sorted[0].File
+}
+
+function Get-InstallerRuntimeMode {
+    param([string]$InstallerPath)
+
+    $infoPath = Join-Path (Split-Path -Parent $InstallerPath) 'build-info.json'
+    if (-not (Test-Path -LiteralPath $infoPath -PathType Leaf)) { return 'unknown' }
+    try {
+        $info = Get-Content -LiteralPath $infoPath -Raw | ConvertFrom-Json
+    }
+    catch {
+        return 'unknown'
+    }
+    $property = $info.PSObject.Properties['selfContained']
+    if ($null -eq $property -or $null -eq $property.Value) { return 'unknown' }
+    if ($property.Value -isnot [bool]) { return 'unknown' }
+    return $(if ($property.Value) { 'self-contained' } else { 'framework-dependent' })
 }
 
 function Resolve-AgentTokenFile {
@@ -333,8 +364,15 @@ function Invoke-DeploymentVerification {
         $versionText = [string]$versionProperty.Value
     }
     Write-Host "Verification succeeded: $($reportPackages.Count) package(s) match the deployment report." -ForegroundColor Green
+    $runtimeModeProperty = $report.PSObject.Properties['RuntimeMode']
+    $runtimeModeText = '확인 불가'
+    if ($null -ne $runtimeModeProperty -and $null -ne $runtimeModeProperty.Value) {
+        $runtimeModeText = [string]$runtimeModeProperty.Value
+    }
+    if ($runtimeModeText -eq 'unknown') { $runtimeModeText = '확인 불가' }
     Write-Host "  Report: $ReportPath"
     Write-Host "  Installer: $reportInstallerName (version $versionText)"
+    Write-Host "  Runtime: $runtimeModeText"
     Write-Host "  LabManager: $reportLabManagerUrl"
 }
 
@@ -410,6 +448,39 @@ if ($safeCollisions.Count -gt 0) {
 }
 
 $installer = Resolve-Installer -Explicit $InstallerPath
+$installerRuntimeMode = Get-InstallerRuntimeMode -InstallerPath $installer.FullName
+if ($FrameworkDependent -and $installerRuntimeMode -ne 'framework-dependent') {
+    $message = ("Cannot verify a framework-dependent installer: {0} has runtime mode '{1}'. " +
+        "Rebuild with scripts\build-inno.ps1 -FrameworkDependent and confirm that the matching " +
+        "Microsoft .NET Desktop Runtime (win-x64) is installed on every target PC.") -f
+        $installer.FullName, $installerRuntimeMode
+    throw $message
+}
+if ((-not $FrameworkDependent) -and $installerRuntimeMode -eq 'framework-dependent') {
+    $message = ("A framework-dependent installer was selected: {0}. Pass -FrameworkDependent only after " +
+        "confirming that the matching Microsoft .NET Desktop Runtime (win-x64) is installed on every " +
+        "target PC, or rebuild with scripts\build-inno.ps1 without that switch.") -f
+        $installer.FullName
+    throw $message
+}
+
+$runtimeNote = switch ($installerRuntimeMode) {
+    'framework-dependent' {
+        '대상 PC에 Microsoft .NET Desktop Runtime(win-x64, runtimeconfig 지정 버전 이상) 사전 설치 필요'
+    }
+    'self-contained' {
+        '자체 포함 패키지: 대상 PC에 .NET 런타임 불필요'
+    }
+    default {
+        '런타임 모드 확인 불가: build-info.json에서 self-contained 여부를 확인할 수 없음'
+    }
+}
+$runtimeRequirement = switch ($installerRuntimeMode) {
+    'framework-dependent' { 'Microsoft .NET Desktop Runtime (win-x64) must be preinstalled' }
+    'self-contained' { 'none (runtime bundled)' }
+    default { '확인 불가' }
+}
+
 $tokenPath = $null
 if (-not $UseEmbeddedToken) {
     $tokenPath = Resolve-AgentTokenFile -Path $AgentTokenFile
@@ -608,10 +679,12 @@ $readme = @'
 UpdateAgent student agent deployment packages
 =============================================
 
-Each <ComputerName> folder is self-contained:
+Each <ComputerName> folder contains:
   UpdateAgent.Agent-Setup-<version>-x64.exe  silent installer
   agent-install.ini                          LabManager URL __CONFIG_TOKEN__
 __PACKAGE_TOKEN__  install-agent.cmd                          elevated silent install + token cleanup
+
+런타임: __RUNTIME_NOTE__
 
 Run install-agent.cmd on the matching student PC from an elevated prompt.
 The installer reads agent-install.ini from its own folder, so no settings are
@@ -628,26 +701,30 @@ if ($UseEmbeddedToken) {
     $readme = $readme.
         Replace('__CONFIG_TOKEN__', '(no token file path)').
         Replace('__PACKAGE_TOKEN__', '').
-        Replace('__TOKEN_NOTE__', 'The setup executable contains the first-install token; updates ignore it.')
+        Replace('__TOKEN_NOTE__', 'The setup executable contains the first-install token; updates ignore it.').
+        Replace('__RUNTIME_NOTE__', $runtimeNote)
 }
 else {
     $readme = $readme.
         Replace('__CONFIG_TOKEN__', '+ token file name').
         Replace('__PACKAGE_TOKEN__', "  agent-token.txt                            shared agent token (do not distribute widely)`n").
-        Replace('__TOKEN_NOTE__', 'Generated token copies are restricted to Administrators, SYSTEM, and the deploying user, and the script restricts them again before installing. The token file is deleted after a successful install; if the install fails, the token file is kept for retry.')
+        Replace('__TOKEN_NOTE__', 'Generated token copies are restricted to Administrators, SYSTEM, and the deploying user, and the script restricts them again before installing. The token file is deleted after a successful install; if the install fails, the token file is kept for retry.').
+        Replace('__RUNTIME_NOTE__', $runtimeNote)
 }
 [IO.File]::WriteAllText((Join-Path $OutputDir 'README.txt'), $readme, (New-Object System.Text.UTF8Encoding($false)))
 
 # Hashes and metadata only: no token value is ever written to this report.
 $deploymentReport = [ordered]@{
-    GeneratedAtUtc   = [DateTime]::UtcNow.ToString('o')
-    InstallerName    = $installer.Name
-    InstallerVersion = $installerVersion
-    InstallerSha256  = $installerSha256
-    LabManagerUrl    = $safeLabManagerUrl
-    Preflight        = $preflightPerformed
-    PackageCount     = $packages.Count
-    Packages         = @($reportPackages)
+    GeneratedAtUtc      = [DateTime]::UtcNow.ToString('o')
+    InstallerName       = $installer.Name
+    InstallerVersion    = $installerVersion
+    InstallerSha256     = $installerSha256
+    RuntimeMode         = $installerRuntimeMode
+    RuntimeRequirement  = $runtimeRequirement
+    LabManagerUrl       = $safeLabManagerUrl
+    Preflight           = $preflightPerformed
+    PackageCount        = $packages.Count
+    Packages            = @($reportPackages)
 }
 $reportPath = Join-Path $OutputDir 'deployment-report.json'
 $reportJson = $deploymentReport | ConvertTo-Json -Depth 6
@@ -656,6 +733,8 @@ $reportJson = $deploymentReport | ConvertTo-Json -Depth 6
 Write-Host ''
 Write-Host "Generated $($packages.Count) agent package(s) in $OutputDir" -ForegroundColor Green
 Write-Host "  Installer : $($installer.Name)"
+$runtimeDisplay = if ($installerRuntimeMode -eq 'unknown') { '확인 불가' } else { $installerRuntimeMode }
+Write-Host "  Runtime   : $runtimeDisplay"
 Write-Host "  LabManager: $LabManagerUrl"
 foreach ($package in $packages) {
     Write-Host "  $($package.ComputerName) -> $($package.PackageDir)"

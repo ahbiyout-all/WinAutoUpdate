@@ -20,7 +20,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.44"
+  #define AppVersion "0.1.45"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\labmanager"
@@ -422,6 +422,12 @@ begin
       (Copy(UpperToken, Length(UpperToken) - 20, 21) = '-REPLACE-BEFORE-PILOT');
 end;
 
+{ TokenGuard.MinimumLength 및 deploy-agents.ps1과 같은 최소 길이를 적용한다. }
+function IsTokenLongEnough(const Value: String): Boolean;
+begin
+  Result := Length(Trim(Value)) >= 8;
+end;
+
 { JSON 문자열 속성 하나를 대소문자 무관하게 읽는다. SetJsonStringValueAnywhere와
   같은 키 검색 규칙을 써야 재사용 판단과 실제 치환이 어긋나지 않는다. }
 function GetJsonStringValueAnywhere(const Text, Key: String): String;
@@ -691,6 +697,11 @@ begin
     Result := '릴리스 내장 LabManager 토큰에 기본/샘플 값이 있습니다. 실제 토큰으로 다시 빌드하세요.';
     Exit;
   end;
+  if (not IsTokenLongEnough(AdminToken)) or (not IsTokenLongEnough(AgentToken)) then
+  begin
+    Result := '릴리스 내장 LabManager 토큰이 8자 미만입니다. 실제 토큰으로 다시 빌드하세요.';
+    Exit;
+  end;
   { 초기화된 값은 이미 NormalizeTokenLine으로 트리밍되어 있다. 역할 분리를 위해
     두 토큰이 같으면 토큰 값을 기록하지 않고 일반적인 메시지로 중단한다. }
   if AdminToken = AgentToken then
@@ -739,6 +750,12 @@ begin
     if IsPlaceholderToken(AdminToken) or IsPlaceholderToken(AgentToken) then
     begin
       Result := '새 LabManager 토큰 파일에 기본/샘플 값이 있습니다. 실제 토큰으로 교체하세요: ' +
+        ExternalTokenFile;
+      Exit;
+    end;
+    if (not IsTokenLongEnough(AdminToken)) or (not IsTokenLongEnough(AgentToken)) then
+    begin
+      Result := '새 LabManager 토큰 파일에 8자 미만 값이 있습니다. 실제 토큰으로 교체하세요: ' +
         ExternalTokenFile;
       Exit;
     end;

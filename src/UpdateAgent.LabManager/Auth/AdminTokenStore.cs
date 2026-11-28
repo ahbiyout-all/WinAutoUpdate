@@ -18,6 +18,12 @@ public sealed class AdminTokenStore
     /// <summary>토큰 회전이 필요한 기준 기간.</summary>
     public const int RotationAfterDays = 90;
 
+    /// <summary>회전용 토큰에 사용하는 난수 바이트 수(256비트).</summary>
+    public const int GeneratedTokenBytes = 32;
+
+    /// <summary>생성값이 현재/에이전트 토큰과 같을 때 재시도하는 횟수.</summary>
+    public const int MaxTokenGenerationAttempts = 8;
+
     private readonly IOptionsMonitor<LabManagerOptions>? _options;
     private readonly string _overridePath;
     private readonly ILogger<AdminTokenStore> _logger;
@@ -27,6 +33,7 @@ public sealed class AdminTokenStore
     private readonly TokenAuditLog _audit;
     private readonly Func<DateTimeOffset> _clock;
     private readonly Action<string, string, bool>? _moveFile;
+    private readonly Func<string>? _tokenGenerator;
     private string? _overrideToken;
     private string? _overrideFingerprint;
     private bool _hasOverrideFingerprint;
@@ -49,7 +56,8 @@ public sealed class AdminTokenStore
         bool restrictAcl = false,
         TokenAuditLog? auditLog = null,
         Func<DateTimeOffset>? clock = null,
-        Action<string, string, bool>? moveFile = null)
+        Action<string, string, bool>? moveFile = null,
+        Func<string>? tokenGenerator = null)
     {
         _options = options;
         _overridePath = overridePath;
@@ -57,6 +65,7 @@ public sealed class AdminTokenStore
         _restrictAcl = restrictAcl;
         _clock = clock ?? (() => UtcClock.Now);
         _moveFile = moveFile;
+        _tokenGenerator = tokenGenerator;
         _audit = auditLog ?? new TokenAuditLog(ResolveAuditPath(overridePath), logger, restrictAcl, clock);
         _overrideToken = LoadOverrideToken();
         CaptureFingerprint();
@@ -73,7 +82,8 @@ public sealed class AdminTokenStore
         bool HasRuntimeOverride,
         DateTimeOffset? LastChangedAt,
         bool RotationDue,
-        bool AuditAvailable);
+        bool AuditAvailable,
+        bool RotationEnabled = false);
 
     /// <summary>현재 유효한 관리자 토큰. 런타임 override가 있으면 그것을 우선한다.</summary>
     public string CurrentToken
@@ -117,7 +127,8 @@ public sealed class AdminTokenStore
                 !_failClosed && !string.IsNullOrWhiteSpace(_overrideToken),
                 lastChangedAt,
                 rotationDue,
-                _audit.Available);
+                _audit.Available,
+                _options?.CurrentValue.TokenRotation?.Enabled == true);
         }
     }
 
@@ -137,8 +148,14 @@ public sealed class AdminTokenStore
     private bool AllowDefaultTokens =>
         _options?.CurrentValue.AllowDefaultTokens == true;
 
-    /// <summary>새 관리자 토큰을 검증하고 저장한다. 저장 후 즉시 인증에 반영된다.</summary>
-    public async Task SetTokenAsync(string newToken, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// 새 관리자 토큰을 검증하고 저장한다. 저장 후 즉시 인증에 반영된다.
+    /// auditEvent는 회전처럼 별도 이벤트를 남겨야 할 때만 지정한다.
+    /// </summary>
+    public async Task SetTokenAsync(
+        string newToken,
+        CancellationToken cancellationToken = default,
+        string? auditEvent = null)
     {
         var candidate = TokenGuard.Normalize(newToken);
         if (candidate.Length < TokenGuard.MinimumLength)
@@ -188,7 +205,9 @@ public sealed class AdminTokenStore
                     _lastChangedAt = _clock();
                     CaptureFingerprintLocked();
                 }
-                _audit.Record(TokenAuditLog.Changed, TokenAuditLog.Fingerprint(candidate));
+                _audit.Record(
+                    auditEvent ?? TokenAuditLog.Changed,
+                    TokenAuditLog.Fingerprint(candidate));
             }
             catch (Exception ex)
             {
@@ -220,12 +239,60 @@ public sealed class AdminTokenStore
                 throw new InvalidOperationException("관리자 토큰을 저장하지 못했습니다.", ex);
             }
 
-            _logger.LogInformation("관리자 토큰이 대시보드에서 변경되었습니다. (길이: {Length})", candidate.Length);
+            if (auditEvent == TokenAuditLog.Rotated)
+                _logger.LogInformation("관리자 토큰이 회전되었습니다. (길이: {Length})", candidate.Length);
+            else
+                _logger.LogInformation("관리자 토큰이 대시보드에서 변경되었습니다. (길이: {Length})", candidate.Length);
         }
         finally
         {
             _writeSync.Release();
         }
+    }
+
+    /// <summary>
+    /// 강한 새 토큰을 만들어 기존 SetTokenAsync 검증·원자적 기록·롤백 경로로 저장한다.
+    /// 토큰 원문은 로그·감사·반환값에 포함하지 않는다.
+    /// </summary>
+    public async Task RotateAsync(CancellationToken cancellationToken = default)
+    {
+        var current = CurrentToken;
+        if (string.IsNullOrEmpty(current) || TokenGuard.IsPlaceholder(current) ||
+            !TokenGuard.IsAcceptable(current, allowPlaceholder: false))
+        {
+            Reject();
+            throw new InvalidOperationException("회전할 수 있는 유효한 관리자 토큰이 없습니다.");
+        }
+
+        for (var attempt = 0; attempt < MaxTokenGenerationAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var candidate = TokenGuard.Normalize(_tokenGenerator?.Invoke() ?? GenerateStrongToken());
+            if (candidate.Length < TokenGuard.MinimumLength ||
+                TokenGuard.IsPlaceholder(candidate) ||
+                TokenGuard.FixedTimeEquals(candidate, current) ||
+                CollidesWithAgentToken(candidate))
+            {
+                continue;
+            }
+
+            await SetTokenAsync(candidate, cancellationToken, TokenAuditLog.Rotated);
+            return;
+        }
+
+        Reject();
+        throw new InvalidOperationException("안전한 새 관리자 토큰을 생성하지 못해 회전하지 않았습니다.");
+    }
+
+    /// <summary>BCL 난수로 URL 안전한 256비트 토큰을 만든다.</summary>
+    private static string GenerateStrongToken()
+    {
+        var bytes = new byte[GeneratedTokenBytes];
+        RandomNumberGenerator.Fill(bytes);
+        return Convert.ToBase64String(bytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
     }
 
     /// <summary>거부된 요청은 지문 없이 감사 로그에 남긴다.</summary>
@@ -404,7 +471,13 @@ public sealed class AdminTokenStore
         if (!File.Exists(_overridePath)) return null;
         try
         {
-            var json = File.ReadAllText(_overridePath);
+            // 토큰 파일은 첫 줄에만 값을 둔다. 뒤에 덧붙은 줄은 토큰으로 해석하지 않는다.
+            var json = File.ReadLines(_overridePath).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                _logger.LogWarning("런타임 관리자 토큰 파일이 비어 있어 무시합니다: {Path}", _overridePath);
+                return null;
+            }
             var file = JsonSerializer.Deserialize<AdminTokenFile>(json);
             var token = TokenGuard.Normalize(file?.AdminToken);
             if (!TokenGuard.IsAcceptable(token, AllowDefaultTokens))

@@ -453,8 +453,8 @@ installer\
 artifacts\
   staging\                    ← build-msi.ps1이 만드는 임시 게시물
   msi\
-    UpdateAgent.Agent-0.1.44-x64.msi
-    UpdateAgent.Agent-0.1.44-x64.msi.sha256
+    UpdateAgent.Agent-0.1.45-x64.msi
+    UpdateAgent.Agent-0.1.45-x64.msi.sha256
     build-info.json
 ```
 
@@ -465,7 +465,7 @@ artifacts\
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
-    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.44</ProductVersion>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.45</ProductVersion>
     <PublishRoot Condition="'$(PublishRoot)' == ''">$(MSBuildThisFileDirectory)..\..\publish</PublishRoot>
     <DefineConstants>ProductVersion=$(ProductVersion);PublishRoot=$(PublishRoot)</DefineConstants>
   </PropertyGroup>
@@ -494,7 +494,7 @@ artifacts\
 
 ```powershell
 .\scripts\publish.ps1
-.\scripts\build-msi.ps1 -ProductVersion 0.1.44
+.\scripts\build-msi.ps1 -ProductVersion 0.1.45
 ```
 
 ```powershell
@@ -503,12 +503,12 @@ dotnet build .\installer\UpdateAgent.Agent.Installer\UpdateAgent.Agent.Installer
   -c Release `
   -t:Rebuild `
   -p:Platform=x64 `
-  -p:ProductVersion=0.1.44 `
+  -p:ProductVersion=0.1.45 `
   -p:PublishRoot="$PWD\artifacts\staging"
 
 # 검증 (저장소 루트에서)
 dotnet tool restore
-dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.44-x64.msi
+dotnet wix msi validate -sice ICE60 .\artifacts\msi\UpdateAgent.Agent-0.1.45-x64.msi
 ```
 
 ### 8-4. 버전 규칙
@@ -532,19 +532,87 @@ self-contained 게시물이 약 413MB이므로, CAB 압축 후 MSI는 대략 150
 - 빌드 산출물에 커밋 해시를 기록해 어떤 소스로 만든 MSI인지 추적합니다.
 - `publish.ps1`은 여전히 단일 게시 원본이며, MSI는 그 출력을 소비합니다.
 
+### 8-7. 프레임워크 종속(경량) MSI — 선택
+
+기본 MSI는 self-contained(`win-x64`)입니다. `8-5`의 크기 수치는 그 자체 포함
+빌드에 대한 과거 추정값이며 경량 MSI의 실제 크기를 뜻하지 않습니다. 경량 빌드는
+**명시적 옵트인**으로만 만듭니다.
+
+```powershell
+.\scripts\publish.ps1 -FrameworkDependent
+.\scripts\build-msi.ps1 -FrameworkDependent
+```
+
+`build-msi.ps1`은 게시를 대신 실행하지 않으므로 `publish.ps1 -FrameworkDependent`를
+먼저 실행해야 합니다. 게시 폴더의 `*.runtimeconfig.json`이 프레임워크 참조를
+사용하고 자체 포함 런타임 파일이 없음을 스크립트가 확인하며, 모드를 알 수 없거나
+요청과 다르면 `framework-dependent`/`self-contained` 기대값과 함께 중단합니다.
+스테이징에서 `*.runtimeconfig.json`과 `*.deps.json`이 제거되면 빌드가 실패합니다.
+
+사전 조건: 모든 학생 PC에 Microsoft .NET Desktop Runtime(win-x64,
+`*.runtimeconfig.json`이 지정한 버전 이상)이 설치되어 있어야 합니다. 확인할 수
+없으면 `확인 불가`로 보고하며 설치된 런타임이 없는 PC에서는 앱 실행을 보장할 수
+없습니다. 토큰은 MSI에 넣지 않고 설치 후 `agent.json`으로 주입하며, 방화벽 규칙
+변경도 없습니다(학생 PC 인바운드 규칙 없음). `build-info.json`의 `selfContained`
+가 `false`, `runtimeMode`가 `framework-dependent`인지와 **실측** `msiSizeBytes`를
+확인하세요. ICE60 억제와 서명 흐름은 동일합니다.
+
 ## 9. 서명
 
-권장 순서:
+`build-msi.ps1`과 `build-inno.ps1`은 `scripts\sign-artifacts.ps1`을 공유해 같은
+Authenticode 흐름을 사용합니다. 서명은 **선택 사항(`-Sign`)** 이며 기본 빌드는
+미서명입니다.
 
-1. 게시된 exe/dll 서명 (`signtool sign /fd SHA256 ...`).
-2. MSI 빌드.
-3. MSI 서명 (`signtool sign /fd SHA256 /tr <timestamp-url> /td SHA256 ...`).
-4. `signtool verify /pa /all`로 확인.
+### 9-1. 준비물과 설정
 
-- 서명은 스테이징 단계에서 수행하고, MSI에는 서명된 파일이 들어가야 합니다.
-- 인증서가 없으면 파일럿은 미서명으로 진행할 수 있지만, SmartScreen/백신 경고와 “알 수 없는 게시자” 표시를 감수해야 합니다.
-- 자체 서명 인증서를 쓰는 경우 학생 PC의 “신뢰할 수 있는 게시자” 저장소에 등록해야 합니다. 랩 이미지/GPO로 배포하는 방법은 2단계에서 다룹니다.
-- MSI 서명은 패키지 변조 방지에 도움이 되지만, Windows Installer가 기본적으로 서명을 강제하지는 않습니다. WDAC/AppLocker 정책이 있는 랩에서는 별도 허용 규칙이 필요합니다.
+- Windows SDK의 `signtool.exe`가 PATH에 있어야 합니다.
+- 코드 서명 인증서는 빌드 머신의 인증서 저장소에 있어야 합니다. 지문(thumbprint)은
+  `-CertificateThumbprint` 또는 `UPDATEAGENT_SIGN_THUMBPRINT` 환경 변수로만
+  전달합니다. 저장소·스크립트·CI 설정 파일에 지문이나 인증서 비밀번호를 넣지 않습니다.
+- 지문은 40자리 SHA-1 16진수여야 하며, 값이 없거나 형식이 잘못되면 빌드가
+  중단됩니다(fail-closed). `signtool.exe`가 없을 때도 중단됩니다.
+- 타임스탬프 URL(`-TimestampUrl`)은 선택입니다. 운영 배포에서는 RFC 3161
+  타임스탬프 서버를 지정하는 것을 권장합니다. 지문/비밀번호와 달리 서명 대상
+  파일 경로만 signtool에 전달되고, 비밀값은 콘솔·보고서·로그에 기록하지 않습니다.
+
+### 9-2. 공통 서명 순서
+
+1. `publish.ps1` 게시물을 스테이징하고 정제된 설정/토큰 파일을 적용합니다.
+2. 스테이징된 `UpdateAgent.*.exe`/`.dll`에 서명하고 각 파일을
+   `signtool verify /pa /all`로 검증합니다.
+3. MSI는 WiX로 빌드한 뒤 ICE 검증을 하고, Inno는 ISCC로 두 설치 EXE를 만듭니다.
+   즉 **페이로드 서명은 컴파일 전**, **최종 설치 파일 서명은 컴파일 후**입니다.
+4. 최종 MSI / `*Setup*.exe`에 서명하고 다시 `signtool verify /pa /all`로
+   검증합니다.
+5. 서명이 끝난 바이트에 대해 SHA-256과 `build-info.json`을 기록합니다.
+   (`signatureVerification` 필드에 검증 정책이 남습니다.)
+
+### 9-3. 인증서가 없는 파일럿
+
+기본값은 미서명이므로 인증서 없이 파일럿을 빌드할 수 있습니다. `-Sign`을
+붙이지 않으면 `signtool.exe`도 필요하지 않습니다. 다만 SmartScreen/백신 경고와
+"알 수 없는 게시자" 표시가 나타날 수 있으므로, 랩 롤아웃 전에는 서명된 빌드로
+교체해야 합니다. 자체 서명 인증서를 쓰면 학생 PC의 "신뢰할 수 있는 게시자"
+저장소에 등록해야 합니다(`/pa`는 신뢰 체인까지 검증합니다). MSI 서명은 패키지
+변조 방지에 도움이 되지만 Windows Installer가 기본적으로 서명을 강제하지는
+않습니다. WDAC/AppLocker 정책이 있는 랩에서는 별도 허용 규칙이 필요합니다.
+
+### 9-4. 명령과 검증
+
+```powershell
+# 지문은 secret 저장소에서 런타임에 주입합니다(저장소에 기록하지 않음).
+$env:UPDATEAGENT_SIGN_THUMBPRINT = '<secret-store-value>'
+.\scripts\build-msi.ps1 -Sign -TimestampUrl "http://timestamp.digicert.com"
+.\scripts\build-inno.ps1 -Sign -TimestampUrl "http://timestamp.digicert.com"
+
+# 수동 재검증(빌드 스크립트도 같은 명령을 모든 서명 파일에 실행합니다)
+signtool verify /pa /all .\artifacts\msi\UpdateAgent.Agent-0.1.45-x64.msi
+signtool verify /pa /all .\artifacts\inno\UpdateAgent.Agent-Setup-0.1.45-x64.exe
+signtool verify /pa /all .\artifacts\inno\UpdateAgent.LabManager-Setup-0.1.45-x64.exe
+```
+
+- `/pa`는 Authenticode 검증 정책을 사용하고 `/all`은 타임스탬프를 포함한
+  모든 서명을 확인합니다. 서명 실패·검증 실패는 모두 빌드 실패로 처리합니다.
 
 ## 10. 설치 / 업그레이드 / 제거 절차
 
@@ -591,13 +659,13 @@ $env:UPDATEAGENT_AGENT_TOKEN = Get-Content ".\pilot-agent-token.txt" -Raw
 
 ```powershell
 # 최소 UI (수동 설치)
-msiexec /i ".\UpdateAgent.Agent-0.1.44-x64.msi" /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.45-x64.msi" /norestart /l*v ".\install.log"
 
 # 무인 설치
-msiexec /i ".\UpdateAgent.Agent-0.1.44-x64.msi" /qn /norestart /l*v ".\install.log"
+msiexec /i ".\UpdateAgent.Agent-0.1.45-x64.msi" /qn /norestart /l*v ".\install.log"
 
 # 무인 + CLI
-msiexec /i ".\UpdateAgent.Agent-0.1.44-x64.msi" /qn /norestart ADDLOCAL=CliFeature
+msiexec /i ".\UpdateAgent.Agent-0.1.45-x64.msi" /qn /norestart ADDLOCAL=CliFeature
 ```
 
 - 토큰/URL은 이 명령으로 설정되지 않습니다. 설치 후 래퍼 또는 `configure-agent.ps1`을 실행해야 원격 관리가 활성화됩니다.
@@ -616,7 +684,7 @@ msiexec /i ".\UpdateAgent.Agent-0.1.44-x64.msi" /qn /norestart ADDLOCAL=CliFeatu
 ### 10-4. 제거
 
 ```powershell
-msiexec /x ".\UpdateAgent.Agent-0.1.44-x64.msi" /qn /norestart /l*v ".\uninstall.log"
+msiexec /x ".\UpdateAgent.Agent-0.1.45-x64.msi" /qn /norestart /l*v ".\uninstall.log"
 ```
 
 또는:

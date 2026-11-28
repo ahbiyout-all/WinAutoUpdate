@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using UpdateAgent.Guards;
+using UpdateAgent.LabManager.Observability;
 using UpdateAgent.LabManager.Services;
 using UpdateAgent.Shared.Models;
 using UpdateAgent.Shared.Serialization;
@@ -12,6 +14,9 @@ public sealed record AgentRecord
     public required AgentTelemetry Telemetry { get; init; }
     public bool Online { get; init; }
     public DateTimeOffset LastSeen { get; init; }
+
+    /// <summary>교사 대시보드가 표시하는 무결성/이탈 판정. 계산하지 않은 경로에서는 null이다.</summary>
+    public AgentIntegrityView? Integrity { get; init; }
 }
 
 public sealed record LabJobRecord
@@ -19,6 +24,9 @@ public sealed record LabJobRecord
     public required JobSummary Summary { get; init; }
     public JobDetail? Detail { get; init; }
     public string MachineName { get; init; } = "";
+
+    /// <summary>서버가 발급한 상관관계 ID. 이전 작업은 null이며 화면에는 "없음"으로 표시한다.</summary>
+    public string? CorrelationId { get; init; }
 }
 
 public sealed record AuditEntry
@@ -29,6 +37,58 @@ public sealed record AuditEntry
     public string Action { get; init; } = "";
     public string Target { get; init; } = "";
     public string Detail { get; init; } = "";
+    public string? CorrelationId { get; init; }
+}
+
+/// <summary>작업 상태/명령 전이 한 건. DedupeKey가 같으면 한 번만 저장된다.</summary>
+public sealed record JobTransition
+{
+    public long Id { get; init; }
+    public string JobId { get; init; } = "";
+    public DateTimeOffset Timestamp { get; init; }
+    public string Event { get; init; } = "";
+    public string? FromState { get; init; }
+    public string? ToState { get; init; }
+    public string Phase { get; init; } = "";
+    public string Message { get; init; } = "";
+    public string Actor { get; init; } = "";
+    public string? CorrelationId { get; init; }
+    public string DedupeKey { get; init; } = "";
+}
+
+/// <summary>리포트용 전이 요약. 기록이 없으면 Count=0, 시각=null이다.</summary>
+public sealed record JobTransitionSummary(
+    int Count,
+    DateTimeOffset? FirstAt,
+    DateTimeOffset? LastAt);
+
+/// <summary>리포트용 작업 행. 값이 없으면 빈 문자열 대신 null로 둔다.</summary>
+public sealed record JobReportRow(
+    string JobId,
+    string? AgentId,
+    string? MachineName,
+    string State,
+    string? Phase,
+    string? Message,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? UpdatedAt,
+    string? CorrelationId);
+
+/// <summary>
+/// 배치별 예약 상태. 작업 상세 JSON과 분리해 에이전트 체크인이 덮어쓰지 않도록 보존한다.
+/// </summary>
+public sealed record JobRolloutSchedule
+{
+    public required string JobId { get; init; }
+    public required string AgentId { get; init; }
+    public string MachineName { get; init; } = "";
+    public int BatchIndex { get; init; }
+    public int BatchCount { get; init; }
+    public int IntervalSeconds { get; init; }
+    public DateTimeOffset DueAt { get; init; }
+    public string PayloadJson { get; init; } = "{}";
+    public DateTimeOffset? DispatchedAt { get; init; }
+    public DateTimeOffset? CancelledAt { get; init; }
 }
 
 /// <summary>교사 PC의 LabManager SQLite 저장소. 작업 상태의 원본이다.</summary>
@@ -163,6 +223,43 @@ public sealed class LabStore
                 updated_at TEXT NOT NULL
             );
 
+            -- 단계적 롤아웃 예약 상태. dispatched_at/cancelled_at이 null인 행만 발송 대상이다.
+            CREATE TABLE IF NOT EXISTS job_rollout (
+                job_id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                machine_name TEXT NOT NULL,
+                batch_index INTEGER NOT NULL,
+                batch_count INTEGER NOT NULL,
+                interval_seconds INTEGER NOT NULL,
+                due_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                dispatched_at TEXT,
+                cancelled_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_job_rollout_due
+                ON job_rollout(dispatched_at, cancelled_at, due_at);
+
+            -- 작업 타임라인. dedupe_key로 같은 전이를 여러 번 기록하지 않는다.
+            CREATE TABLE IF NOT EXISTS job_transitions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                event TEXT NOT NULL,
+                from_state TEXT,
+                to_state TEXT,
+                phase TEXT NOT NULL,
+                message TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                correlation_id TEXT,
+                dedupe_key TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_job_transitions_job
+                ON job_transitions(job_id, ts, id);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_job_transitions_dedupe
+                ON job_transitions(job_id, dedupe_key);
+
             -- 이전 릴리스에서 대소문자만 다른 에이전트/정책 키가 저장될 수 있었다.
             -- 최신 행 하나만 남기고 모두 소문자로 정규화해 중복 PC와 정책 키 충돌을 제거한다.
             WITH ranked AS (
@@ -190,6 +287,37 @@ public sealed class LabStore
             UPDATE commands SET agent_id = lower(agent_id) WHERE agent_id <> lower(agent_id);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
+
+        // 기존 DB도 상관관계 ID 컬럼을 갖도록 한다. 값이 없는 이전 작업은 null로 남는다.
+        await EnsureColumnAsync(connection, "jobs", "correlation_id", cancellationToken);
+        await EnsureColumnAsync(connection, "audit", "correlation_id", cancellationToken);
+    }
+
+    private static async Task EnsureColumnAsync(
+        SqliteConnection connection,
+        string table,
+        string column,
+        CancellationToken cancellationToken)
+    {
+        var exists = false;
+        await using (var check = connection.CreateCommand())
+        {
+            check.CommandText = $"PRAGMA table_info({table});";
+            await using var reader = await check.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                {
+                    exists = true;
+                    break;
+                }
+            }
+        }
+        if (exists) return;
+
+        await using var alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} TEXT;";
+        await alter.ExecuteNonQueryAsync(cancellationToken);
     }
 
     // ---------- Agents ----------
@@ -298,7 +426,11 @@ public sealed class LabStore
 
     // ---------- Jobs ----------
 
-    public async Task SaveJobAsync(JobDetail detail, string machineName, CancellationToken cancellationToken = default)
+    public async Task SaveJobAsync(
+        JobDetail detail,
+        string machineName,
+        CancellationToken cancellationToken = default,
+        string? correlationId = null)
     {
         var canonicalId = AgentIdGuard.Canonical(detail.Summary.AgentId);
         var summary = ToUtc(detail.Summary with { AgentId = canonicalId });
@@ -307,8 +439,8 @@ public sealed class LabStore
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO jobs(job_id, agent_id, machine_name, state, phase, progress,
-                             created_at, updated_at, summary_json, detail_json)
-            VALUES($id, $agent, $machine, $state, $phase, $progress, $created, $updated, $summary, $detail)
+                             created_at, updated_at, summary_json, detail_json, correlation_id)
+            VALUES($id, $agent, $machine, $state, $phase, $progress, $created, $updated, $summary, $detail, $correlation)
             ON CONFLICT(job_id) DO UPDATE SET
                 machine_name = excluded.machine_name,
                 state = excluded.state,
@@ -316,7 +448,8 @@ public sealed class LabStore
                 progress = excluded.progress,
                 updated_at = excluded.updated_at,
                 summary_json = excluded.summary_json,
-                detail_json = COALESCE(excluded.detail_json, jobs.detail_json);
+                detail_json = COALESCE(excluded.detail_json, jobs.detail_json),
+                correlation_id = COALESCE(excluded.correlation_id, jobs.correlation_id);
             """;
         command.Parameters.AddWithValue("$id", summary.JobId);
         command.Parameters.AddWithValue("$agent", summary.AgentId);
@@ -328,28 +461,31 @@ public sealed class LabStore
         command.Parameters.AddWithValue("$updated", UtcTimestamps.Format(summary.UpdatedAt));
         command.Parameters.AddWithValue("$summary", UpdateAgentJson.Serialize(summary));
         command.Parameters.AddWithValue("$detail", UpdateAgentJson.Serialize(detail));
+        command.Parameters.AddWithValue("$correlation", string.IsNullOrWhiteSpace(correlationId) ? DBNull.Value : correlationId);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task SaveJobSummaryAsync(
         JobSummary summary,
         string machineName,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? correlationId = null)
     {
         summary = ToUtc(summary with { AgentId = AgentIdGuard.Canonical(summary.AgentId) });
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO jobs(job_id, agent_id, machine_name, state, phase, progress,
-                             created_at, updated_at, summary_json, detail_json)
-            VALUES($id, $agent, $machine, $state, $phase, $progress, $created, $updated, $summary, NULL)
+                             created_at, updated_at, summary_json, detail_json, correlation_id)
+            VALUES($id, $agent, $machine, $state, $phase, $progress, $created, $updated, $summary, NULL, $correlation)
             ON CONFLICT(job_id) DO UPDATE SET
                 machine_name = excluded.machine_name,
                 state = excluded.state,
                 phase = excluded.phase,
                 progress = excluded.progress,
                 updated_at = excluded.updated_at,
-                summary_json = excluded.summary_json;
+                summary_json = excluded.summary_json,
+                correlation_id = COALESCE(excluded.correlation_id, jobs.correlation_id);
             """;
         command.Parameters.AddWithValue("$id", summary.JobId);
         command.Parameters.AddWithValue("$agent", summary.AgentId);
@@ -360,6 +496,7 @@ public sealed class LabStore
         command.Parameters.AddWithValue("$created", UtcTimestamps.Format(summary.StartedAt));
         command.Parameters.AddWithValue("$updated", UtcTimestamps.Format(summary.UpdatedAt));
         command.Parameters.AddWithValue("$summary", UpdateAgentJson.Serialize(summary));
+        command.Parameters.AddWithValue("$correlation", string.IsNullOrWhiteSpace(correlationId) ? DBNull.Value : correlationId);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -370,7 +507,7 @@ public sealed class LabStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT summary_json, detail_json, machine_name FROM jobs
+            SELECT summary_json, detail_json, machine_name, correlation_id FROM jobs
             ORDER BY updated_at DESC LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$limit", limit);
@@ -393,6 +530,7 @@ public sealed class LabStore
                 Summary = summary,
                 Detail = detail,
                 MachineName = reader.GetString(2),
+                CorrelationId = reader.IsDBNull(3) ? null : reader.GetString(3),
             });
         }
 
@@ -409,7 +547,7 @@ public sealed class LabStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT summary_json, detail_json, machine_name FROM jobs
+            SELECT summary_json, detail_json, machine_name, correlation_id FROM jobs
             WHERE state NOT IN ($completed, $failed, $cancelled)
             ORDER BY updated_at DESC LIMIT $limit;
             """;
@@ -436,6 +574,7 @@ public sealed class LabStore
                 Summary = summary,
                 Detail = detail,
                 MachineName = reader.GetString(2),
+                CorrelationId = reader.IsDBNull(3) ? null : reader.GetString(3),
             });
         }
 
@@ -447,7 +586,7 @@ public sealed class LabStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT summary_json, detail_json, machine_name FROM jobs
+            SELECT summary_json, detail_json, machine_name, correlation_id FROM jobs
             WHERE job_id = $id LIMIT 1;
             """;
         command.Parameters.AddWithValue("$id", jobId);
@@ -469,6 +608,7 @@ public sealed class LabStore
             Summary = summary,
             Detail = detail,
             MachineName = reader.GetString(2),
+            CorrelationId = reader.IsDBNull(3) ? null : reader.GetString(3),
         };
     }
 
@@ -773,6 +913,257 @@ public sealed class LabStore
         return results;
     }
 
+    // ---------- 단계적 롤아웃 ----------
+
+    /// <summary>
+    /// 배치 예약을 저장한다. 첫 배치의 명령/감사까지 같은 트랜잭션에 넣어
+    /// 재시작 후 같은 작업이 두 번 발급되지 않게 한다. 이미 저장된 작업은 무시한다.
+    /// </summary>
+    public async Task<bool> SaveRolloutScheduleAsync(
+        JobRolloutSchedule schedule,
+        AgentCommand? firstCommand,
+        CancellationToken cancellationToken = default)
+    {
+        var agentId = AgentIdGuard.Canonical(schedule.AgentId);
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction();
+
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = """
+            INSERT OR IGNORE INTO job_rollout(job_id, agent_id, machine_name, batch_index,
+                                              batch_count, interval_seconds, due_at,
+                                              payload_json, dispatched_at, cancelled_at)
+            VALUES($id, $agent, $machine, $batch, $count, $interval, $due, $payload, $dispatched, NULL);
+            """;
+        insert.Parameters.AddWithValue("$id", schedule.JobId);
+        insert.Parameters.AddWithValue("$agent", agentId);
+        insert.Parameters.AddWithValue("$machine", schedule.MachineName);
+        insert.Parameters.AddWithValue("$batch", schedule.BatchIndex);
+        insert.Parameters.AddWithValue("$count", schedule.BatchCount);
+        insert.Parameters.AddWithValue("$interval", schedule.IntervalSeconds);
+        insert.Parameters.AddWithValue("$due", UtcTimestamps.Format(schedule.DueAt));
+        insert.Parameters.AddWithValue("$payload", schedule.PayloadJson);
+        // Microsoft.Data.Sqlite는 null 값에 DBNull.Value를 요구한다(C# null은 바인딩 오류).
+        insert.Parameters.AddWithValue(
+            "$dispatched",
+            firstCommand is null ? DBNull.Value : UtcTimestamps.Format(firstCommand.CreatedAt));
+
+        if (await insert.ExecuteNonQueryAsync(cancellationToken) == 0) return false;
+
+        if (firstCommand is not null)
+        {
+            await using var commandInsert = connection.CreateCommand();
+            commandInsert.Transaction = transaction;
+            commandInsert.CommandText = """
+                INSERT INTO commands(command_id, agent_id, type, status, payload_json,
+                                     issued_by, created_at, expires_at)
+                VALUES($id, $agent, $type, $status, $payload, $issued, $created, $expires);
+                """;
+            commandInsert.Parameters.AddWithValue("$id", firstCommand.CommandId);
+            commandInsert.Parameters.AddWithValue("$agent", AgentIdGuard.Canonical(firstCommand.AgentId));
+            commandInsert.Parameters.AddWithValue("$type", (int)firstCommand.Type);
+            commandInsert.Parameters.AddWithValue("$status", (int)firstCommand.Status);
+            commandInsert.Parameters.AddWithValue("$payload", firstCommand.PayloadJson);
+            commandInsert.Parameters.AddWithValue("$issued", firstCommand.IssuedBy);
+            commandInsert.Parameters.AddWithValue("$created", UtcTimestamps.Format(firstCommand.CreatedAt));
+            commandInsert.Parameters.AddWithValue("$expires", UtcTimestamps.Format(firstCommand.ExpiresAt));
+            await commandInsert.ExecuteNonQueryAsync(cancellationToken);
+            // 첫 배치의 감사는 호출부가 기존과 같이 teacher/job-start로 남긴다.
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<JobRolloutSchedule?> GetRolloutScheduleAsync(
+        string jobId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT agent_id, machine_name, batch_index, batch_count, interval_seconds,
+                   due_at, payload_json, dispatched_at, cancelled_at
+            FROM job_rollout WHERE job_id = $id LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$id", jobId);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) return null;
+
+        return new JobRolloutSchedule
+        {
+            JobId = jobId,
+            AgentId = reader.GetString(0),
+            MachineName = reader.GetString(1),
+            BatchIndex = reader.GetInt32(2),
+            BatchCount = reader.GetInt32(3),
+            IntervalSeconds = reader.GetInt32(4),
+            DueAt = UtcTimestamps.Parse(reader.GetString(5)),
+            PayloadJson = reader.GetString(6),
+            DispatchedAt = reader.IsDBNull(7) ? null : UtcTimestamps.Parse(reader.GetString(7)),
+            CancelledAt = reader.IsDBNull(8) ? null : UtcTimestamps.Parse(reader.GetString(8)),
+        };
+    }
+
+    /// <summary>
+    /// 지금 전송해야 하는 예약 배치를 원자적으로 명령화한다. 명령 삽입과 dispatched_at 갱신이
+    /// 같은 트랜잭션이라 중복 틱/재시작/재시도에서도 StartJob이 두 번 생기지 않는다.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> DispatchDueRolloutJobsAsync(
+        DateTimeOffset? now = null,
+        int maxJobs = 100,
+        CancellationToken cancellationToken = default)
+    {
+        if (maxJobs <= 0) throw new ArgumentOutOfRangeException(nameof(maxJobs));
+
+        var reference = (now ?? UtcTimestamps.Now).ToUniversalTime();
+        var stamp = UtcTimestamps.Format(reference);
+        var dispatched = new List<string>();
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction();
+
+        var rows = new List<(string JobId, string AgentId, string MachineName, int Batch, int Count, string Payload, int? JobState)>();
+        await using (var select = connection.CreateCommand())
+        {
+            select.Transaction = transaction;
+            select.CommandText = """
+                SELECT r.job_id, r.agent_id, r.machine_name, r.batch_index, r.batch_count,
+                       r.payload_json, j.state
+                FROM job_rollout r
+                LEFT JOIN jobs j ON j.job_id = r.job_id
+                WHERE r.dispatched_at IS NULL AND r.cancelled_at IS NULL AND r.due_at <= $now
+                ORDER BY r.due_at, r.batch_index, r.job_id
+                LIMIT $max;
+                """;
+            select.Parameters.AddWithValue("$now", stamp);
+            select.Parameters.AddWithValue("$max", maxJobs);
+
+            await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                rows.Add((
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetInt32(3),
+                    reader.GetInt32(4),
+                    reader.GetString(5),
+                    reader.IsDBNull(6) ? null : reader.GetInt32(6)));
+            }
+        }
+
+        foreach (var row in rows)
+        {
+            if (row.JobState is null ||
+                row.JobState == (int)UpdateJobState.Cancelled ||
+                row.JobState == (int)UpdateJobState.Completed ||
+                row.JobState == (int)UpdateJobState.Failed)
+            {
+                // 취소/종료된 작업은 예약만 정리하고 명령을 만들지 않는다.
+                await using var skip = connection.CreateCommand();
+                skip.Transaction = transaction;
+                skip.CommandText = """
+                    UPDATE job_rollout SET cancelled_at = $stamp
+                    WHERE job_id = $id AND dispatched_at IS NULL AND cancelled_at IS NULL;
+                    """;
+                skip.Parameters.AddWithValue("$stamp", stamp);
+                skip.Parameters.AddWithValue("$id", row.JobId);
+                await skip.ExecuteNonQueryAsync(cancellationToken);
+                continue;
+            }
+
+            var commandId = Guid.NewGuid().ToString("N");
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO commands(command_id, agent_id, type, status, payload_json,
+                                     issued_by, created_at, expires_at)
+                VALUES($id, $agent, $type, $status, $payload, $issued, $created, $expires);
+                """;
+            insert.Parameters.AddWithValue("$id", commandId);
+            insert.Parameters.AddWithValue("$agent", AgentIdGuard.Canonical(row.AgentId));
+            insert.Parameters.AddWithValue("$type", (int)CommandType.StartJob);
+            insert.Parameters.AddWithValue("$status", (int)CommandStatus.Pending);
+            insert.Parameters.AddWithValue("$payload", row.Payload);
+            insert.Parameters.AddWithValue("$issued", "system");
+            insert.Parameters.AddWithValue("$created", stamp);
+            insert.Parameters.AddWithValue("$expires", UtcTimestamps.Format(reference.AddHours(12)));
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+
+            await using var audit = connection.CreateCommand();
+            audit.Transaction = transaction;
+            audit.CommandText = """
+                INSERT INTO audit(ts, actor, action, target, detail, correlation_id)
+                VALUES($ts, $actor, $action, $target, $detail, $correlation);
+                """;
+            audit.Parameters.AddWithValue("$ts", stamp);
+            audit.Parameters.AddWithValue("$actor", "system");
+            audit.Parameters.AddWithValue("$action", "rollout-dispatch");
+            audit.Parameters.AddWithValue("$target", $"{row.MachineName}/{row.JobId}");
+            audit.Parameters.AddWithValue("$detail", $"배치 {row.Batch}/{row.Count} 시작 명령 발급");
+            audit.Parameters.AddWithValue(
+                "$correlation",
+                ReadStringProperty(row.Payload, "correlationId") is { } dispatchCorrelation
+                    ? (object)dispatchCorrelation
+                    : DBNull.Value);
+            await audit.ExecuteNonQueryAsync(cancellationToken);
+
+            await AddJobTransitionAsync(new JobTransition
+            {
+                JobId = row.JobId,
+                Timestamp = reference,
+                Event = "rollout-dispatch",
+                FromState = row.JobState is { } state && Enum.IsDefined(typeof(UpdateJobState), state)
+                    ? ((UpdateJobState)state).ToString()
+                    : null,
+                Phase = "명령 전달",
+                Message = $"배치 {row.Batch}/{row.Count} 시작 명령 발급",
+                Actor = "system",
+                CorrelationId = ReadStringProperty(row.Payload, "correlationId"),
+                DedupeKey = $"rollout:{row.JobId}:{row.Batch}:{commandId}",
+            }, connection, transaction, cancellationToken);
+
+            await using var mark = connection.CreateCommand();
+            mark.Transaction = transaction;
+            mark.CommandText = """
+                UPDATE job_rollout SET dispatched_at = $stamp
+                WHERE job_id = $id AND dispatched_at IS NULL AND cancelled_at IS NULL;
+                """;
+            mark.Parameters.AddWithValue("$stamp", stamp);
+            mark.Parameters.AddWithValue("$id", row.JobId);
+            if (await mark.ExecuteNonQueryAsync(cancellationToken) != 1)
+            {
+                throw new InvalidOperationException("예약 배치 상태를 갱신하지 못했습니다.");
+            }
+
+            dispatched.Add(row.JobId);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return dispatched;
+    }
+
+    /// <summary>아직 발송되지 않은 예약을 취소한다. 발송된 배치는 그대로 둔다.</summary>
+    public async Task<bool> CancelRolloutAsync(
+        string jobId,
+        DateTimeOffset? now = null,
+        CancellationToken cancellationToken = default)
+    {
+        var stamp = UtcTimestamps.Format((now ?? UtcTimestamps.Now).ToUniversalTime());
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE job_rollout SET cancelled_at = $stamp
+            WHERE job_id = $id AND dispatched_at IS NULL AND cancelled_at IS NULL;
+            """;
+        command.Parameters.AddWithValue("$stamp", stamp);
+        command.Parameters.AddWithValue("$id", jobId);
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
     // ---------- Audit ----------
 
     public async Task AddAuditAsync(
@@ -780,19 +1171,27 @@ public sealed class LabStore
         string action,
         string target,
         string detail,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? correlationId = null)
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO audit(ts, actor, action, target, detail)
-            VALUES($ts, $actor, $action, $target, $detail);
+            INSERT INTO audit(ts, actor, action, target, detail, correlation_id)
+            VALUES($ts, $actor, $action, $target, $detail, $correlation);
             """;
         command.Parameters.AddWithValue("$ts", UtcTimestamps.FormatNow());
         command.Parameters.AddWithValue("$actor", TextGuard.Truncate(actor, TextGuard.MaxLabelLength));
         command.Parameters.AddWithValue("$action", TextGuard.Truncate(action, TextGuard.MaxLabelLength));
         command.Parameters.AddWithValue("$target", TextGuard.Truncate(target, TextGuard.MaxLabelLength));
-        command.Parameters.AddWithValue("$detail", TextGuard.Truncate(detail, TextGuard.MaxAuditTextLength));
+        command.Parameters.AddWithValue(
+            "$detail",
+            TextGuard.Truncate(ObservabilityEvent.MaskSecrets(detail) ?? "", TextGuard.MaxAuditTextLength));
+        command.Parameters.AddWithValue(
+            "$correlation",
+            ObservabilityEvent.MaskSecrets(correlationId) is { } safeCorrelation
+                ? TextGuard.Truncate(safeCorrelation, TextGuard.MaxLabelLength)
+                : DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -803,7 +1202,7 @@ public sealed class LabStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, ts, actor, action, target, detail FROM audit
+            SELECT id, ts, actor, action, target, detail, correlation_id FROM audit
             ORDER BY id DESC LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$limit", limit);
@@ -820,11 +1219,231 @@ public sealed class LabStore
                 Action = reader.GetString(3),
                 Target = reader.GetString(4),
                 Detail = reader.GetString(5),
+                CorrelationId = reader.IsDBNull(6) ? null : reader.GetString(6),
             });
         }
 
         return results;
     }
+
+    // ---------- 작업 전이 타임라인 ----------
+
+    private const string TransitionInsertSql = """
+        INSERT OR IGNORE INTO job_transitions(job_id, ts, event, from_state, to_state,
+                                              phase, message, actor, correlation_id, dedupe_key)
+        VALUES($job, $ts, $event, $from, $to, $phase, $message, $actor, $correlation, $dedupe);
+        """;
+
+    /// <summary>중복 키가 이미 있으면 false를 돌려준다. 타임라인은 한 번만 기록한다.</summary>
+    public async Task<bool> AddJobTransitionAsync(
+        JobTransition transition,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = TransitionInsertSql;
+        BindTransition(command, transition);
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
+    /// <summary>같은 트랜잭션 안에서 전이를 기록할 때 사용한다(예약 배치 발급).</summary>
+    private static async Task<bool> AddJobTransitionAsync(
+        JobTransition transition,
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = TransitionInsertSql;
+        BindTransition(command, transition);
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
+    private static string SafeTransitionText(string? value, int maxLength) =>
+        TextGuard.Truncate(ObservabilityEvent.MaskSecrets(value) ?? "", maxLength);
+
+    private static object SafeTransitionValue(string? value, int maxLength) =>
+        ObservabilityEvent.MaskSecrets(value) is { } safe
+            ? TextGuard.Truncate(safe, maxLength)
+            : DBNull.Value;
+
+    private static void BindTransition(SqliteCommand command, JobTransition transition)
+    {
+        var timestamp = transition.Timestamp == default ? UtcTimestamps.Now : transition.Timestamp;
+        command.Parameters.AddWithValue(
+            "$job", SafeTransitionText(transition.JobId, TextGuard.MaxIdentifierLength));
+        command.Parameters.AddWithValue("$ts", UtcTimestamps.Format(timestamp));
+        command.Parameters.AddWithValue(
+            "$event", SafeTransitionText(transition.Event, TextGuard.MaxLabelLength));
+        command.Parameters.AddWithValue(
+            "$from", SafeTransitionValue(transition.FromState, TextGuard.MaxLabelLength));
+        command.Parameters.AddWithValue(
+            "$to", SafeTransitionValue(transition.ToState, TextGuard.MaxLabelLength));
+        command.Parameters.AddWithValue(
+            "$phase", SafeTransitionText(transition.Phase, TextGuard.MaxLabelLength));
+        command.Parameters.AddWithValue(
+            "$message", SafeTransitionText(transition.Message, TextGuard.MaxAuditTextLength));
+        command.Parameters.AddWithValue(
+            "$actor", SafeTransitionText(transition.Actor, TextGuard.MaxLabelLength));
+        command.Parameters.AddWithValue(
+            "$correlation", SafeTransitionValue(transition.CorrelationId, TextGuard.MaxLabelLength));
+        command.Parameters.AddWithValue(
+            "$dedupe", string.IsNullOrWhiteSpace(transition.DedupeKey)
+                ? Guid.NewGuid().ToString("N")
+                : SafeTransitionText(transition.DedupeKey, TextGuard.MaxAuditTextLength));
+    }
+
+    public async Task<IReadOnlyList<JobTransition>> GetTransitionsAsync(
+        string jobId,
+        int limit = 200,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, job_id, ts, event, from_state, to_state, phase, message, actor, correlation_id
+            FROM job_transitions WHERE job_id = $id
+            ORDER BY ts ASC, id ASC LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$id", jobId);
+        command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 1000));
+
+        var results = new List<JobTransition>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(new JobTransition
+            {
+                Id = reader.GetInt64(0),
+                JobId = reader.GetString(1),
+                Timestamp = UtcTimestamps.Parse(reader.GetString(2)),
+                Event = SafeTransitionText(reader.GetString(3), TextGuard.MaxLabelLength),
+                FromState = reader.IsDBNull(4)
+                    ? null
+                    : ObservabilityEvent.MaskSecrets(reader.GetString(4)),
+                ToState = reader.IsDBNull(5)
+                    ? null
+                    : ObservabilityEvent.MaskSecrets(reader.GetString(5)),
+                Phase = SafeTransitionText(reader.GetString(6), TextGuard.MaxLabelLength),
+                Message = SafeTransitionText(reader.GetString(7), TextGuard.MaxAuditTextLength),
+                Actor = SafeTransitionText(reader.GetString(8), TextGuard.MaxLabelLength),
+                CorrelationId = reader.IsDBNull(9)
+                    ? null
+                    : ObservabilityEvent.MaskSecrets(reader.GetString(9)),
+            });
+        }
+        return results;
+    }
+
+    // ---------- 작업 리포트 ----------
+
+    /// <summary>
+    /// 기간 내 전체 건수와 상한 내 행을 함께 읽는다. 잘린 목록을 전체로 오인하지 않도록
+    /// 호출부가 totalCount와 returnedCount를 비교해 생략 건수를 계산한다.
+    /// </summary>
+    public async Task<(int TotalCount, IReadOnlyList<JobReportRow> Jobs, IReadOnlyDictionary<string, JobTransitionSummary> Transitions)> GetJobReportAsync(
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        var fromText = UtcTimestamps.Format(from ?? DateTimeOffset.MinValue);
+        var toText = UtcTimestamps.Format(to ?? DateTimeOffset.MaxValue);
+        await using var connection = await OpenAsync(cancellationToken);
+
+        int totalCount;
+        await using (var count = connection.CreateCommand())
+        {
+            count.CommandText = """
+                SELECT COUNT(*) FROM jobs WHERE created_at >= $from AND created_at <= $to;
+                """;
+            count.Parameters.AddWithValue("$from", fromText);
+            count.Parameters.AddWithValue("$to", toText);
+            totalCount = Convert.ToInt32(await count.ExecuteScalarAsync(cancellationToken) ?? 0);
+        }
+
+        var rows = new List<JobReportRow>();
+        await using (var select = connection.CreateCommand())
+        {
+            select.CommandText = """
+                SELECT job_id, agent_id, machine_name, state, phase, created_at, updated_at,
+                       correlation_id, summary_json
+                FROM jobs
+                WHERE created_at >= $from AND created_at <= $to
+                ORDER BY created_at DESC, job_id DESC LIMIT $limit;
+                """;
+            select.Parameters.AddWithValue("$from", fromText);
+            select.Parameters.AddWithValue("$to", toText);
+            select.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 500));
+
+            await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var stateValue = reader.GetInt32(3);
+                var state = Enum.IsDefined(typeof(UpdateJobState), stateValue)
+                    ? ((UpdateJobState)stateValue).ToString()
+                    : "확인 불가";
+                rows.Add(new JobReportRow(
+                    reader.GetString(0),
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetString(2),
+                    state,
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    ReadSummaryMessage(reader.IsDBNull(8) ? null : reader.GetString(8)),
+                    TryParseStamp(reader.IsDBNull(5) ? null : reader.GetString(5)),
+                    TryParseStamp(reader.IsDBNull(6) ? null : reader.GetString(6)),
+                    reader.IsDBNull(7) ? null : reader.GetString(7)));
+            }
+        }
+
+        var transitions = new Dictionary<string, JobTransitionSummary>(StringComparer.OrdinalIgnoreCase);
+        await using (var summary = connection.CreateCommand())
+        {
+            summary.CommandText = """
+                SELECT job_id, COUNT(*), MIN(ts), MAX(ts) FROM job_transitions GROUP BY job_id;
+                """;
+            await using var reader = await summary.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                transitions[reader.GetString(0)] = new JobTransitionSummary(
+                    reader.GetInt32(1),
+                    TryParseStamp(reader.IsDBNull(2) ? null : reader.GetString(2)),
+                    TryParseStamp(reader.IsDBNull(3) ? null : reader.GetString(3)));
+            }
+        }
+
+        return (totalCount, rows, transitions);
+    }
+
+    private static string? ReadSummaryMessage(string? json) => ReadStringProperty(json, "message");
+
+    private static string? ReadStringProperty(string? json, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.TryGetProperty(propertyName, out var value) &&
+                   value.ValueKind == JsonValueKind.String
+                ? ObservabilityEvent.MaskSecrets(value.GetString())
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static DateTimeOffset? TryParseStamp(string? value) =>
+        DateTimeOffset.TryParse(
+            value,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal |
+            System.Globalization.DateTimeStyles.AdjustToUniversal,
+            out var parsed)
+            ? parsed
+            : null;
 
     // ---------- Maestro checklist ----------
 

@@ -127,6 +127,8 @@ main { max-width: 1500px; margin: 0 auto; padding: 20px 24px; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);
 }
@@ -348,6 +350,7 @@ select.text-input { appearance: auto; }
   border-radius: 8px;
   font-size: 12px;
   line-height: 1.5;
+  white-space: pre-line;
 }
 .token-status.warning {
   background: rgba(245, 158, 11, 0.1);
@@ -592,6 +595,8 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
   font-family: inherit;
 }
 .filter-select:focus { outline: none; border-color: var(--blue); }
+.filter-share { flex-wrap: wrap; white-space: normal; }
+.filter-share .btn { padding: 5px 9px; font-size: 12px; }
 
 @media (max-width: 720px) {
   .topbar { flex-direction: column; align-items: stretch; }

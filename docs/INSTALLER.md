@@ -268,7 +268,8 @@ AgentTokenFile=agent-token.txt
 무인 설치 기존 토큰 재사용)을 적용합니다. 설정 백업본은 토큰 적용이 성공한 뒤에만 삭제합니다.
 
 - 내장 토큰이 비어 있거나 `change-me-*`, `sample-*-replace-before-pilot`이면 첫 설치와 교체 선택
-  업데이트가 중단됩니다.
+  업데이트가 중단됩니다. 빌드는 시크릿 값의 **첫 줄만** 사용하고 앞의 공백/UTF-8 BOM을 제거하며,
+  8자 미만이면 중단합니다(서버·배포 스크립트와 동일한 규칙).
 - 재사용을 선택한 업데이트는 내장 파일을 꺼내지도 않으므로 결과에 영향을 주지 않습니다.
   단, 명시적으로 지정한 외부 토큰 파일은 재사용 선택에서도 우선합니다.
 - 내장 토큰은 설치 파일에서 추출할 수 있습니다. 파일럿 전용으로 취급하고 설치 직후
@@ -286,7 +287,7 @@ PC를 변경하지 않고 설치가 중단됩니다(`/VERYSILENT`에서는 오�
 - 업그레이드에서 유효한 기존 설정이 없는데 INI/명령줄 값이 없거나 한쪽만 있음,
   첫 설치에서 INI가 BOM 포함/잘못된 형식(명령줄 키가 있어도 중단)
 - `LabManagerUrl`이 절대 `http`/`https` URL이 아님
-- 토큰 파일이 없거나 비었거나 샘플/기본 토큰임(첫 설치에서 내장 토큰도 동일하게 검사)
+- 토큰 파일이 없거나 비었거나 8자 미만이거나 샘플/기본 토큰임(첫 설치에서 내장 토큰도 동일하게 검사)
 - `agent.json` 생성/ACL 제한 실패, 방화벽 규칙 처리 실패
 
 방화벽 규칙은 `netsh`가 지원하지 않는 그룹 정리를 PowerShell `Remove-NetFirewallRule`로 처리합니다.
@@ -411,6 +412,53 @@ UTC 시각, 이벤트(`changed`, `rolled-back`, `loaded`, `rejected`)와 토큰 
 .\scripts\build-inno.ps1 -AgentOnly -NoPublish
 ```
 
+### 프레임워크 종속(경량) 설치 파일 — 선택
+
+기본 빌드는 self-contained(`win-x64`)이며 대상 PC에 .NET 런타임이 없어도 동작합니다.
+용량을 줄이려면 **명시적으로** `-FrameworkDependent`를 사용합니다. 런타임이 패키지에
+들어가지 않으므로 모든 대상 PC에 Microsoft .NET Desktop Runtime(win-x64,
+`*.runtimeconfig.json`이 지정한 버전 이상)이 미리 설치되어 있어야 합니다.
+런타임 여부를 확인할 수 없으면 `확인 불가`로 보고하고, 게시물/설치 파일의 런타임 모드가
+요청과 다르면 빌드와 배포가 중단됩니다(fail-closed).
+
+```powershell
+.\scripts\publish.ps1 -FrameworkDependent
+.\scripts\build-inno.ps1 -FrameworkDependent -NoPublish
+
+# 게시 폴더가 없으면 이 한 줄이 publish.ps1 -FrameworkDependent까지 실행합니다.
+.\scripts\build-inno.ps1 -FrameworkDependent
+
+# 배포 패키지에도 같은 옵트인을 전달합니다(토큰은 파일로만 전달).
+.\scripts\deploy-agents.ps1 -InventoryCsv .\inventory.csv -UseEmbeddedToken -FrameworkDependent
+```
+
+확인 방법:
+
+- `artifacts\inno\build-info.json`의 `selfContained`가 `false`, `runtimeMode`가
+  `framework-dependent`인지 확인합니다.
+- `-NoPublish -KeepStaging`으로 스테이징을 남겨 `*.runtimeconfig.json`과
+  `*.deps.json`이 빠지지 않았는지 확인합니다.
+- 크기는 빌드가 출력한 실측값만 사용합니다. 문서의 예시 숫자를 실제 용량으로
+  신뢰하지 마세요.
+
+제한: 런타임을 포함하지 않고, 토큰·URL·설정 파일 처리와 방화벽 규칙(교사 PC TCP 5080
+Domain/Private만 허용, 학생 PC 인바운드 없음)은 바뀌지 않습니다. 스위치 없이
+framework-dependent 게시물을 사용하면 오류가 나며, 설치된 런타임이 없으면 앱 실행이
+보장되지 않습니다.
+
+### 코드 서명 (선택)
+
+`build-inno.ps1 -Sign`은 스테이징된 `UpdateAgent.*.exe`/`.dll`을 ISCC 전에,
+완성된 두 `*Setup*.exe`를 ISCC 후에 서명하고 각각 `signtool verify /pa /all`로
+검증합니다. Windows SDK의 `signtool.exe`와 코드 서명 인증서가 필요하며, 지문은
+`-CertificateThumbprint` 또는 `UPDATEAGENT_SIGN_THUMBPRINT` 환경 변수로만
+전달합니다. 지문·비밀번호는 저장소에 기록하지 않습니다.
+
+인증서가 없는 파일럿은 기본(미서명)으로 빌드할 수 있습니다. 미서명 설치 파일은
+SmartScreen/백신 경고와 "알 수 없는 게시자" 표시가 날 수 있으므로 랩 롤아웃 전에
+서명 빌드로 교체하세요. MSI와 공유하는 서명 순서·검증 명령은 [`MSI.md`](MSI.md)의
+서명 장을 참고하세요.
+
 `build-inno.ps1`은 `Directory.Build.props`의 `<Version>`을 읽어 파일 이름과
 `AppVersion`을 맞춥니다. 버전은 `scripts\github-push.ps1`이 올립니다.
 
@@ -483,7 +531,7 @@ build\agent\<버전>\
 
 ## 13. 알려진 제약
 
-- 설치 파일은 파일럿 단계에서 **코드 서명이 없습니다.** SmartScreen 경고가 표시될 수 있습니다.
+- 설치 파일은 파일럿 단계에서 **기본적으로 코드 서명이 없습니다.** `-Sign`으로 선택적으로 서명할 수 있고, 미서명 빌드는 SmartScreen 경고가 표시될 수 있습니다.
 - Inno Setup은 Windows 전용입니다(macOS/Linux/모바일 설치 파일을 만들지 않습니다).
 - `UpdateAgent.Agent-Setup`의 지원 범위는 Windows 11 / Windows 10 22H2(ESU) / Windows Server 2016–2025입니다. Inno Setup의 `MinVersion=10.0.14393`은 설치 프로그램 실행의 최소 요건일 뿐 지원 정책을 의미하지 않습니다.
 - 서비스 시작은 설치 직후 수행되지만, 그룹 정책/보안 프로그램이 차단하면

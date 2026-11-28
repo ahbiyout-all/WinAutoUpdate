@@ -17,7 +17,19 @@ public sealed record LiveAgentView(
     bool MaestroDetectionFailed,
     bool RebootPending,
     bool HasActiveJob,
-    DateTimeOffset LastSeen);
+    DateTimeOffset LastSeen,
+    /// <summary>구성 지문을 확인할 수 없어 무결성을 단정할 수 없는 경우.</summary>
+    bool IntegrityUnavailable = true,
+    /// <summary>최초 기준선과 현재 구성 지문이 달라진 경우.</summary>
+    bool ConfigChanged = false,
+    /// <summary>설정된 기대 버전과 보고 버전이 다른 경우.</summary>
+    bool VersionMismatch = false,
+    /// <summary>기대 버전이나 보고 버전이 없어 비교할 수 없는 경우.</summary>
+    bool VersionUnknown = true,
+    /// <summary>오래된 체크인으로 이탈이 의심되는 경우.</summary>
+    bool Departed = false,
+    /// <summary>이탈 사유. 이탈이 아니면 null이다.</summary>
+    string? DepartureReason = null);
 
 /// <summary>실시간 모니터가 표시하는 작업 요약.</summary>
 public sealed record LiveJobView(
@@ -65,8 +77,15 @@ public static class LiveSnapshotBuilder
 {
     private const int MaxJobs = 100;
 
+    /// <summary>기존 호출부용. 무결성 상태가 없는 스냅샷은 확인 불가로 표시한다.</summary>
+    public static Task<LiveSnapshot> BuildAsync(
+        LabStore store,
+        CancellationToken cancellationToken = default) =>
+        BuildAsync(store, new AgentIntegrityService(store), cancellationToken);
+
     public static async Task<LiveSnapshot> BuildAsync(
         LabStore store,
+        AgentIntegrityService integrity,
         CancellationToken cancellationToken = default)
     {
         var agents = await store.GetAgentsAsync(cancellationToken).ConfigureAwait(false);
@@ -88,25 +107,37 @@ public static class LiveSnapshotBuilder
         var activeJobCount = await store.CountActiveJobsAsync(cancellationToken).ConfigureAwait(false);
         var attentionCount = await store.CountAttentionJobsAsync(cancellationToken).ConfigureAwait(false);
 
-        var agentViews = agents
-            .Select(agent =>
-            {
-                var current = agent.Telemetry.CurrentJob;
-                return new LiveAgentView(
-                    agent.Agent.AgentId,
-                    agent.Agent.MachineName,
-                    agent.Telemetry.State.ToString(),
-                    current?.Phase ?? agent.Telemetry.CurrentPhase,
-                    current?.ProgressPercent ?? 0,
-                    agent.Online,
-                    agent.Agent.MaestroInstalled,
-                    agent.Agent.MaestroDetectionFailed ||
-                        agent.Telemetry.Maestro?.DetectionFailed == true,
-                    agent.Telemetry.RebootPending,
-                    (current is not null && JobStateRules.IsActive(current.State.ToString())) ||
-                        activeAgentIds.Contains(agent.Agent.AgentId),
-                    agent.LastSeen);
-            })
+        // 모든 판정에 동일한 기준 시각을 사용해야 스냅샷 안에서 오래됨 상태가 일관된다.
+        var snapshotAt = UtcTimestamps.Now;
+        var agentViews = new List<LiveAgentView>(agents.Count);
+        foreach (var agent in agents)
+        {
+            var state = await integrity.GetAsync(
+                agent.Agent.AgentId, cancellationToken).ConfigureAwait(false);
+            var flags = integrity.Evaluate(state, agent.Agent, snapshotAt);
+            var current = agent.Telemetry.CurrentJob;
+            agentViews.Add(new LiveAgentView(
+                agent.Agent.AgentId,
+                agent.Agent.MachineName,
+                agent.Telemetry.State.ToString(),
+                current?.Phase ?? agent.Telemetry.CurrentPhase,
+                current?.ProgressPercent ?? 0,
+                agent.Online,
+                agent.Agent.MaestroInstalled,
+                agent.Agent.MaestroDetectionFailed ||
+                    agent.Telemetry.Maestro?.DetectionFailed == true,
+                agent.Telemetry.RebootPending,
+                (current is not null && JobStateRules.IsActive(current.State.ToString())) ||
+                    activeAgentIds.Contains(agent.Agent.AgentId),
+                agent.LastSeen,
+                flags.IntegrityUnavailable,
+                flags.ConfigChanged,
+                flags.VersionMismatch,
+                flags.VersionUnknown,
+                flags.Departed,
+                flags.DepartureReason));
+        }
+        agentViews = agentViews
             .OrderBy(a => a.MachineName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -128,9 +159,6 @@ public static class LiveSnapshotBuilder
                 job.Summary.UpdatedAt,
                 job.Summary.Message))
             .ToList();
-
-        // 모든 판정에 동일한 기준 시각을 사용해야 스냅샷 안에서 오래됨 상태가 일관된다.
-        var snapshotAt = UtcTimestamps.Now;
 
         return new LiveSnapshot(
             snapshotAt,

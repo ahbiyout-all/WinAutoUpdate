@@ -27,7 +27,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.1.44"
+  #define AppVersion "0.1.45"
 #endif
 #ifndef StageRoot
   #define StageRoot "..\..\artifacts\inno\stage\agent"
@@ -618,6 +618,12 @@ begin
       (Copy(UpperToken, Length(UpperToken) - 20, 21) = '-REPLACE-BEFORE-PILOT');
 end;
 
+{ TokenGuard.MinimumLength 및 deploy-agents.ps1과 같은 최소 길이를 적용한다. }
+function IsTokenLongEnough(const Value: String): Boolean;
+begin
+  Result := Length(Trim(Value)) >= 8;
+end;
+
 { JSON 텍스트에서 문자열 값 하나를 읽는다(이스케이프된 따옴표 처리). }
 function GetJsonStringValue(const Text, Key: String): String;
 var
@@ -1202,6 +1208,14 @@ begin
     AgentConfigWriteFailed := True;
     AgentConfigError := '에이전트 토큰 파일에 기본/샘플 토큰이 있습니다. 실제 토큰으로 교체하세요: ' +
       TokenFile;
+    Exit;
+  end;
+
+  { 서버(TokenGuard)와 배포 스크립트가 거부하는 짧은 토큰도 설치 전에 중단한다. }
+  if not IsTokenLongEnough(Token) then
+  begin
+    AgentConfigWriteFailed := True;
+    AgentConfigError := '에이전트 토큰이 8자 미만입니다. 실제 토큰으로 교체하세요: ' + TokenFile;
     Exit;
   end;
 

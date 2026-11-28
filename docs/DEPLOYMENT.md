@@ -8,6 +8,86 @@
 - 1대 파일럿은 [`PILOT.md`](PILOT.md), 설치 프로그램 옵션은 [`INSTALLER.md`](INSTALLER.md),
   공통 Guard DLL 규칙은 [`PURE-DLL.md`](PURE-DLL.md) 참고
 
+## 0-A. 50대 부하 리허설 런북 (`scripts/load-rehearsal.ps1`)
+
+`scripts/load-rehearsal.ps1`은 **실제 LabManager 인스턴스**에 대해 실제
+`POST /api/agents/checkin` 요청(`X-Agent-Token` 헤더, camelCase DTO)을 보내
+체크인 경로의 동시성·지연·실패 복구를 측정합니다. 기본 50개 가상 에이전트 ID는
+스크립트가 생성합니다. **합성 리허설이며 실 PC 50대 증명이 아닙니다.**
+학생 PC 설치, WUA 스캔/설치, 재부팅/재개, 오버레이, Maestro 마커는 이 스크립트가
+확인하지 않으므로 [파일럿 체크리스트](PILOT.md)와 7장 검증을 별도로 수행해야 합니다.
+기능 업데이트 정책은 시작하지 않습니다.
+
+### 실행 명령
+
+토큰 **값**은 명령줄에 쓰지 않고 토큰 **파일 경로**만 넘깁니다. 파일의 첫 줄만 읽습니다.
+
+```powershell
+# 기본: 50대, 30초, 5초 간격, 동시성 10
+.\scripts\load-rehearsal.ps1 `
+  -LabManagerUrl "http://127.0.0.1:5080" `
+  -AgentTokenFile "<agent-token.txt 경로>" `
+  -OutputPath ".\deploy\load-rehearsal\load-rehearsal-report.json"
+
+# 관리자 API까지 확인: 소수의 합성 작업 시작/취소 + SSE 재연결 확인
+.\scripts\load-rehearsal.ps1 `
+  -LabManagerUrl "http://<교사-PC-IP>:5080" `
+  -AgentTokenFile "<agent-token.txt 경로>" `
+  -AdminTokenFile "<admin-token.txt 경로>" `
+  -AgentCount 50 -DurationSeconds 60 -IntervalSeconds 5 -MaxConcurrency 10
+
+# 네트워크 사전 점검만 생략(토큰 검증은 그대로 수행)
+.\scripts\load-rehearsal.ps1 `
+  -AgentTokenFile "<agent-token.txt 경로>" -SkipPreflight
+```
+
+`-SkipPreflight`는 `GET /api/health`만 건너뜁니다. 서버가 꺼져 있거나
+토큰 파일이 없/비었음/너무 짧음/플레이스홀더이면 즉시 중단됩니다.
+Ctrl+C로 취소할 수 있고, 취소 신호를 정상 취소로 변환해 보고서를 기록합니다.
+하드 타임아웃은 `DurationSeconds + RequestTimeoutSeconds + 30`초이며,
+요청별 제한은 `RequestTimeoutSeconds`(기본 10초)입니다.
+
+가상 에이전트 ID는 실행마다 바뀌지 않는 `rehearsal-pc-000`~`049`를 사용합니다.
+서버는 등록 가능한 PC를 200대로 제한하므로, 실행마다 새 ID를 만들면 반복
+리허설에서 429가 발생합니다. 같은 서버에 대해 **한 번에 하나의 리허설만 실행**하고,
+병렬 리허설이 필요하면 서버 인스턴스를 분리하세요.
+
+### 보고서 해석
+
+`OutputPath`에 UTF-8(BOM 없음) JSON을 기록합니다. 주요 필드:
+
+| 필드 | 의미 |
+|---|---|
+| `generatedAtUtc`, `version` | UTC 생성 시각, 제품 버전(`Directory.Build.props`)과 스크립트 버전 |
+| `parameters` | URL/대수/기간/간격/동시성/토큰 파일 경로. **토큰 값은 없음** |
+| `preflight` | `/api/health` 결과(2xx 여부) 또는 `skipped` |
+| `counts` | `completedRequests`, `success`, `httpFailure`, `transportFailure`, `serverError5xx`, `unauthorized`, `throttled`, 비율 |
+| `statusDistribution` | HTTP 상태 코드별 건수(전송 실패는 `transport`) |
+| `latencyMs` | `minMs`/`avgMs`/`p95Ms`/`maxMs`, `sampleCount`(완료된 모든 시도) |
+| `recovery` | 연속 실패 후 성공으로 회복된 가상 PC 수, 최대 연속 실패, 미회복 ID |
+| `failures` | 최대 50건의 정제된 실패 메시지. 토큰/원시 헤더 없음. 50건을 넘어 생략된 건수만 `truncatedFailureCount`에 명시 |
+| `liveStream` | 관리자 토큰이 있으면 SSE 2회 연결/재연결 확인. 없으면 `skipped` + 사유 |
+| `jobChecks` | 관리자 토큰이 있으면 소수 작업 시작 후 취소 결과. 없으면 `skipped` + 사유 |
+| `artifacts` | 리허설이 만든 입력 JSON의 SHA-256. 보고서 자체 해시는 기록 직후 콘솔에 출력(자기 참조 방지) |
+| `cancellation` | 하드 타임아웃 도달 여부, 사용자 취소 여부, 취소 시점의 미완료 요청 수 |
+
+`liveStream`/`jobChecks`가 `skipped`인 것은 실패가 아니라 **확인 불가**입니다.
+관리자 토큰을 넘겼는데 `reconnectVerified=false`거나 `cancelledJobs`가
+`startedJobs`보다 적으면 원인을 확인해야 합니다.
+
+### 합격 기준(종료 코드)
+
+| 조건 | 결과 |
+|---|---|
+| 사전 점검 실패, 토큰 파일/플레이스홀더 오류, 취소·치명 오류 | 종료 코드 1 |
+| HTTP 5xx 1건 이상 | 종료 코드 2 (0건 요구) |
+| 전송 실패율 > 5% | 종료 코드 3 |
+| 성공률 < 95%, 또는 401/403/429 1건 이상 | 종료 코드 4 |
+| 위 조건 미해당 | 종료 코드 0 |
+
+`liveStream`/`jobChecks`의 경고는 현재 종료 코드에 반영되지 않는 **참고 항목**입니다.
+합격 기준을 통과해도 실 PC 파일럿의 대체 증적으로 쓰지 마세요.
+
 ## 0. 토폴로지
 
 ```text
@@ -20,6 +100,11 @@
 학생 → 학생 통신 없음. 학생 PC 인바운드 규칙 없음.
 방화벽: 교사 PC Domain/Private 프로필에서만 TCP 5080 허용.
 ```
+
+> 교사용 콘솔은 시스템 Edge/Chrome의 `--app=` 단독 창만 사용합니다. 과거 독립 실험용
+> Tauri 스캐폴드는 제거되었고, 내장 WebView2 런타임이나 Node/Rust 도구는 릴리스에
+> 포함되지 않습니다(추가 릴리스 자산: 없음). 로컬에 남은 실험 폴더는 Git에서 무시되며
+> 배포 경로가 아닙니다.
 
 | 항목 | 값 |
 |---|---|
@@ -127,6 +212,13 @@ STUDENT-02,AA:BB:CC:DD:EE:02,192.168.0.102
 .\scripts\publish.ps1 -AgentOnly
 .\scripts\build-inno.ps1 -AgentOnly
 ```
+
+기본 패키지는 self-contained(`win-x64`)입니다. 모든 학생 PC에 Microsoft .NET Desktop
+Runtime(win-x64)이 설치되어 있다는 전제에서만 경량 패키지를 쓸 수 있습니다. 이때는
+위 두 명령과 `deploy-agents.ps1`에 `-FrameworkDependent`를 함께 전달하고,
+`build-info.json`의 `selfContained:false`를 확인하세요. 런타임 모드를 알 수 없으면
+`확인 불가`이고, 모드가 다르면 생성/배포가 중단됩니다. 토큰·방화벽 규칙은 바뀌지
+않습니다(자세한 절차는 [`INSTALLER.md`](INSTALLER.md), [`PILOT.md`](PILOT.md)).
 
 패키지를 생성합니다.
 
@@ -428,6 +520,239 @@ Invoke-WebRequest "http://127.0.0.1:5080/api/admin/audit" -Headers @{ "X-Admin-T
 > Windows 10 22H2는 ESU 라이선스가 필요하고 기능 업데이트 대상이 아닙니다.
 > Windows Server의 릴리스 표기는 `DisplayVersion`(예: `21H2`) 대신 빌드 번호를 사용합니다.
 
+### 8-D. 단계적 롤아웃과 유지보수 창 (선택)
+
+기본 동작은 그대로입니다. 아래 값을 설정하지 않으면 선택한 모든 PC에 대해 작업과
+`StartJob` 명령을 즉시 만들고, 시간 제한도 두지 않습니다. 값은 **작업 시작 요청의
+정책**(`Policy`) 또는 서버 기본 정책(`PUT /api/admin/policy`)에 넣어 적용합니다.
+PC별 정책에 같은 필드가 있어도 일괄 시작의 롤아웃 설정으로 읽지 않습니다.
+
+| 필드 | 기본값 | 의미 |
+|---|---|---|
+| `RolloutBatchSize` | `0` | `0`은 전부 즉시 시작. `N>0`이면 요청 순서대로 N대씩 묶어 시작 |
+| `RolloutIntervalSeconds` | `0` | 배치 사이 대기 시간(초). `0`이면 예약 배치를 바로 전송 |
+| `MaintenanceWindowStart` | `null` | 유지보수 시작 시각(교사 PC 로컬 `HH:mm`) |
+| `MaintenanceWindowEnd` | `null` | 유지보수 종료 시각(교사 PC 로컬 `HH:mm`) |
+
+유지보수 시작/종료는 **반드시 함께** 설정하고, 종료 시각은 포함하지 않습니다
+(예: `22:00~06:00`이면 22:00부터 다음 날 05:59까지). 자정을 넘기는 창도 지원합니다.
+형식이 다르거나 한쪽만 있거나 시작과 종료가 같으면 요청을 거부합니다. 현재 로컬
+시각이 창 밖이면 작업·명령·감사 생성 전에 `errors`에 한국어 사유를 담아 400으로
+거부합니다. 잘못된 배치 크기/간격(음수)도 같은 방식으로 거부하며, 일부 작업만
+생성되지 않습니다.
+
+서버 기본 정책에 적용할 때의 예시입니다. 토큰 **값**은 화면에 출력하거나 파일에
+기록하지 말고 토큰 파일에서 읽어 헤더에만 사용하세요.
+
+```powershell
+$adminToken = (Get-Content "<관리자 토큰 파일>" -Raw).Trim()
+$policy = @{
+  includeSecurity = $true
+  includeCritical = $true
+  includeImportant = $true
+  rolloutBatchSize = 10
+  rolloutIntervalSeconds = 300
+  maintenanceWindowStart = "22:00"
+  maintenanceWindowEnd = "06:00"
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod -Method Put `
+  -Uri "http://127.0.0.1:5080/api/admin/policy" `
+  -Headers @{ "X-Admin-Token" = $adminToken } `
+  -ContentType "application/json" -Body $policy
+```
+
+**배치 동작**
+
+- 대시보드에 표시할 모든 대상 작업을 먼저 `Pending`으로 만듭니다. 따라서 아직
+  시작되지 않은 PC도 작업 목록에서 바로 확인할 수 있습니다.
+- 배치 1의 `StartJob`만 요청 중에 명령 큐에 넣습니다. 나머지 배치는 작업 ID, 순번,
+  예약 시각, 명령 본문을 LabManager DB의 `job_rollout` 테이블에 저장합니다.
+- 예약 시각은 `작업 시작 시각 + (배치 순번 - 1) × RolloutIntervalSeconds`입니다.
+  LabManager의 백그라운드 서비스가 약 1초 간격으로 도래한 배치를 읽어 명령을
+  발급하고, 모니터에 변경을 알립니다.
+- 응답의 `warnings`에는 `2/3개 배치가 서버에 대기 중입니다.`와 같은 안내가 담기고,
+  `totalBatches`/`dispatchedBatches`/`pendingBatches` 필드로 배치 진행 상황을
+  확인할 수 있습니다. 토큰 값은 포함되지 않습니다.
+
+**재시작과 중복 방지**
+
+명령 삽입과 예약의 `dispatched_at` 기록은 같은 SQLite 트랜잭션에서 처리합니다.
+서버 재시작, 틱 중복, 같은 시각의 재요청이 있어도 이미 발급된 배치는 다시
+전송되지 않습니다. 서버가 꺼져 있어 예약 시각을 놓친 배치는 다음 시작 시 첫 틱에
+발급됩니다(지연 시작). 이미 발급된 명령이 에이전트에 아직 전달되지 않았다면
+기존 만료 시간(12시간) 안에 체크인 시 전달됩니다.
+
+**남은 배치 중단**
+
+아직 시작되지 않은 배치도 작업이 미리 만들어져 있으므로, 해당 작업 행의
+**취소** 또는 **강제 중단**을 누르면 됩니다. 서버는 아직 발송되지 않은 예약에
+`cancelled_at`을 기록해 이후 `StartJob`이 나가지 않게 하고, 감사 로그에
+`남은 예약 배치 중단`을 남깁니다. 이미 발급된 배치는 되돌릴 수 없으므로 해당
+작업의 취소/강제 중단 명령으로 에이전트에서 중지하세요. 취소된 작업은 다음 틱에서
+건너뛰며, 취소 전에 이미 시작된 다른 PC의 작업에는 영향이 없습니다.
+
+> 기능 업데이트는 계속 비활성이고, Server Core의 전체화면 오버레이도 계속
+> 비활성입니다. 예약 명령 본문에는 토큰이 저장되지 않고, 감사 로그에도 토큰을
+> 기록하지 않습니다. 기본/샘플 토큰은 여전히 서버 시작 단계에서 거부됩니다.
+
+### 8-E. 작업 타임라인·관측 (교사용)
+
+작업 시작 요청에 `correlationId`를 넣지 않으면 LabManager가 서버에서 상관관계 ID를
+발급합니다. 같은 값이 작업, 감사 로그, `StartJob`/취소 명령 payload의 `correlationId`,
+작업 상세 화면에 함께 기록되므로 한 작업의 흐름을 추적할 수 있습니다. 요청 값은
+`[A-Za-z0-9-_]` 형식만 허용되고, 형식이 잘못되면 서버가 새로 발급합니다.
+
+교사 대시보드의 작업 상세에는 `작업 타임라인`과 `상관관계 ID`가 표시됩니다.
+타임라인은 작업 생성, 첫 명령 발급, 예약 배치 발급, 교사의 일시중지·재개·취소,
+에이전트가 보고한 상태 변화, 시작 명령 거부 실패를 UTC 시각과 함께 기록합니다.
+같은 전이는 `job_transitions`의 중복 키로 한 번만 저장됩니다. 기록이 없으면
+화면에 `없음`이라고 표시하며, 빈 상태를 실제 상태로 오인하지 않습니다.
+
+기간 리포트는 관리자 토큰이 필요한 `/api/admin/reports/jobs`에서 조회합니다.
+
+```powershell
+$adminToken = (Get-Content "<관리자 토큰 파일>" -Raw).Trim()
+Invoke-RestMethod `
+  -Uri "http://127.0.0.1:5080/api/admin/reports/jobs?from=2026-11-27T00:00:00Z&to=2026-11-28T00:00:00Z&limit=100" `
+  -Headers @{ "X-Admin-Token" = $adminToken }
+# CSV는 동일 경로에 &format=csv를 붙입니다.
+```
+
+`from`/`to`는 UTC ISO-8601이고 날짜만 주면 `to`는 그 날의 마지막 순간으로
+처리됩니다. `limit`은 1~500으로 제한되며 기본값은 100입니다. 응답의
+`totalCount`는 기간 내 전체 작업 수이고 `returnedCount`는 실제 반환 건수입니다.
+목록이 잘리면 `truncated=true`와 `omittedCount`(생략된 건수)가 함께 내려와
+일부 목록을 전체로 오인하지 않게 합니다. 없는 값은 빈 문자열이 아니라
+`없음`/`확인 불가`로 표시하고, 에이전트 보고값이 있으면 추정값보다 우선합니다.
+
+관측 로그는 `%LOCALAPPDATA%\UpdateAgent\LabManager\logs\observability.jsonl`에
+JSONL 한 줄 이벤트(UTC 시각, 수준, 이벤트명, 작업/에이전트 ID, 상관관계 ID)로
+기록됩니다. 현재 파일은 256 KiB를 넘으면 회전되어 `observability.1.jsonl`부터
+최대 5개까지 보관되고 기존 콘솔/일반 파일 로깅은 그대로 유지됩니다. 디렉터리에
+쓰지 못하면 한 번만 경고하고 서버는 계속 동작합니다.
+
+> 토큰 값, 요청 본문, 원시 헤더는 관측 로그·리포트·화면·감사에 남기지 않습니다.
+> 리포트 호출도 관리자 토큰이 필요한 `/api/admin` 경로에 있으며, 토큰은 헤더로만
+> 전달하고 응답에는 포함하지 않습니다.
+
+### 8-F. 에이전트 변조·이탈 탐지 (교사용)
+
+서비스는 체크인마다 허용 목록에 있는 비밀성이 없는 설정(주소, 에이전트 ID, 오버레이
+옵션 등)과 실행 중 유효 설정으로 구성 지문을 계산해 보냅니다. LabManager는 지문을
+읽을 수 있는 첫 체크인의 값을 기준선으로 저장하고, 이후 값이 달라지면 `설정 변경`을
+표시합니다. 지문을 못 읽은 체크인은 기준선을 만들지 않습니다.
+지문을 읽거나 만들지 못하면 `무결성 확인 불가`로 표시하며 정상으로 단정하지 않습니다.
+기대 버전은 `LabManager:ExpectedAgentVersion`으로 선택적으로 설정합니다. 설정하지
+않거나 에이전트 보고값이 없으면 `버전 확인 불가`이고, 값이 다르면 `버전 불일치`입니다.
+90초를 넘게 체크인이 없으면 이 화면의 다른 상태와 무관하게 `이탈 · 체크인 없음`으로
+표시합니다. 모니터와 대시보드의 PC 목록에서 네 가지 표시를 확인할 수 있습니다.
+
+**탐지할 수 있는 것**: 허용 목록 설정의 변경, 기대 버전과 다른 에이전트 버전,
+체크인 공백(서비스 정지·PC 종료·네트워크 차단·설치 제거 등으로 발생), 그리고
+지문 자체를 확인할 수 없는 상태입니다.
+
+**탐지할 수 없는 것**: 학생은 로컬 관리자이므로 서비스를 멈추거나 제거하고,
+설정·에이전트 파일·체크인 보고 자체를 바꿀 수 있습니다. 이 기능은 이를 막지
+않고, 다음 체크인이 도착하거나 체크인이 끊긴 뒤에만 알려줍니다. 첫 체크인 이전의
+변조는 기준선 오염을 막을 수 없으므로 기준선 시각과 감사 로그를 함께 확인하세요.
+토큰 값은 지문·기준선·감사·응답에 포함되지 않습니다. 토큰처럼 보이는 값을 만나면
+원문을 남기지 않고 `확인 불가`로 처리합니다.
+
+변경을 교사가 확인했다면 관리자 토큰으로 기준선을 재설정합니다. 현재 지문이 새
+기준선이 되고 `설정 변경` 플래그가 해제됩니다. 현재 지문이 확인 불가이면 기준선을
+지우고 다시 확인 불가로 남습니다.
+
+```powershell
+$adminToken = (Get-Content "<관리자 토큰 파일>" -Raw).Trim()
+Invoke-RestMethod `
+  -Uri "http://127.0.0.1:5080/api/admin/agents/<PC ID>/integrity/baseline" `
+  -Method Post -Headers @{ "X-Admin-Token" = $adminToken }
+```
+
+### 8-G. 관리자 토큰 회전 (선택, 옵트인)
+
+자동 회전은 **기본값이 사용 안 함**입니다. 오래된 설치가 업그레이드만으로 90일이 지났다고
+토큰을 바꾸면 교사 대시보드에 저장된 토큰이 갑자기 무효해지므로, 반드시 교사가 명시적으로
+켜야 합니다. `C:\Program Files\UpdateAgent\LabManager\appsettings.json`의 `LabManager` 섹션에
+아래 값을 추가한 뒤 LabManager를 다시 시작하세요. **토큰 값은 여기에 쓰지 않습니다.**
+
+```json
+{
+  "LabManager": {
+    "TokenRotation": {
+      "Enabled": true,
+      "CheckIntervalMinutes": 60
+    }
+  }
+}
+```
+
+- `Enabled`: `true`일 때만 백그라운드 서비스가 조건을 확인합니다. 기본값 `false`.
+- `CheckIntervalMinutes`: 확인 주기(분). 기본값 60, 최소 5, 최대 1440으로 제한됩니다.
+  서비스가 시작된 직후에는 확인하지 않고 첫 주기가 지난 뒤에만 확인합니다.
+- 회전 조건: 자동 회전이 켜져 있고, 마지막 변경 시각을 알 수 있으며, **90일을 넘었고**,
+  런타임 override 파일에 유효하고 기본값이 아닌 토큰이 있을 때만 한 번 회전합니다.
+  조건이 하나라도 없으면 `확인 불가`/`없음`으로 두고 추정하지 않습니다.
+- 90일 기준은 마지막 변경 시각부터입니다. 시작 시각이나 설치 시각으로 추정하지 않습니다.
+
+교사가 대시보드의 **지금 회전** 버튼(또는 관리자 토큰이 필요한
+`POST /api/admin/token/rotate`)을 누르면 자동 설정과 무관하게 즉시 회전합니다.
+새 토큰은 교사 PC의 `%LOCALAPPDATA%\UpdateAgent\LabManager\runtime-admin-token.json`
+**첫 줄**에 원자적 이동과 ACL 제한을 유지하며 기록됩니다. 서버 응답에는 새 토큰이
+없으므로, 교사는 이 설정 파일에서 새 토큰을 안전하게 확인한 뒤 대시보드에 **다시 입력**해야
+합니다. 이전 토큰은 브라우저 저장소에서 지워지며 그대로 계속 사용되지 않습니다.
+수동으로 정한 토큰을 GitHub 시크릿/보관소에 다시 등록할 때도 값 자체를 로그나 이슈에
+붙여넣지 마세요.
+
+감사 기록은 두 곳에 남습니다. `%LOCALAPPDATA%\UpdateAgent\LabManager\runtime-admin-token.audit.log`에는
+`token-rotated` 이벤트와 SHA-256 지문 앞 12자리만 기록되고, LabManager DB의 감사에는
+토큰 값 없이 `token-rotate`가 기록됩니다. 실패하면 이전 토큰을 같은 원자적 경로로 되돌리고
+`rolled-back`을 남기며, 복구까지 실패하면 인증을 중단합니다(fail-closed).
+
+```powershell
+$adminToken = (Get-Content "<관리자 토큰 파일>" -TotalCount 1).Trim()
+Invoke-RestMethod `
+  -Uri "http://127.0.0.1:5080/api/admin/token/rotate" `
+  -Method Post -Headers @{ "X-Admin-Token" = $adminToken }
+```
+
+> 토큰 원문은 로그·리포트·명령줄·저장소·화면·감사에 남기지 않습니다. 로그에는 길이만
+> 기록하고, API/대시보드 상태에는 회전 사용 여부·마지막 변경 시각·회전 필요 여부만
+> 포함합니다. 값이 없으면 `없음`/`확인 불가`로 표시합니다.
+
+### 8-H. 필터 URL 공유 / 다중 모니터 동기화
+
+대시보드에서 OS 필터 칩을 누르면 주소에 `?os=server`처럼 **허용된 OS 식별자만** 남습니다.
+전체 필터(`all`)는 파라미터를 만들지 않으므로 쿼리 없는 기존 주소와 동하게 유지됩니다.
+작업 상세 딥 링크 `?job=<작업 ID>`는 그대로 유지되며 필터를 바꿔도 사라지지 않습니다.
+뒤로/앞으로 가기는 필터 상태를 URL에서 다시 읽어 복원합니다(필터만 바꿀 때는 히스토리에 새 항목을 남기지 않습니다).
+
+모니터(`/monitor.html`)는 검색어를 `?q=`, 상태 필터를 `?state=`에 담습니다.
+상태 값은 `all`·`busy`·`attention`·`offline`만 허용하고, 검색어는 64자 이하의 문자만
+허용합니다. `필터 링크 복사` 버튼은 현재 필터가 담긴 주소만 클립보드에 복사합니다.
+클립보드 API가 없거나 복사가 거부되면 성공한 것처럼 표시하지 않고 `확인 불가`와
+주소창 수동 복사 안내를 보여 줍니다.
+
+여러 모니터 창/탭은 같은 브라우저 프로필에서 `BroadcastChannel`로 필터를 공유합니다.
+창을 열거나 검색어/상태를 바꾸면 다른 창의 표와 URL이 함께 갱신됩니다.
+채널을 쓸 수 없는 브라우저에서는 `storage` 이벤트로 동일하게 동기화하며,
+다른 창이 없으면 아무 메시지도 보내지 않습니다. 같은 탭이 보낸 메시지는 보낸 탭 식별자
+(source id)로 무시하고, 원격에서 받은 필터는 다시 브로드캐스트하지 않으므로 메아리 루프가
+생기지 않습니다.
+
+> **토큰은 절대 URL·쿼리·클립보드·브로드캐스트·필터 저장 값에 넣지 않습니다.**
+> 관리자 토큰은 대시보드에서 기존처럼 브라우저 로컬 저장소에만 보관하고, 각 창에서
+> 따로 입력합니다. 링크를 받은 사람이 토큰을 함께 전달받지 않으므로 다른 프로필에서는
+> 토큰 입력 화면이 나타날 수 있습니다. 이는 정상 동작입니다.
+
+공유 링크에 알 수 없는 필터 값이 있으면 `확인 불가` 안내를 보여 주고 해당 값은 무시하며
+`없음`/`전체`로 표시합니다. 정상 데이터라고 추측하지 않습니다. 복구 방법은 다음과 같습니다.
+
+1. 주소창에서 알 수 없는 `os=`, `q=`, `state=` 값을 지우거나 올바른 값으로 바꿉니다.
+2. 대시보드는 OS 칩의 `전체`, 모니터는 상태 선택의 `전체`와 검색어 지우기를 누릅니다.
+3. 그래도 필터가 이상하면 새로고침 후 필터 링크를 다시 복사해 공유합니다.
+
 ## 9. 보안 주의
 
 - `agent-token.txt`는 **공유 에이전트 토큰**입니다. 배포 폴더와 USB를 보호하고
@@ -458,8 +783,14 @@ Invoke-WebRequest "http://127.0.0.1:5080/api/admin/audit" -Headers @{ "X-Admin-T
 - 2026-11-24: 교체 선택 시 릴리스 내장 토큰 사용, 외부 토큰 파일은 선택 사항으로 변경(`v0.1.33`).
 - 2026-11-24: 자아성찰 25회 결함 수정 — 재사용/교체 토큰 규칙 정리, 체크인 결과·감사 제한·UTC 일관성,
   시크릿 검증과 설치 안전성 보강, 문서 정합성 개선(`v0.1.34`).
+- 2026-11-27: 개선 1 — `scripts/load-rehearsal.ps1` 추가, 50대 합성 체크인 부하 리허설 런북과
+  합격 기준 정리(제품 버전 변경 없음, 실 PC 증적과 구분).
 - 2026-11-24: 순수 창작 공통 Guard DLL 도입 — 토큰·URL·UTC 규칙 일원화, 런타임 관리자 토큰 충돌 차단,
   브라우저 앱 모드 주소 검증(`v0.1.35`).
 - 2026-11-24: 순수 DLL 5회 반복 감사 — Guard 규칙 보강과 공유 적용, Core UTC/정책/ID 일원화,
   LabManager 체크인 검증·ack·캐시 정리, UI 실패 처리·주소/창 크기 검증, 문서·패키징 보강(`v0.1.36`).
 - 2026-11-24: LabManager 토큰 교체 경로 대소문자 무관 키 검색과 단계별 진단 로그 보강(`v0.1.37`).
+- 2026-11-27: 개선 3 — 옵트인 단계적 롤아웃/유지보수 창, 배치 예약 영속화와 중복 방지,
+  남은 배치 취소 전파·회귀 테스트 추가(제품 버전 변경 없음).
+- 2026-11-28: 개선 5 — 구성 지문 기준선·버전 불일치·이탈 탐지와 교사 기준선 재설정,
+  비밀값 비포함 규칙 및 회귀 테스트 추가(제품 버전 변경 없음).

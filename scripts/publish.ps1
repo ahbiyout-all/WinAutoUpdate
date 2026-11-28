@@ -16,6 +16,12 @@ With -AgentOnly only the four student-PC folders are produced
 
 Run from a PowerShell prompt. No administrator rights are required for publishing.
 
+.PARAMETER FrameworkDependent
+Opt in to a smaller framework-dependent publish. The default stays self-contained.
+Framework-dependent output requires the matching Microsoft .NET Desktop Runtime
+(win-x64) on every target PC. The publish layout is validated after publishing;
+an ambiguous or mismatched layout fails closed with guidance.
+
 .EXAMPLE
 .\scripts\publish.ps1
 
@@ -41,6 +47,9 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repoRoot "publish"
 }
 $OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
+
+# English-only layout checks; shared with the installer and deployment scripts.
+. (Join-Path $PSScriptRoot "package-layout.ps1")
 
 $projects = @(
     [pscustomobject]@{
@@ -124,29 +133,46 @@ foreach ($project in $projects) {
     }
 }
 
+$expectedMode = if ($FrameworkDependent) { "framework-dependent" } else { "self-contained" }
+Write-Host ""
+Write-Host "Validating publish layout (expected: $expectedMode)..." -ForegroundColor Cyan
+foreach ($project in $projects) {
+    $info = Assert-PackageLayout -Path $project.Output `
+        -ExpectFrameworkDependent:$FrameworkDependent -Label $project.Name
+    Write-Host ("  {0}: {1} ({2} assemblies, {3} runtime markers)" -f
+        $project.Name, $info.Mode, $info.AssemblyCount, $info.RuntimeMarkerCount)
+}
+if ($FrameworkDependent) {
+    Write-Host "Prerequisite: install the matching Microsoft .NET Desktop Runtime (win-x64) on every target PC." -ForegroundColor Yellow
+}
+
 $size = (Get-ChildItem -LiteralPath $OutputRoot -Recurse -File |
     Measure-Object -Property Length -Sum).Sum
 
 Write-Host ""
 Write-Host ("Publish complete: {0} ({1:N1} MB)" -f $OutputRoot, ($size / 1MB)) -ForegroundColor Green
 Write-Host ""
+$installerSwitch = if ($FrameworkDependent) { " -FrameworkDependent" } else { "" }
 if ($AgentOnly) {
     Write-Host "Next steps:"
     Write-Host "  1) Build the versioned agent output: build.bat"
-    Write-Host "  2) Installer (agent only): scripts\build-inno.ps1 -AgentOnly -NoPublish"
+    Write-Host "  2) Installer (agent only): scripts\build-inno.ps1$installerSwitch -AgentOnly -NoPublish"
     Write-Host "  3) Student PC: put agent-install.ini + token file next to UpdateAgent.Agent-Setup-<version>-x64.exe, then run it with /VERYSILENT /SUPPRESSMSGBOXES /NORESTART (or use scripts\deploy-agents.ps1)"
     Write-Host "  4) Optional on a student PC: publish\cli\UpdateAgent.Cli.exe preflight --confirm-maestro"
     Write-Host "  5) Full runbook: docs\PILOT.md (installers: docs\INSTALLER.md, release: docs\RELEASE.md)"
 } else {
     Write-Host "Next steps:"
     Write-Host "  1) Teacher PC: scripts\configure-labmanager.ps1, then start publish\labmanager\UpdateAgent.LabManager.Desktop.exe"
-    Write-Host "  2) Installer (recommended): scripts\build-inno.ps1 -> artifacts\inno\*Setup*.exe"
-    Write-Host "     Alternative MSI: scripts\build-msi.ps1 -> artifacts\msi\UpdateAgent.Agent-<version>-x64.msi"
+    Write-Host "  2) Installer (recommended): scripts\build-inno.ps1$installerSwitch -> artifacts\inno\*Setup*.exe"
+    Write-Host "     Alternative MSI: scripts\build-msi.ps1$installerSwitch -> artifacts\msi\UpdateAgent.Agent-<version>-x64.msi"
     Write-Host "  3) Student PC (Inno): put agent-install.ini + token file next to UpdateAgent.Agent-Setup-<version>-x64.exe, then run it with /VERYSILENT /SUPPRESSMSGBOXES /NORESTART (or use scripts\deploy-agents.ps1)"
     Write-Host "     Student PC (MSI): scripts\install-agent-msi.ps1 -LabManagerUrl http://<teacher-ip>:5080 -ConfirmMaestro"
     Write-Host "     Student PC (legacy): scripts\install-service.ps1 -LabManagerUrl http://<teacher-ip>:5080"
     Write-Host "  4) Optional on a student PC: publish\cli\UpdateAgent.Cli.exe preflight --confirm-maestro"
     Write-Host "  5) Full runbook: docs\PILOT.md (installers: docs\INSTALLER.md, release: docs\RELEASE.md, MSI: docs\MSI.md)"
+}
+if ($FrameworkDependent) {
+    Write-Host "  6) Deployment: pass -FrameworkDependent to scripts\deploy-agents.ps1 after confirming the runtime prerequisite."
 }
 Write-Host ""
 Write-Host "Note: re-publishing resets publish\agent\service\appsettings.json to its defaults."

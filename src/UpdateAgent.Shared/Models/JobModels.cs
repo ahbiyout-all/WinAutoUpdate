@@ -104,6 +104,24 @@ public sealed record AgentInfo
 
     public bool HasBattery { get; init; }
     public int FreeDiskMb { get; init; }
+
+    /// <summary>
+    /// 허용 목록에 있는 비밀성이 없는 설정만으로 계산한 구성 지문.
+    /// 설정을 읽거나 파싱하지 못하면 null이며 서버는 이를 확인 불가로 취급한다.
+    /// </summary>
+    public string? ConfigFingerprint { get; init; }
+
+    /// <summary>
+    /// 구성 지문을 신뢰할 수 없는 경우. 이 필드를 보내지 않는 이전 에이전트도
+    /// 확인 불가로 취급되도록 기본값은 true이다.
+    /// </summary>
+    public bool ConfigFingerprintUnavailable { get; init; } = true;
+
+    /// <summary>
+    /// 체크인을 직접 보낼 수 있는 실행 중 서비스의 자체 표시. 체크인이 없으면
+    /// 서버가 오래됨(이탈)으로 판단하며, 이 필드로 정지 신호를 위조하지 않는다.
+    /// </summary>
+    public bool? ServiceAlive { get; init; }
 }
 
 /// <summary>에이전트의 주기적 상태 보고.</summary>
@@ -226,12 +244,18 @@ public sealed record StartJobCommandPayload
     public UpdatePolicy Policy { get; init; } = UpdatePolicy.Default;
     public bool MaestroConfirmed { get; init; }
     public string ConfirmedBy { get; init; } = "teacher";
+
+    /// <summary>작업 추적용 상관관계 ID. 에이전트는 무시해도 된다.</summary>
+    public string? CorrelationId { get; init; }
 }
 
 /// <summary>작업 중단 명령 본문. Force=true면 예약 재부팅·남은 업데이트·오버레이 잠금을 즉시 해제한다.</summary>
 public sealed record CancelJobCommandPayload
 {
     public bool Force { get; init; }
+
+    /// <summary>작업 추적용 상관관계 ID. 에이전트는 무시해도 된다.</summary>
+    public string? CorrelationId { get; init; }
 }
 
 public sealed record RebootCommandPayload

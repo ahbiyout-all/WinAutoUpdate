@@ -5,6 +5,679 @@
 
 ---
 
+## 2026-11-28 릴리스 후보 v0.1.45 준비 (게시 승인 대기)
+
+`docs/IMPROVEMENT-ROADMAP.md`의 개선 1~10을 정해진 순서대로 모두 완료했고,
+각 개선마다 자아성찰 10회를 마쳤습니다. 모든 변경은 로컬 작업 트리에만 있으며
+**커밋·태그·푸시·Release·게시는 사용자 명시적 승인을 기다리고 있습니다.**
+
+- 개선 1~10 누적 신규 회귀 테스트: 411 → 425 → 451 → 464 → 475 → 493 → 514 → 523 → 532 → 546
+- 버전 단일 소스(`Directory.Build.props`)와 Inno/MSI 폴백 버전, 문서 예제를 `0.1.45`로 갱신했습니다.
+- 이미 게시된 `v0.1.44`(커밋 `c88b65f`, 태그, Release, 산출물 SHA-256)는 변경하지 않았습니다.
+- 최종 검증: 빌드 경고 0/오류 0, 전체 테스트 546/546(실패 0, 건너뜀 0),
+  PowerShell 파서 21개 파일 오류 0, JS `node --check` 2개 통과, YAML 파싱 통과,
+  `.iss` 2개 BOM 유지, 샘플 INI 무-BOM 유지, 변경 59개 파일 예상 외 BOM 0,
+  `git diff --check` 공백 오류 0(기존 LF→CRLF 안내만 존재).
+- 미해결 블로커: 실 PC 50대 동시 재부팅 검증, 실제 코드 서명 인증서/signtool,
+  실제 교사 PC 설치 재현은 수행하지 못했습니다(각 개선 문서에 명시).
+
+---
+
+## 2026-11-28 개선 10 — 내장 첫 설치 토큰 경로 재검토
+
+### 범위
+
+`docs/IMPROVEMENT-ROADMAP.md`의 개선 10(내장 첫 설치 토큰 경로 재검토)만 재검토했습니다.
+이미 올바르게 동작하던 결정 매트릭스(첫 설치/재사용/교체, 명시적 외부 토큰 파일 우선)는
+유지하고, 검증 과정에서 확인된 불일치만 보강했습니다. 토큰 원문은 GitHub secret과
+교사 PC 설정 파일에만 두며, 로그·리포트·명령줄·저장소·테스트 소스에 기록하지 않았습니다.
+방화벽 규칙, 기능 업데이트 비활성화, Server Core 오버레이, 토큰 파일 ACL, 릴리스 자산
+3개(인스톨러 EXE 2개 + MSI 1개), 게시 버전 v0.1.44는 변경하지 않았습니다.
+본 개선 단계에서는 커밋·태그·푸시·Release·게시와 버전 상승을 하지 않았고,
+이후 릴리스 후보 준비에서 `0.1.45`로 상승했으며 게시는 승인 대기 중입니다.
+
+### 변경 사항
+
+- `scripts/build-inno.ps1`: `Get-FirstLine`이 서버의 `TokenGuard.Normalize`와 같은 순서로
+  앞 공백과 BOM을 제거하고, 8자 미만 토큰과 관리자/에이전트 동일 값을 빌드 전에 거부합니다.
+- `.github/workflows/release.yml`: 게시 전 검증이 시크릿 **전체 값**이 아니라 내장되는
+  **첫 줄**을 비교하도록 수정하고, LabManager 관리자/에이전트 동일 값도 거부합니다.
+- 두 Inno 스크립트: 내장/명시적 외부 토큰 모두 `TokenGuard.MinimumLength`(8자)를
+  적용합니다. 기존 재사용 경로는 내장 토큰을 읽지 않는 동작을 유지합니다.
+- 문서: `docs/INSTALLER.md`, `docs/RELEASE.md`에 첫 줄·BOM·최소 길이·역할 분리 검증을
+  반영했습니다. 회귀 테스트 `Improvement10EmbeddedTokenTests.cs`를 추가했습니다.
+
+### 10회 자아성찰
+
+| 회차 | 발견 | 조치 | 검증 명령/결과 |
+|---|---|---|---|
+| 1 | 요구사항과 범위 재확인. 개선 9 산출물과 게시 자산은 그대로 두어야 함. | 내장 토큰 경로 외 파일은 수정하지 않고, 미수정 영역은 테스트로만 고정. | `git status --short`, `git diff --stat`: 개선 10 관련 파일만 추가 수정, v0.1.44 태그/자산 무변경 확인 |
+| 2 | 결정 매트릭스가 문서에는 10행으로 완비되어 있음. 외부 토큰 우선, 재사용 무시, 교체 선택만 내장 사용은 이미 올바름. | 동작을 바꾸지 않고 `docs/INSTALLER.md`의 10행을 회귀 테스트로 고정. | `dotnet test --filter DecisionMatrix_IsDocumentedForBothProducts`: 통과 |
+| 3 | `build-inno.ps1`의 `Get-FirstLine`이 앞의 BOM을 제거하지 않아 `change-me-*`가 헤더를 통과할 수 있고, 8자 미만 토큰도 서버·배포 스크립트와 달리 허용됨. | `Trim().TrimStart([char]0xFEFF).Trim()` 적용 및 `$minimumTokenLength = 8` 검사 추가. | `powershell.exe -File` 임시 프로브: BOM+플레이스홀더/짧은 토큰 거부, 첫 줄만 검증 확인; `BuildScript_UsesFirstLineOnlyWithBomNormalization`, `BuildScript_RejectsTokensShorterThanTheServerMinimum` 통과 |
+| 4 | 빌드는 에이전트 토큰 일치와 LabManager 쌍 설정만 검사하고, 관리자=에이전트인 경우는 인스톨러/서버까지 갔다가 거부됨. `containsSecrets`는 내장 파일 존재로 정확히 기록됨. | 빌드 단계에서 `-ceq`로 역할 분리 검사 추가, `containsSecrets` 동작은 유지하고 테스트로 고정. | `BuildScript_ChecksCrossInstallerConsistencyAndRoleSeparation`, `BuildScript_WritesConstantFileSetAndReportsContainsSecrets` 통과 |
+| 5 | `agent.json`이 임시 파일+ACL 후 원자적 교체를 사용하고, `-KeepStaging` 없는 실패/성공 경로 모두 스테이징을 삭제함. 토큰 파일은 정리 후 주입됨. | 정리 순서를 바꾸지 않고 trap/최종 삭제를 테스트로 고정. | `BuildScript_RemovesStagingOnFailureAndSuccess`, `AgentInstaller_UsesEmbeddedTokenOnlyOnFirstInstallOrExplicitReplacement` 통과 |
+| 6 | 토큰 값은 `value hidden` 로그만 남기고, 배포 리포트는 해시만 기록함. 테스트 소스에 실제 토큰 리터럴이 없어야 함. | 로그/리포트/테스트 소스에 토큰 원문이 없는지 정적 검사 추가. | `TokenValuesAreNeverLoggedWrittenToReportsOrStoredInTheRepo`, `TestSource_DoesNotContainPlaintextTokenValues` 통과 |
+| 7 | CI가 시크릿 **전체 값**을 비교해 첫 줄만 다른 정상 조합을 오탐할 수 있고, 문서가 주장한 관리자/에이전트 차이 검증이 없음. | 워크플로도 `Get-SecretFirstLine`으로 정규화해 비교하고 역할 분리·`containsSecrets` 기대값을 동일하게 검사. 자산 3개 제한은 유지. | `ReleaseWorkflow_ValidatesTheSameFirstLineAsTheBuild`, `ReleaseWorkflow_StillPublishesExactlyThreeAssets` 통과; YAML 파싱 및 BOM 검사 통과 |
+| 8 | 한국어 문서/UI와 영어 PowerShell 메시지가 섞이지 않음. `RELEASE.md`의 워크플로 검증 주장이 실제와 달랐음. | 문구를 실제 동작에 맞추고 새 빌드 오류 메시지는 영어로 유지. | `Docs_DescribeEmbeddedTokenFailClosedRules` 통과; 신규 PowerShell 메시지 영어, 인스톨러 메시지 한국어 확인 |
+| 9 | 기존 감사 테스트는 내장 토큰 신규 보강 사항을 검증하지 않음. | `Improvement10EmbeddedTokenTests.cs` 14개 테스트 추가. | `dotnet test -c Release --no-build --filter FullyQualifiedName~Improvement10EmbeddedTokenTests`: 통과 14, 실패 0, 건너뜀 0 |
+| 10 | 최종 회귀: 빌드 경고/오류, 전체 테스트, 파서, JS/YAML/BOM, 공백 차이, 자산 목록 확인. | 문제 없으면 변경을 유지하고 커밋/게시하지 않음. | `dotnet build UpdateAgent.sln -c Release`(경고 0/오류 0), `dotnet test`(전체 통과), YAML/JS 파서·BOM·`git diff --check` 통과, 자산 3개 유지 확인 |
+
+### 검증 결과
+
+- scoped 테스트: `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --no-build --filter FullyQualifiedName~Improvement10EmbeddedTokenTests` → 통과 14/실패 0/건너뜀 0.
+- 전체 테스트: `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --no-build` → 통과 546/실패 0/건너뜀 0.
+- 빌드: `dotnet build UpdateAgent.sln -c Release` → 경고 0/오류 0.
+- 정적 검사: YAML/JS 파서, UTF-8 BOM(두 Inno 스크립트), `git diff --check`, 릴리스 자산 3개 목록 모두 통과.
+
+---
+
+## 2026-11-28 개선 9 — `desktop/tauri` 실험 스캐폴드 정리
+
+### 범위
+
+`docs/IMPROVEMENT-ROADMAP.md`의 개선 9만 구현했습니다. LabManager/에이전트와 연결되지
+않고 빌드·릴리스·인스톨러에도 포함되지 않았던 Tauri 2 실험 스캐폴드를 저장소에서
+제거했습니다. 내장 WebView2 런타임과 Node/Rust 도구를 요구하므로 프로젝트의
+"WebView2 미사용, 교사 콘솔은 시스템 Edge/Chrome `--app=` 창" 결정과 맞지 않았습니다.
+교사 콘솔 실행 경로, 토큰 취급, 인스톨러 출력, 릴리스 자산(EXE 2개 + MSI 1개)은
+그대로입니다. 커밋·태그·푸시·Release·게시와 버전 상승은 하지 않았습니다.
+
+### 변경 사항
+
+- 추적 소스 17개 삭제: `desktop/tauri`의 `.gitignore`, `README.md`, `index.html`,
+  `package.json`, `package-lock.json`, `vite.config.js`, `src/main.js`, `src/styles.css`,
+  `src-tauri/`의 `.gitignore`, `Cargo.lock`, `Cargo.toml`, `build.rs`, `tauri.conf.json`,
+  `capabilities/default.json`, `icons/icon.ico`, `src/lib.rs`, `src/main.rs`.
+- `.gitignore`: 섹션 10의 재포함 패턴(`!desktop/`, `!desktop/tauri/**`)을 제거하고
+  `desktop/tauri/` 전체를 명시적으로 무시하도록 변경했습니다. 다른 허용 목록과
+  마지막 안전망은 유지했습니다.
+- `README.md`: 스캐폴드를 경로 표에 올리지 않고, 제거 사유·추가 릴리스 자산 없음·
+  시스템 Edge/Chrome `--app=` 유지 안내를 추가했습니다.
+- `docs/DEPLOYMENT.md`: 0장 토폴로지에 같은 제거/실행 경로 안내를 추가했습니다.
+- `docs/WORKLOG.md`: 2026-11-17 스캐폴드 추가 이력에 "과거 이력이며 현재 실행 절차가
+  아님"을 명시하고, 개선 9 섹션을 개선 8 위에 추가했습니다.
+- `tests/UpdateAgent.Tests/Improvement09TauriCleanupTests.cs` (신규): 추적 소스 부재,
+  `.gitignore` 무시/허용 목록, 내장 웹뷰 의존성 부재, 릴리스 자산 3개 유지,
+  stale 빌드 지시 제거, 한국어 정합성, 비밀값 배제 회귀 9개를 추가했습니다.
+
+### 자아성찰 10회
+
+요구사항 정합성 → 추적 파일 목록·제거 완전성 → `.gitignore` 허용 목록 안전성 →
+출시 소스·빌드·릴리스 워크플로 비변경 → 내장 웹뷰 의존성·API 부재 →
+문서 정확성·stale 지시 제거 → 로컬 무시 산출물 보존 → 한국어 문서 일관성 →
+회귀 범위 → 최종 검증 순서로 10회를 수행했습니다. 아래 발견/조치는 실제로
+재현·수정한 내용만 적었습니다.
+
+| 회차 | 점검 차원 | 발견 | 조치 | 검증 명령/결과 |
+|---:|---|---|---|---|
+| 1 | 요구사항 정합성 | 결함 없음 | 스캐폴드 소스만 제거하고 출시 코드·토큰·자산·버전·로드맵은 건드리지 않음 | `git status --short`, `git diff --cached --name-only`: 스테이징 변경은 17개 삭제뿐, 로드맵은 상위 미추적 상태 유지 |
+| 2 | 추적 파일 목록·제거 완전성 | 결함 없음 | `git ls-files` 기준 17개를 명시적으로 `git rm` | `git ls-files desktop/tauri`: 출력 없음; `git status --short desktop/tauri`: `D` 17개뿐 |
+| 3 | .gitignore 허용 목록 안전성 | 결함 없음 | 재포함 22개 패턴 제거 후 단일 무시 규칙 배치, 마지막 안전망 유지 | `git check-ignore -v`: 소스/산출물 6경로 모두 `.gitignore:107:desktop/tauri/`; 기존 허용 대상 8개는 `TRACKABLE` |
+| 4 | 출시 소스·빌드·릴리스 워크플로 비변경 | 결함 없음(상위 개선 1~8분만 존재) | 이번 항목에서는 `src`, `installer`, `scripts`, 워크플로를 수정하지 않음 | `git diff --cached --name-only`: 17개 삭제만; `git diff --name-only -- src installer scripts .github/workflows`: 기존 상위 개선 파일만 표시 |
+| 5 | 내장 웹뷰 의존성·API 부재 | 결함 없음 | 새 NuGet/npm 패키지나 WebView2 API를 추가하지 않음 | PowerShell `Select-String`: 143개 출시 파일에서 `@tauri-apps`, `tauri::`, `Microsoft.Web.WebView2`, `CoreWebView2` 등 0건 |
+| 6 | 문서 정확성·stale 지시 제거 | 결함 없음 | 활성 문서의 Tauri 빌드·실행 명령 제거, 과거 이력은 제거 사실로 표시 | 문서 6개 `Select-String`: 활성 빌드 지시 0건, 과거 이력에 "현재 빌드·실행 절차가 아닙니다" 확인 |
+| 7 | 로컬 무시 산출물 보존 | 결함 없음 | `node_modules`, `dist`, `target`, `gen`은 디스크에 그대로 두고 Git 무시만 적용 | 삭제 전/후 파일 수 3258, SHA-256 `4B6BECC5…E42A8` 동일(316 + 3 + 2935 + 4) |
+| 8 | 한국어 문서 일관성 | DEPLOYMENT에 영어 단어가 섞인 문장, WORKLOG에 두 가지 비한국어/오기 문자열을 입력함 | `학생 → 학생 통신 없음.`, `현재 빌드·실행 절차… 실제 절차는`, `제거/실행 경로 안내`로 수정하고 회귀 테스트 강화 | `KoreanDocs_RemainConsistentAfterCleanup` 통과, 오기 문자열 검사 0건 |
+| 9 | 회귀 범위 | 개선 9 구간 누락으로 2개 실패(7/9), 이어 WORKLOG 표에 금지 문자열을 그대로 적어 2개 재실패 | 개선 9 섹션을 개선 8 위에 추가하고, 표에는 금지 명령·오기 문자열을 설명형으로만 기재 | 수정 후 scoped `Improvement09TauriCleanupTests`: 9/9 통과 |
+| 10 | 최종 검증 | 결함 없음 | 빌드·전체 테스트·PowerShell AST·JS/YAML/BOM·`git diff --check`·`git ls-files` 재실행 | 빌드 경고 0/오류 0, 전체 532/532, 파서/구문/공백 오류 0, `git ls-files desktop/tauri` 출력 없음 |
+
+### 검증 메모
+
+- `dotnet build UpdateAgent.sln -c Release --no-restore`: 경고 0, 오류 0.
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~Improvement09TauriCleanupTests"`: 통과 9, 실패 0.
+- `dotnet test UpdateAgent.sln -c Release --no-build`: 통과 532, 실패 0.
+- `git ls-files desktop/tauri`: 출력 없음. `git status --short desktop/tauri`: 삭제 17개뿐.
+- `git check-ignore -v`: 스캐폴드 소스/빌드 산출물 6경로가 모두 신규 무시 규칙에 매칭.
+- PowerShell AST 파서, `node --check`, YAML 파싱, UTF-8 BOM, `git diff --check`: 이상 없음.
+- 로컬 실험 산출물 3258개 파일의 수와 manifest SHA-256이 삭제 전후 동일합니다.
+
+---
+
+## 2026-11-28 개선 8 — 설치 패키지 경량화 (Framework-dependent 옵션)
+
+### 범위
+
+`docs/IMPROVEMENT-ROADMAP.md`의 개선 8만 구현했습니다. 기본 게시/설치 파일은
+self-contained(`win-x64`)로 유지하고, 프레임워크 종속(경량) 패키지는
+`-FrameworkDependent`로 명시적으로 선택할 때만 만듭니다. 대상 PC의 Microsoft
+.NET Desktop Runtime(win-x64) 전제를 명시하고, 레이아웃이 불명확하거나 요청과
+다르면 fail-closed로 중단합니다. 토큰·URL·설정 파일 규칙과 방화벽 규칙은
+바꾸지 않았습니다. 커밋·태그·푸시·Release·게시와 버전 상승은 하지 않았습니다.
+
+### 변경 사항
+
+- `scripts/package-layout.ps1` (신규): `*.runtimeconfig.json`의
+  `includedFrameworks`/`framework` 구분, 자체 포함 런타임 파일 5종, 어셈블리 수
+  임계값(80)으로 레이아웃을 판별하고 불명확하면 `unknown`을 반환합니다.
+- `scripts/publish.ps1`: 기존 `-FrameworkDependent` 옵트인에 게시 후 레이아웃
+  검증과 실측 크기/모드 출력을 추가하고, 후속 빌드·배포 스위치를 안내합니다.
+- `scripts/build-inno.ps1`: `-FrameworkDependent`를 추가해 게시 위임 시 스위치를
+  전달하고, 게시물·스테이징의 런타임 파일을 검증하며 `build-info.json`에 실제
+  모드/전제를 기록합니다.
+- `scripts/build-msi.ps1`: 동일한 옵트인과 게시물/스테이징 검증을 추가하고
+  `build-info.json`의 `selfContained` 하드코딩을 제거했습니다.
+- `scripts/deploy-agents.ps1`: `-FrameworkDependent`를 추가해 설치 파일의
+  `build-info.json` 모드를 확인하고, 불일치 시 중단하며 report/README에
+  런타임 전제(확인 불가 포함)를 기록합니다. 토큰은 여전히 파일 첫 줄만 사용합니다.
+- `docs/INSTALLER.md`, `docs/MSI.md`, `docs/PILOT.md`, `docs/DEPLOYMENT.md`:
+  한국어 옵트인 절차, 사전 조건, 확인 방법과 제한을 추가했습니다.
+- `tests/UpdateAgent.Tests/Improvement08PackageSlimmingTests.cs` (신규):
+  기본 self-contained 유지, 스위치 배선, 임계값/레이아웃 판별, fail-closed 문구,
+  비밀값 배제, BOM 규칙, 문서/테이블 정합성 회귀 테스트.
+
+### 자아성찰 10회
+
+요구사항 정합성 → 하위 호환성 → 프레임워크 종속 레이아웃 감지 정확성 →
+fail-closed 불일치/런타임 전제 정직성 → 크기 보고의 실측성 →
+패키지/로그의 토큰·설정 배제 → BOM/인코딩/문서 정합성 →
+한국어 문서/영문 도움말 정합성 → 회귀 범위 → 최종 검증 순서로 10회를 수행했습니다.
+
+| 회차 | 점검 차원 | 발견 | 조치 | 검증 명령/결과 |
+|---:|---|---|---|---|
+| 1 | 요구사항 정합성 | 결함 없음(옵트인·기본 self-contained·런타임 전제·문서·테스트 범위 충족) | 스위치는 네 스크립트에만 추가하고 버전/로드맵/태그는 변경하지 않음 | 신규 테스트 9개가 범위를 검증 |
+| 2 | 하위 호환성 | `build-info.json` 필드 정렬 중 기존 서명 테스트가 기대하는 `signed` 간격이 깨짐 | 원래 간격으로 복원하고 신규 테스트에 문자열 고정 | `DefaultBuildRemainsSelfContained` 통과, 기존 서명 테스트와 신규 Assertion 통과 |
+| 3 | 프레임워크 종속 레이아웃 감지 정확성 | self-contained `runtimeconfig.json`도 `includedFrameworks`를 가지므로 runtimeconfig만 보면 오판 가능 | `includedFrameworks` 대신 `framework` 참조 여부 + 런타임 파일 5종 + 어셈블리 수(79/80 경계)를 함께 판별 | `LayoutDetection_UsesRuntimeConfigMarkersAndThresholds` 통과, 기존 publish 5개 폴더 모두 `self-contained`로 판별 |
+| 4 | fail-closed 불일치/런타임 전제 정직성 | PowerShell에서 문자열 연결 뒤 `-f`가 마지막 문자열에만 적용되어 오류에 `{0}`이 남음. `-Verify`도 모드를 영문 `unknown`으로 표시 | `$message = (...) -f ...` 후 `throw $message`로 변경, `unknown`은 `확인 불가`로 표시, 배포 시 모드 불명확/opt-in 불일치 중단 | `MismatchAndUnknown_FailClosedWithRuntimeGuidance` 통과, 시뮬레이션에서 치환된 오류와 fail-closed 확인 |
+| 5 | 크기 보고의 실측성 | 결함 없음 | 새 문서/도움말에 추정 MB를 넣지 않고 기존 실측 `Length` 합계와 `build-info.json`만 안내 | `SizeReporting_UsesMeasuredValues_NotFabricatedNumbers` 통과 |
+| 6 | 패키지/로그의 토큰·설정 배제 | 결함 없음 | 리포트에는 해시/모드/안전한 주소만 기록, 첫 줄 토큰 파일 규칙과 내장 토큰 검증 유지 | `NoTokensOrSecrets_InNewHelpStagingAndReports` 통과 |
+| 7 | BOM/인코딩/문서 정합성 | BOM 없는 `deploy-agents.ps1`에 한국어 문자열을 넣어 Windows PowerShell 5.1이 파싱/실행에 실패 | 해당 스크립트를 UTF-8 BOM으로 저장하고 회귀 테스트 추가. `.iss` BOM과 샘플 INI 무-BOM은 유지 | `IssBomAndSampleIniNoBom_RulesArePreserved` 통과, AST 파서/실제 스크립트 실행 확인 |
+| 8 | 한국어 문서/영문 도움말 정합성 | `deploy-agents.ps1` 영문 도움말에 한국어 `확인 불가`를 넣어 기존 영문 도움말 테스트가 실패 | 도움말은 영문으로 복원하고 한국어 출력은 README/리포트에 유지, 신규 테스트가 도움말 비한글을 검증 | `FrameworkDependentSwitch_IsWiredThroughAllScripts`와 `Docs_StatePrerequisiteOptInFlowAndLimits` 통과 |
+| 9 | 회귀 범위 | 신규 테스트가 xUnit 3인자 `DoesNotMatch` 오버로드로 컴파일 실패 | `Assert.False(Regex.IsMatch(...), 메시지)`로 교체하고 전체 테스트를 재실행 | 빌드 성공, 신규 테스트 통과 확인 |
+| 10 | 최종 검증 | 결함 없음 | 빌드·전체 테스트·PowerShell AST·JS/YAML/BOM·`git diff --check` 재실행 | 빌드 성공(경고 0/오류 0), 전체 523/523, 구문·공백 오류 0 |
+
+### 검증 메모
+
+- `dotnet build UpdateAgent.sln -c Release --no-restore`: 경고 0, 오류 0.
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~Improvement08PackageSlimmingTests"`: 통과 9, 실패 0.
+- `dotnet test UpdateAgent.sln -c Release --no-build`: 통과 523, 실패 0.
+- `package-layout.ps1` 판별 확인: 기존 publish 5개 폴더 모두 `self-contained`로 판별,
+  `framework`/`runtimeconfig` 시뮬레이션 폴더는 `framework-dependent`, 불완전한
+  레이아웃은 `unknown`, 모드 불일치 시 치환된 영문 오류와 fail-closed 확인.
+- `deploy-agents.ps1` 시뮬레이션: `selfContained:false` 빌드 정보는
+  `-FrameworkDependent`로 생성 성공, 스위치 없이는 중단, 빌드 정보 없음은
+  `확인 불가`로 표시하고 옵트인 요청은 중단.
+- PowerShell AST 파서: 스크립트 16개 파싱, 오류 0. `node --check`: JS 2개 통과.
+  PyYAML: YAML 1개 파싱 통과.
+- BOM: `.iss` 2개는 BOM 유지, 샘플 INI·빌드 스크립트 3개·신규 도우미는 무-BOM,
+  한국어 문자열을 포함한 `deploy-agents.ps1`은 UTF-8 BOM 확인.
+- `git diff --check`: 공백 오류 0(줄바꿈 정규화 경고만 존재).
+
+## 2026-11-28 개선 7 — 대시보드 필터 URL 공유 / 다중 모니터 동기화
+
+### 범위
+
+`docs/IMPROVEMENT-ROADMAP.md`의 개선 7만 구현했습니다. 교사 대시보드의 OS 필터와
+전용 모니터의 검색어/상태 필터를 브라우저 URL에 담아 링크로 공유하고, 여러 모니터
+창·탭의 필터를 같은 브라우저 프로필 안에서 동기화합니다. 관리자 토큰은 URL·쿼리·
+클립보드·브로드캐스트·저장 이벤트 어디에도 실지 않습니다. 커밋·태그·푸시·Release·
+게시와 버전 상승은 하지 않았습니다.
+
+### 변경 사항
+
+- `src/UpdateAgent.LabManager/wwwroot/app.js`: `?os=` 허용 목록 파싱, 필터 변경 시
+  `history.replaceState`, `popstate` 복원, 알 수 없는 값 안내, 기존 `?job=` 딥 링크 유지.
+- `src/UpdateAgent.LabManager/wwwroot/monitor.js`: `?q=`/`?state=` 허용 목록 파싱,
+  입력 디바운스 URL 갱신, `popstate`, `필터 링크 복사`, `BroadcastChannel` 동기화와
+  `storage` 폴백, 같은 탭 source id 에코 방지, 원격 변경의 재전파 금지.
+- `src/UpdateAgent.LabManager/wwwroot/monitor.html`는 수정하지 않고 `monitor.js`가
+  복사 버튼·상태·안내 요소를 런타임에 추가합니다.
+- `src/UpdateAgent.LabManager/wwwroot/styles.css`: 모니터 필터 영역 줄바꿈과 작은 버튼 스타일.
+- `docs/DEPLOYMENT.md`: 8-H 필터 링크 공유/멀티 모니터 동기화 런북 추가.
+- `tests/UpdateAgent.Tests/Improvement07FilterSharingTests.cs` (신규): 허용 목록/길이 제한,
+  비밀값 비직렬화, `replaceState`/`popstate`/디바운스, 에코 방지와 원격 적용,
+  클립보드 실패 안내, 한국어 UI/문서, `job=` 딥 링크 회귀 테스트.
+
+### 자아성찰 10회
+
+요구사항 정합성 → 하위 호환성 → 토큰/비밀 배제 → URL 파싱 허용 목록과 길이 제한 →
+히스토리/popstate/디바운스 → 창 간 에코 방지와 원격 적용 → 클립보드 실패·알 수 없는 값 →
+한국어 문서/UI 정합성 → 회귀 범위 → 최종 검증 순서로 10회를 수행했습니다.
+아래 발견/조치는 실제로 재현·수정한 내용만 적었습니다.
+
+| 회차 | 점검 차원 | 발견 | 조치 | 검증 명령/결과 |
+|---:|---|---|---|---|
+| 1 | 요구사항 정합성 | 결함 없음(URL 공유·동기화·비밀값 배제·문서·테스트 범위 충족) | 토큰 입력은 기존 로컬 저장소에만 두고 링크/메시지 스키마는 필터 필드로 한정 | 신규 테스트가 8개 축을 검증 |
+| 2 | 하위 호환성 | 결함 없음 | 쿼리 없음·`BroadcastChannel` 없음·기존 `job=` 딥 링크를 그대로 유지, 로드 시 URL 재기록 없음 | `JobDeepLinkAndNoQueryDefaults_ArePreserved`, `NoBroadcastChannel_IsInert` 통과 |
+| 3 | 토큰/비밀 배제 | 무해한 키(`note` 등)에 토큰 같은 값이 들어 있어도 URL에 남았음 | `SENSITIVE_KEY_PATTERN`을 키와 값 양쪽에 적용하고 현재 토큰과 같은 값도 제거. 메시지/저장 상태는 `q`/`state`/`sourceId`/`at`만 사용 | `TokenLikeValues_AreDroppedFromUrls`, `BroadcastPayload_HasOnlyFilterFields` 통과 |
+| 4 | URL 파싱 허용 목록과 길이 제한 | `?os=`처럼 값이 비어 있는 경우를 '알 수 없는 값'으로 표시해 불필요한 `확인 불가` 안내가 나옴 | 두 파서 모두 빈 값은 '없음'으로 보고, 값이 있을 때만 허용 목록을 검사하는 회귀 테스트 추가 | Node 실행 하네스 파싱 8+8건 통과, `UnknownValues_AreIgnored_AndBounded` 통과 |
+| 5 | 히스토리/popstate/디바운스 정확성 | 입력 직후 `필터 링크 복사`를 누르면 디바운스 전 낡은 URL이 복사됨 | 복사 전에 보류 중인 검색어를 즉시 반영하고 URL을 갱신하도록 수정, `popstate`는 URL 재기록 없이 복원 | `CopyLink_FlushesPendingFilterText`, `MonitorHistoryWiring_DebouncesAndRestores` 통과 |
+| 6 | 창 간 에코 방지와 원격 적용 | 미래 시각으로 찍힌 메시지가 그대로 적용됨 | source id 자기 메시지 무시, 시간 허용 오차(60초) 검사, 원격 적용 시 `broadcast: false`, 대기 중 로컬 디바운스 취소, `storage` 폴백은 채널 없을 때만 | `RemoteMessage_RejectsInvalidTimestamp`, `BroadcastSourceIdGuard_AndRemoteApply` 통과 |
+| 7 | 클립보드 실패·알 수 없는 값 | 결함 없음 | API 없음/거부 시 `확인 불가`와 수동 복사 안내, 성공/실패 문구 구분, 허용 목록 밖 값은 무시 | `ClipboardFailure_ShowsUnavailableGuidance` 통과 |
+| 8 | 한국어 문서/UI 정합성 | 결함 없음 | `필터 링크 복사`, `확인 불가`, `없음` 문구와 8-H 런북을 한국어로 통일 | `KoreanUiAndDocs_AreConsistent` 통과 |
+| 9 | 회귀 범위 | 결함 없음 | 개선 1~6 테스트와 JS 문법 검사를 함께 실행 | 전체 테스트 514개 통과(신규 21개 포함) |
+| 10 | 최종 검증 | 결함 없음 | 빌드·전체 테스트·Node 하네스·JS/YAML/BOM·`git diff --check` 재실행 | 빌드 성공, 전체 514/514, 구문 오류 0, 공백 오류 0 |
+
+### 검증 메모
+
+- `dotnet build UpdateAgent.sln -c Release --no-restore`: 경고 0, 오류 0.
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~Improvement07FilterSharingTests"`: 통과 21, 실패 0.
+- `dotnet test UpdateAgent.sln -c Release --no-build`: 통과 514, 실패 0.
+- `node --check app.js`, `node --check monitor.js`: 통과.
+- Node VM 하네스로 실제 파서/직렬화/에코 방지 함수 실행: 통과.
+- PowerShell AST 파서, YAML 파싱, UTF-8 BOM, `git diff --check`: 이상 없음.
+
+## 2026-11-28 개선 6 — 토큰 회전 스케줄러
+
+### 범위
+
+`docs/IMPROVEMENT-ROADMAP.md`의 개선 6(토큰 회전 스케줄러)만 구현했습니다.
+자동 회전은 명시적 옵트인이며 기본 설치에서는 아무 토큰도 바꾸지 않습니다.
+토큰 원문은 저장 파일 외의 로그·감사·리포트·응답·화면·명령줄에 남기지 않습니다.
+커밋·태그·푸시·Release·게시와 버전 상승은 하지 않았습니다.
+
+### 변경 사항
+
+- `src/UpdateAgent.LabManager/Auth/TokenAuditLog.cs`: `token-rotated` 이벤트 추가.
+- `src/UpdateAgent.LabManager/Auth/AdminTokenStore.cs`: BCL 난수 256비트 URL 안전 토큰 생성,
+  현재/에이전트 토큰과의 충돌·플레이스홀더 reject, 기존 `SetTokenAsync` 경로 재사용,
+  지문 전용 감사, 상태에 `RotationEnabled` 추가, 토큰 파일 첫 줄만 읽기 유지.
+- `src/UpdateAgent.LabManager/Configuration/LabManagerOptions.cs`: `TokenRotation:Enabled`
+  (기본 `false`)와 `CheckIntervalMinutes`(기본 60, 최소 5, 최대 1440) 추가.
+- `src/UpdateAgent.LabManager/Services/AdminTokenRotationService.cs` (신규): 주기 확인,
+  시작 시 미실행, 동시 틱 직렬화, 취소 준수, 실패 시 다음 주기 재시도.
+- `src/UpdateAgent.LabManager/Program.cs`: 옵트인 hosted service 등록,
+  `POST /api/admin/token/rotate`와 LabManager 감사 `token-rotate` 추가.
+- `src/UpdateAgent.LabManager/wwwroot/app.js`, `index.html`, `styles.css`: 자동 회전/마지막
+  변경/회전 필요 표시, `지금 회전` 버튼, 회전 후 이전 토큰 지우기와 재입력 안내.
+- `docs/DEPLOYMENT.md`: 8-G 옵트인 활성화, 90일 규칙, 토큰 기록 위치, 재입력,
+  감사/개인정보 규칙 추가.
+- `tests/UpdateAgent.Tests/Improvement06TokenRotationTests.cs` (신규): 옵트인/시작 무동작,
+  1회 회전, 강한 토큰, 첫 줄 파일, 충돌·플레이스홀더 거부, 롤백/fail-closed, 상태 정직성,
+  UI/문서 정합성, 비밀값 비누출 회귀 테스트.
+
+### 자아성찰 10회
+
+요구사항 정합성 → 하위 호환성 → 토큰 생성 강도 → 원자성·롤백·fail-closed →
+스케줄러 반복·취소 → API 인증·상태 정직성 → 교사 UI 재입력 → 한국어 문서/UI 정합성 →
+회귀 범위 → 최종 검증 순서로 10회를 수행했습니다. 아래 발견/조치는 실제로 재현·수정한 내용만 적었습니다.
+
+| 회차 | 점검 차원 | 발견 | 조치 | 검증 명령/결과 |
+|---:|---|---|---|---|
+| 1 | 요구사항 정합성 | 결함 없음(옵트인·생성·스케줄러·API·UI·문서·테스트 범위 충족) | 회전은 관리자 토큰 override만 바꾸고 에이전트 토큰은 건드리지 않음 | 신규 18개 테스트가 8개 축을 검증 |
+| 2 | 하위 호환성 | hosted service 등록은 했지만 DI가 4인자 테스트 생성자를 선택해 실패할 가능성이 검증되지 않음 | 상태 레코드 끝에 기본값 필드·`SetTokenAsync` 끝에 선택 인자 유지, DI 컨테이너에서 `IHostedService` 해석 회귀 테스트 추가 | `DependencyInjection_ResolvesHostedService_WithoutManualIntervalRegistration` 통과 |
+| 3 | 토큰 생성 강도 | 결함 없음 | `RandomNumberGenerator` 256비트 → base64url, 최소 길이·플레이스홀더·현재/에이전트 충돌 검사 후에만 저장 | 충돌/플레이스홀더 거부 테스트 통과 |
+| 4 | 원자성·롤백·fail-closed | 감사 실패 회귀 테스트가 플레이스홀더 토큰을 사용해 실제 회전 경로에 닿지 않음 | 유효한 설정 토큰으로 테스트를 수정해 감사 실패 → 롤백 → fail-closed 경로 확인 | `RotationAuditFailure_FailsClosed_WithoutTokenInMessage`, `RotationWriteFailure_RollsBack_PreservingPreviousToken` 통과 |
+| 5 | 스케줄러 반복·취소 | 결함 없음 | 첫 확인은 주기 대기 뒤, 세마포어 직렬화, 회전 후 상태 갱신으로 중복 방지, 취소 토큰 준수 | 동시 호출 1회 회전·취소 테스트 통과 |
+| 6 | API 인증·상태 정직성 | 결함 없음 | 경로가 `/api/admin`이라 기존 미들웨어가 인증, 응답은 상태만, 없는 값은 `없음`/`확인 불가` | 401 미들웨어 테스트·상태 직렬화 테스트 통과 |
+| 7 | 교사 UI 재입력 | 버튼 문구를 `app.js`에서 찾아 테스트가 실패(실제 위치는 `index.html`) | 회전 핸들러는 `app.js`, 버튼 문구는 `index.html`로 테스트 범위 수정 | `TeacherUiDocsAndApi_ShowRotationFields_AndReentryFlow` 통과 |
+| 8 | 한국어 문서/UI 정합성 | 결함 없음 | WORKLOG 개선 6과 배포 런북 8-G를 한국어로 추가하고 `없음`/`확인 불가` 표현 통일 | 문서 정합성 테스트 통과 |
+| 9 | 회귀 범위 | 로그 비누출 테스트가 없고 `TokenRotation=null` 설정에서 상태 조회가 예외를 낼 수 있음 | 상태/서비스/주기 계산에 null-conditional 적용, 로그 캡처·누락 설정 회귀 테스트 추가 | `MissingRotationConfig_StaysDisabled_AndNeverThrows`, `NoPlaintextToken_InApplicationLogs` 통과 |
+| 10 | 최종 검증 | 결함 없음 | 최종 명령을 다시 실행 | 빌드·전체 테스트·파서/JS/YAML/BOM/`git diff --check` 통과 |
+
+### 검증 메모
+
+- `dotnet build UpdateAgent.sln -c Release --no-restore`: 경고 0, 오류 0.
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~Improvement06TokenRotationTests"`: 통과 18, 실패 0.
+- `dotnet test UpdateAgent.sln -c Release --no-build`: 통과 493, 실패 0.
+- `node --check src/UpdateAgent.LabManager/wwwroot/app.js`: 통과.
+- PowerShell AST 파서로 `scripts/*.ps1` 전수 검사: 구문 오류 0.
+- `python -c "import yaml; ..."`로 `.github/workflows/release.yml` 파싱: 통과.
+- 변경/신규 텍스트 11개 파일 UTF-8 BOM 검사: BOM 없음.
+- `git diff --check`: 공백 오류 없음(기존 CRLF 설정 경고만 있음).
+- 비밀값 누출 테스트: 토큰 원문이 로그·감사·상태 응답·LabManager 감사·UI에 없음을 확인.
+
+## 2026-11-28 개선 5 — 에이전트 변조·이탈 탐지
+
+### 범위
+
+`docs/IMPROVEMENT-ROADMAP.md`의 개선 5(에이전트 변조·이탈 탐지)만 구현했습니다.
+학생이 로컬 관리자라는 전제를 바꾸지 않으며, 입력 차단·키보드 필터·HID 비활성화·
+변조 방지 서비스는 추가하지 않았습니다. 목적은 차단이 아니라 다음 체크인 또는
+체크인 공백(이탈)으로 교사에게 알리는 것입니다. 커밋·태그·푸시·Release·게시와
+버전 상승은 하지 않았습니다.
+
+### 변경 사항
+
+- `src/UpdateAgent.Shared/Models/JobModels.cs`: 체크인에 `ConfigFingerprint`,
+  `ConfigFingerprintUnavailable`, `ServiceAlive` 필드 추가. 이전 에이전트/서버도
+  새 필드를 무시하거나 기본값(확인 불가)으로 처리합니다.
+- `src/UpdateAgent.Service/Integrity/ConfigFingerprint.cs` (신규): 명시적 허용 목록의
+  비밀성이 없는 설정과 실행 중 유효 설정만 정규화해 SHA-256 지문을 만듭니다.
+  토큰/암호/비밀 키는 읽지 않고, 의심스러운 값이 나오면 원문을 남기지 않고
+  `null`/확인 불가로 반환합니다.
+- `src/UpdateAgent.Service/Worker.cs`: 실행 중 서비스 관점의 `ServiceAlive=true`와
+  구성 지문을 체크인에 실습니다. 서비스가 멈추면 체크인이 없으므로 정지 신호를
+  위조하지 않습니다.
+- `src/UpdateAgent.LabManager/Services/AgentIntegrityService.cs` (신규): 첫 유효
+  체크인의 지문을 기준선으로 저장하고, 변경을 감지해 플래그를 유지합니다. 기대
+  버전이 없으면 버전 비교를 확인 불가로 남기고, 오래된 체크인은 `체크인 없음`
+  사유와 함께 이탈로 판정합니다. 교사 재설정은 현재 지문을 새 기준선으로 삼습니다.
+- `src/UpdateAgent.LabManager/Services/AgentCheckInHandler.cs`: 검증을 통과한
+  체크인에서 무결성을 관찰합니다. 관찰 실패는 체크인을 막지 않고 확인 불가로 남습니다.
+- `src/UpdateAgent.LabManager/Live/LiveSnapshot.cs`: `LiveAgentView`에 무결성/이탈
+  플래그 추가. 기존 생성자 호출은 기본값(확인 불가)으로 동작합니다.
+- `src/UpdateAgent.LabManager/Storage/LabStore.cs`: `AgentRecord`에 화면용 판정 추가.
+  기준선은 기존 `settings` 테이블에 저장하므로 DB 스키마 마이그레이션이 없습니다.
+- `src/UpdateAgent.LabManager/Program.cs`: 관리자 토큰이 필요한 기준선 재설정 API,
+  스냅샷/에이전트 목록의 판정 연결. 지문 원문과 토큰은 응답·로그에 남기지 않습니다.
+- `src/UpdateAgent.LabManager/wwwroot/monitor.js`, `app.js`: `무결성 확인 불가`,
+  `설정 변경`, `버전 불일치`, `이탈`과 이탈 사유 표시. 데이터가 없으면 확인 불가로
+  표시하며 정상이라고 단정하지 않습니다. 모니터에는 기준 재설정 버튼을 추가했습니다.
+- `docs/DEPLOYMENT.md`: 탐지 가능/불가 범위, 기준선 재설정, 개인정보 규칙 추가.
+- `tests/UpdateAgent.Tests/Improvement05TamperDetectionTests.cs` (신규): 허용 목록과
+  비밀값 제외, 읽기 실패, 기준선/변경/재설정, 버전 확인 불가, 이탈 표시, 비밀값
+  비누출, 문서 정합성 회귀 테스트.
+
+### 자아성찰 10회
+
+요구사항 정합성 → DTO/DB 마이그레이션 호환성 → 지문 허용 목록/비밀값 제외 →
+기준선/변경 감지·재설정 → 버전 불일치·이탈 정직성 → UI 표시 정확성 →
+실패 모드/설정 읽기 불가 → 한국어 문서/UI 정합성 → 회귀 범위 → 최종 검증 순서로
+10회를 수행했습니다. 아래 발견/조치는 실제로 재현·수정한 내용만 적었습니다.
+
+| 회차 | 점검 차원 | 발견 | 조치 | 검증 명령/결과 |
+|---:|---|---|---|---|
+| 1 | 요구사항 정합성 | 결함 없음(지문·기준선·버전·이탈·UI·문서·테스트 범위 충족) | 탐지 전용 범위를 유지하고 차단 API는 추가하지 않음 | 신규 11개 테스트가 7개 축을 검증 |
+| 2 | DTO/DB 마이그레이션 호환성 | 결함 없음 | 새 필드는 기본값이 있고 기존 `settings` 테이블을 재사용. `LiveAgentView`/`ProcessAsync`는 기존 호출용 오버로드 유지 | 전체 테스트 기존 항목 회귀 없음 |
+| 3 | 지문 허용 목록/비밀값 제외 | 머신 설정 파일만 해시하면 `appsettings.json`/환경 변수의 유효 설정 변경을 놓침 | 같은 허용 목록의 유효 `AgentOptions` 값을 함께 해시. 의심 값은 `확인 불가`로 반환 | 허용 목록/유효 설정/토큰 유사 값 테스트 통과 |
+| 4 | 기준선/변경 감지·재설정 | 변경 상태 체크인 반복 시 감사 중복, 첫 체크인에 지문이 없으면 이후 지문이 기준선이 되지 않음 | 감사는 `false → true` 전환 시 1회만 기록. 처음 읽은 유효 지문을 기준선으로 저장 | `Baseline_IsFirstSeenThenSticksUntilTeacherReset`, `Baseline_IsSetWhenFirstReadableFingerprintArrives` 통과 |
+| 5 | 버전 불일치·이탈 정직성 | 결함 없음 | 기대 버전/보고 버전이 없으면 `null`로 두어 화면에 `버전 확인 불가`. 오래됨은 `체크인 없음` 사유의 이탈 | 버전·이탈 테스트 통과 |
+| 6 | UI 표시 정확성 | 결함 없음 | 플래그가 없는 이전 스냅샷도 확인 불가 칩 표시. `정상` 문구 사용하지 않음 | JS 문자열 정합성 테스트 통과 |
+| 7 | 실패 모드/설정 읽기 불가 | 관찰이 실패해 저장된 지문과 화면 값이 달라도 기존 상태만 보면 정상처럼 보일 수 있음 | 마지막 관찰값 불일치도 확인 불가로 처리하고 기준선과 다르면 설정 변경으로 표시 | `UnobservedFingerprintDifference_NeverReportsHealthy`, 읽기 불가 테스트 통과 |
+| 8 | 한국어 문서/UI 정합성 | 결함 없음 | WORKLOG 개선 5 섹션과 배포 런북 8-F를 한국어로 추가하고 `없음`/`확인 불가` 표현 통일 | 문서 정합성 테스트 통과 |
+| 9 | 회귀 범위 | 결함 없음 | 신규 테스트와 기존 개선 1~4 테스트를 함께 실행 | 빌드 경고 0/오류 0, scoped/전체 테스트 통과 |
+| 10 | 최종 검증 | 결함 없음 | 최종 명령을 다시 실행 | `dotnet build`: 경고 0/오류 0. scoped 11/11, 전체 475/475. PowerShell 파서/JS 문법/YAML/BOM/`git diff --check` 통과 |
+
+### 검증 메모
+
+- `dotnet build UpdateAgent.sln -c Release --no-restore`: 경고 0, 오류 0.
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~Improvement05TamperDetectionTests"`: 통과 11, 실패 0.
+- `dotnet test UpdateAgent.sln -c Release --no-build`: 통과 475, 실패 0.
+- `node --check src/UpdateAgent.LabManager/wwwroot/monitor.js`, `node --check .../app.js`: 통과.
+- PowerShell AST 파서로 `scripts/*.ps1` 전수 검사: 구문 오류 0.
+- `python -c "import yaml; ..."`로 `.github/workflows/release.yml` 파싱: 통과.
+- 변경/신규 텍스트 37개 파일 UTF-8 BOM 검사: BOM 없음.
+- `git diff --check`: 공백 오류 없음(기존 CRLF 설정 경고만 있음).
+- 비밀값 누출 테스트: 토큰/암호 문자열이 지문·기준선·감사·응답·UI에 없음을 확인.
+
+---
+
+## 2026-11-28 개선 4 — 작업 타임라인·관측 강화
+
+### 범위
+
+`docs/IMPROVEMENT-ROADMAP.md`의 개선 4(작업 타임라인·관측 강화)만 구현했습니다.
+개선 1~3의 기존 동작과 게시된 `v0.1.44` 산출물/버전은 변경하지 않았습니다.
+커밋·태그·푸시·Release·게시와 버전 상승은 하지 않았습니다.
+
+### 변경 사항
+
+- `src/UpdateAgent.Shared/Models/JobModels.cs`: 시작/취소 명령 payload에 선택적
+  `CorrelationId` 추가. 에이전트는 새 필드를 무시할 수 있습니다.
+- `src/UpdateAgent.LabManager/Models/ApiContracts.cs`: 시작 요청/응답에 상관관계
+  ID 추가. 요청 값이 없거나 형식이 잘못되면 서버가 식별자를 발급합니다.
+- `src/UpdateAgent.LabManager/Storage/LabStore.cs`: `jobs`/`audit`에
+  `correlation_id` 컬럼을 추가하는 마이그레이션, 새 `job_transitions` 테이블과
+  중복 키 인덱스, 타임라인/리포트 조회 메서드. 예약 배치 발급 전이는 같은
+  트랜잭션에 기록됩니다.
+- `src/UpdateAgent.LabManager/Services/JobStartService.cs`: 작업 생성, 첫 명령
+  발급, 감사 로그에 상관관계 ID를 전파하고 전이를 기록합니다.
+- `src/UpdateAgent.LabManager/Services/AgentCheckInHandler.cs`: 에이전트가 보고한
+  상태 변화와 시작 명령 거부 실패를 타임라인에 기록합니다.
+- `src/UpdateAgent.LabManager/Services/JobReportBuilder.cs` (신규): 기간/상한 기반
+  리포트와 CSV 변환. 잘린 목록은 `truncated`/`omittedCount`로 명시하고 없는 값은
+  `없음`/`확인 불가`로 표시합니다.
+- `src/UpdateAgent.LabManager/Program.cs`: 상세 API에 `Timeline`/`CorrelationId`,
+  교사용 `GET /api/admin/reports/jobs`, 정지 명령의 타임라인·감사·payload 메타데이터.
+- `src/UpdateAgent.LabManager/Observability/` (신규): BCL 기반 회전 JSONL 기록기와
+  Serilog 싱크. 현재 256 KiB, 회전본 5개, 쓰기 실패 시 한 번만 경고합니다.
+- `src/UpdateAgent.LabManager/wwwroot/index.html`, `app.js`: 작업 상세에 상관관계
+  ID와 타임라인 표시. 기록이 없으면 `없음`을 표시합니다.
+- `docs/DEPLOYMENT.md`: 관측/운영 런북 추가.
+- `tests/UpdateAgent.Tests/Improvement04ObservabilityTests.cs` (신규): 상관관계 ID,
+  전이 멱등성, 리포트 절단/누락, 로그 회전/비밀값 마스킹, 문서 정합성 회귀 테스트.
+
+### 자아성찰 10회
+
+요구사항 정합성 → DTO/DB 마이그레이션 호환성 → 상관관계 ID 전파 →
+전이 완전성/멱등성 → 리포트 절단/누락 정직성 → 로그/리포트/UI 비밀값 →
+동시성/파일 로그 안전성 → 한국어 문서/UI 정합성 → 회귀 범위 → 최종 검증 순서로
+10회를 수행했습니다. 아래 발견/조치는 실제로 재현·수정한 내용만 적었습니다.
+
+| 회차 | 점검 차원 | 발견 | 조치 | 검증 명령/결과 |
+|---:|---|---|---|---|
+| 1 | 요구사항 정합성 | 범위 누락 없음(요청 사항 6개 축 모두 구현) | 상관관계 ID·타임라인·리포트·JSONL·문서·테스트를 개선 4 범위로 한정 | scoped 13개 테스트가 6개 축을 모두 검증 |
+| 2 | DTO/DB 마이그레이션 호환성 | 이전 DB에 `correlation_id`가 없음. 테스트도 이미 초기화된 DB를 재사용해 실패 | `PRAGMA table_info` 후 `ALTER TABLE`로 추가하고 기존 행은 null 유지. 테스트는 별도 legacy DB로 분리 | `LegacyDatabase_GainsCorrelationColumn_AndReportsAbsent` 통과 |
+| 3 | 상관관계 ID 전파 | 누락 없음 | 요청 값 검증 후 서버 발급, DB·감사·명령 payload·상세 API에 동일 값 전달 | `StartRequest_Generates...`, `StartRequest_WithValid...` 통과 |
+| 4 | 전이 완전성/멱등성 | 같은 체크인 재전송·같은 배치 재발급으로 전이가 중복될 수 있음 | `(job_id, dedupe_key)` 유니크 인덱스와 `INSERT OR IGNORE` 적용, 배치 전이는 기존 트랜잭션에 기록 | 중복 삽입·rollout·agent-state 테스트 통과 |
+| 5 | 리포트 절단/누락 정직성 | 잘린 목록만 보면 전체로 오인됨. 테스트 기대값도 날짜 경계/상한 밖 행을 잘못 가정 | DB 전체 건수와 반환 건수로 `truncated`/`omittedCount` 산출. 테스트 데이터와 기대값을 실제 상한 결과로 정정 | 5건 중 2건 반환·생략 3건, CSV `true`/`4` 확인 |
+| 6 | 로그/리포트/UI 비밀값 | 토큰 유사 `adminToken123`이 상관관계 ID로, 에이전트 보고 메시지의 `token=...`가 타임라인·리포트·화면에 저장될 수 있었음. JSONL은 한글 마커를 `\u...`로 이스케이프했음 | 시작 요청와 저장/조회 경로에서 토큰 유사 값을 `확인 불가`로 마스킹하거나 재발급. JSONL은 허용 필드만 기록하고 relaxed 인코더로 마커를 사람이 읽게 함 | `StartRequest_WithValid...`, agent-state, report, 비밀값 마스킹 테스트에서 토큰·본문 부재 확인 |
+| 7 | 동시성/파일 로그 안전성 | **회전할 때 현재 파일을 삭제해 이전 이벤트가 사라짐** | `lock`으로 회전+기록을 직렬화하고 현재 파일을 `.1`로 이동한 뒤 `.5`까지 보존. 실패는 한 번만 경고 | 20회 기록 후 `.1`~`.5` 존재, `.6` 없음, 상한 이내, 실패 경고 1회 확인 |
+| 8 | 한국어 문서/UI 정합성 | RUNBOOK 문장에 비한국어 단어가 잘못 들어감 | `필요한`으로 수정하고 `없음`/`확인 불가` 표현을 문서·UI·리포트에 통일 | `ProgramAndDocs_DescribeTimelineReportAndRotationContract` 통과 |
+| 9 | 회귀 범위 | 초기 컴파일 오류(`Property`)와 xUnit 분석기 경고 | Serilog `LogEventProperty`로 수정하고 `Assert.Single` 조건자 오버로드 적용 | 빌드 경고 0/오류 0, scoped 13/13, 전체 464/464 |
+| 10 | 최종 검증 | 추가 결함 없음 | - | 빌드 0/0, scoped 13/13, 전체 464/464, PowerShell 15개·JS 2개·YAML·BOM·`git diff --check` 통과 |
+
+### 검증 메모
+
+- `dotnet build UpdateAgent.sln -c Release --no-restore`: 오류 0, 경고 0.
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~Improvement04ObservabilityTests"`: **13/13 통과**, 실패 0, 건너뜀 0.
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --no-build`: **464/464 통과**(기존 451 + 신규 13), 실패 0, 건너뜀 0.
+- PowerShell 파서 15개 파일 오류 0, `wwwroot` JS 2개 `node --check` 오류 0, `.github/workflows/release.yml` YAML 파싱 성공.
+- BOM 스캔: 변경 파일 28개 무-BOM, 두 `.iss`는 UTF-8 BOM 유지, 샘플 INI는 무-BOM 유지.
+- `git diff --check`: 오류 0(LF→CRLF 변환 안내만 존재), 후행 공백/충돌 표시 없음.
+- 토큰 원문, 요청 본문, 원시 헤더는 로그·리포트·UI·저장소에 남기지 않았습니다.
+
+---
+
+## 2026-11-27 개선 3 — 단계적 롤아웃 / 유지보수 창
+
+### 범위
+
+`docs/IMPROVEMENT-ROADMAP.md`의 개선 3만 구현했습니다. 개선 1/2의 코드·문서
+섹션, 게시된 `v0.1.44` 산출물과 버전은 변경하지 않았습니다. 기본 동작은 여전히
+선택한 모든 PC에 작업과 명령을 즉시 생성하는 것이고, 유지보수 창과 배치는 옵션을
+명시할 때만 적용됩니다. 커밋·태그·Release·게시는 하지 않았습니다.
+
+### 변경 사항
+
+- `src/UpdateAgent.Shared/Models/UpdatePolicy.cs`: `RolloutBatchSize`,
+  `RolloutIntervalSeconds`, `MaintenanceWindowStart`, `MaintenanceWindowEnd` 추가.
+  기본값 `0`/`null`이라 기존 정책과 직렬화 형태가 그대로 동작합니다.
+- `src/UpdateAgent.LabManager/Services/RolloutConfiguration.cs` (신규): 한국어
+  fail-closed 검증, 자정 넘는 창 판정, 배치 계산.
+- `src/UpdateAgent.LabManager/Services/JobStartService.cs` (신규):
+  `/api/admin/jobs/start` 본문 이전. 창 밖/잘못된 설정은 부작용 전에 400으로
+  거부합니다. 배치 옵션이 없으면 기존처럼 바로 명령을 발급하고, 옵션이 있으면
+  모든 대상 작업을 `Pending`으로 만든 뒤 첫 배치만 즉시 명령화합니다.
+- `src/UpdateAgent.LabManager/Storage/LabStore.cs`: `job_rollout` 테이블과 원자적
+  dispatch, 취소 표시. 명령 삽입과 `dispatched_at` 갱신을 같은 트랜잭션에 담아
+  재시작·중복 틱에도 한 번만 발급합니다.
+- `src/UpdateAgent.LabManager/Services/JobRolloutDispatcherService.cs` (신규):
+  저장된 예약을 약 1초 간격으로 확인하는 백그라운드 서비스. 종료 토큰을 존중합니다.
+- `src/UpdateAgent.LabManager/Program.cs`: 서비스 등록, 시작/정책 검증 엔드포인트
+  연결, 취소·강제 중단 시 남은 예약 중단 전파.
+- `src/UpdateAgent.LabManager/Models/ApiContracts.cs`: 배치 수 응답 필드 추가.
+- `docs/DEPLOYMENT.md`: 유지보수 창·배치·재시작·남은 배치 중단 한국어 안내 추가.
+- `tests/UpdateAgent.Tests/Improvement03RolloutTests.cs` (신규): 기본 동작,
+  창 경계/자정/오류, 배치 순서, 영속 예약과 멱등 dispatch, 취소, cap·Maestro,
+  문서/코드 정합성 회귀 테스트.
+
+### 자아성찰 10회
+
+| 회차 | 점검 차원 | 발견 | 조치 | 검증 명령/결과 |
+|---:|---|---|---|---|
+| 1 | 요구사항 정합성 | 기본 경로에도 예약 행이 생겨 옵트인 원칙과 어긋남 | 배치 옵션이 없으면 기존 `AddCommandAsync`로 바로 발급하고 예약 상태를 만들지 않음 | `DefaultBehavior_StartsAllTargetsImmediatelyWithoutWindowOrSchedule`가 예약 행 없음 확인, scoped 26/26 통과 |
+| 2 | 기존 정책/직렬화 호환성 | 결함 없음 | - | `UpdatePolicy` 기본값 `0`/`null`, 이전 JSON 재질렬화 테스트 통과 |
+| 3 | 유지보수 창(자정 포함) | 결함 없음 | - | 내부·자정·경계·형식 오류 테스트 통과(16:59 허용, 17:00 거부, 22:00~06:00 자정 포함) |
+| 4 | 배치 멱등성/재시작 안전성 | SQLite null 바인딩 오류, 실패한 앞 배치의 즉시 발급 오보 | `DBNull.Value` 사용, 실제 발급/예약 배치만 응답에 반영 | 회귀 2건 추가 후 scoped 테스트 통과, 중복 틱·재시작도 메모 |
+| 5 | 취소/중단 동작 | 결함 없음 | - | 취소 전 예약 건너뛰기, 이미 발급된 예약 취소 불가 테스트 통과 |
+| 6 | 비밀값/감사 로그 | 결함 없음 | - | 신규 코드 토큰 명칭 부재, payload·감사·warnings에 토큰 없음 확인 |
+| 7 | 동시성/취소 토큰 | 결함 없음 | - | 취소된 디스패처 무발급, 트랜잭션 기반 중복 틱 방지 확인 |
+| 8 | 한국어 문서/메시지 | WORKLOG 개선 3 섹션 누락 | 개선 2 위에 한국어 섹션과 10회 표 추가 | `Docs_DescribeWindowBatchingRestartAndAbort` 통과, 개선 1/2 섹션 비변경 확인 |
+| 9 | 회귀 범위 | 결함 없음 | - | 개선 3 회귀 26개(기본·창·배치·재시작·취소·cap·Maestro·문서) 포함 |
+| 10 | 최종 검증 | 결함 없음 | - | 빌드 경고 0/오류 0, scoped 26/26, 전체 451/451, 파서·JS·YAML·BOM·`git diff --check` 0 |
+
+### 검증 메모
+
+- `dotnet build UpdateAgent.sln -c Release --no-restore`: 오류 0.
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --filter "FullyQualifiedName~Improvement03RolloutTests"`: 26/26 통과.
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release`: 전체 통과.
+- PowerShell 파서, `app.js`/`monitor.js` 구문 검사, YAML 파싱, BOM 스캔,
+  `git diff --check` 모두 오류 없음(개행 정규화 안내 제외).
+- 토큰 원문은 로그·리포트·저장소에 남기지 않았고, placeholder 토큰은 계속
+  fail-closed입니다. 기능 업데이트 비활성과 Server Core 오버레이 비활성도 유지했습니다.
+
+---
+
+## 2026-11-27 개선 2 — 코드 서명 도입 (빌드 스크립트 지원)
+
+### 범위
+
+`docs/IMPROVEMENT-ROADMAP.md`의 개선 2만 구현했습니다. 제품 버전, 게시 상태,
+기존 인스톨러/서비스/에이전트 코드는 변경하지 않았습니다. 아래 작업은 로컬
+검증만 수행했으며 커밋·태그·Release·게시를 하지 않았습니다.
+
+### 변경 사항
+
+- `scripts/sign-artifacts.ps1` (신규): 지문 해석(파라미터 →
+  `UPDATEAGENT_SIGN_THUMBPRINT`), 40자리 SHA-1 형식 검사, `signtool.exe`
+  확인, 서명, `signtool verify /pa /all` 검증을 두 빌드 스크립트가 공유합니다.
+- `scripts/build-inno.ps1`: `-Sign`, `-CertificateThumbprint`, `-TimestampUrl`
+  추가. 스테이징 어셈블리는 ISCC **전에**, 두 `*Setup*.exe`는 ISCC **후에**
+  서명·검증하고 서명된 바이트의 SHA-256을 기록합니다.
+- `scripts/build-msi.ps1`: 기존 공개 파라미터를 그대로 유지하면서 로컬
+  `Invoke-SignTool`을 공유 helper로 교체하고 최종 MSI 검증을 추가했습니다.
+- `docs/MSI.md`, `docs/INSTALLER.md`, `docs/RELEASE.md`: 공통 서명 흐름,
+  준비물, 파일럿 미서명 대안, 검증 명령, non-secret 공급 원칙, 릴리스
+  체크리스트를 반영했습니다.
+- `tests/UpdateAgent.Tests/Improvement02CodeSigningTests.cs` (신규): 옵트인,
+  fail-closed, 서명 순서, 검증 호출, 비밀값 부재, 문서 정합성에 대한 정적
+  회귀 테스트 14건을 추가했습니다.
+
+### 코드로 입증되어 수정한 결함 4건
+
+1. `build-msi.ps1`은 `-Sign`으로 서명하면서 `signtool verify`를 호출하지 않아
+   `docs/MSI.md` 9장의 검증 단계와 불일치했습니다. 공유 helper의
+   `Assert-AuthenticodeSignature`로 최종 MSI와 스테이징 어셈블리를 모두 검증하도록
+   수정했습니다.
+2. 기존 MSI 서명 경로는 지문만 먼저 검사하고 `signtool.exe` 유무는 스테이징
+   이후에 확인했습니다. 도구가 없으면 스테이징을 남긴 채 실패하므로,
+   `New-SigningContext`가 스테이징 전에 지문 형식과 도구를 함께 검증하도록
+   수정했습니다.
+3. 신규 테스트에서 xUnit `Assert.DoesNotMatch`의 인자 순서를 반대로 사용해
+   비밀값 검사가 예외로 중단되고 한글 검사가 무효화되었습니다. pattern-first
+   시그니처로 수정해 실제로 검사하도록 했습니다.
+4. `signtool` 스텁을 이용한 실제 실행에서 `$LASTEXITCODE`가 설정되지 않은
+   명령을 호출하면 이전 값(또는 빈 값) 때문에 서명이 실패한 것으로 보고됐습니다.
+   각 네이티브 호출 직전에 `$global:LASTEXITCODE = 0`으로 초기화하도록 수정했습니다.
+
+### 10회 자아성찰
+
+| 회차 | 차원 | 발견 | 수정 | 검증 명령/결과 |
+|---:|---|---|---|---|
+| 1 | 요구사항 정합성 | 결함 없음 | `-Sign` 파라미터 3개와 문서 요구사항을 대조 | `InnoSigning_IsOptInAndLoadsTheSharedHelperOnlyWhenRequested` 통과 |
+| 2 | MSI 서명 호환성 | 서명 후 검증 호출 누락(위 1번) | 공유 helper로 검증 추가, 공개 파라미터 유지 | `MsiPublicParameters_AreUnchangedAndUnsignedBuildInfoIsPreserved` 통과 |
+| 3 | 비밀값/지문 | 결함 없음 | 지문은 파라미터/환경 변수로만 전달, 리터럴 없음 | `NoHardCodedThumbprintPasswordTokenOrSecretInScripts` 통과(리터럴 0건) |
+| 4 | fail-closed 검증 | signtool 확인이 스테이징 이후(위 2번) | 스테이징 전 지문·도구 검증 | `Helper_FailsClosedWithoutAValidThumbprintOrSigntool` 통과 |
+| 5 | 스테이징 순서 | 결함 없음 | 어셈블리 → ISCC → 최종 EXE → 해시 | `InnoPayload_IsSignedBeforeISCC_SetupsAfterISCC_AndHashesLast` 통과 |
+| 6 | PowerShell 5.1 | 종료 코드 미설정 시 거짓 실패(위 4번) | 네이티브 호출 전 `$LASTEXITCODE` 초기화 | PowerShell 5.1 `Parser::ParseFile` 오류 0 + 스텁 실행 sign 3/verify 3/timestamp 3 |
+| 7 | 검증 증적/로그 | 결함 없음 | 서명 파일마다 `verify /pa /all`, 지문 미로깅 | `Verification_IsInvokedForStagedFilesAndFinalInstallers` 통과 |
+| 8 | 한국어 문서/영어 메시지 | 결함 없음 | 문서는 한국어, helper는 영어 | `NewHelperIsEnglishAndFileEncodingsAreUnchanged` 통과 |
+| 9 | 회귀 범위 | 테스트 인자 순서 오류(위 3번) | pattern-first로 수정, 종료 코드 회귀 추가 | 스코프 테스트 14건 통과 |
+| 10 | 최종 검증 | 결함 없음 | - | `dotnet build` 경고 0/오류 0, 전체 테스트 통과, 파서·JS·YAML·BOM·`git diff --check` 0 |
+
+### 검증
+
+- `dotnet build UpdateAgent.sln -c Release --no-restore`: 경고 0, 오류 0
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --filter FullyQualifiedName~Improvement02CodeSigningTests`:
+  **14개 통과, 0 실패, 0 건너뜀**
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release --no-build`:
+  전체 통과(신규 14건 포함), 실패 0, 건너뜀 0
+- PowerShell 5.1 파서 검사: `build-inno.ps1`, `build-msi.ps1`,
+  `sign-artifacts.ps1` 오류 0
+- PowerShell 5.1 helper 스텁 실행: 미서명 컨텍스트 `null`, 지문 누락/형식 오류
+  fail-closed, sign 3회·verify 3회·타임스탬프 3회 호출, 스테이징 필터가
+  `notes.txt` 제외 확인
+- JS 구문 검사와 `.github/workflows/release.yml` YAML 파싱 성공
+- 두 `.iss` 파일 UTF-8 BOM 유지, 샘플 `agent-install.ini` 무-BOM 유지,
+  신규 스크립트/테스트 무-BOM
+- `git diff --check` 오류 0, 변경 파일 후행 공백 0
+- 실제 인증서가 없어 `-Sign` 실제 서명/검증 실행은 하지 않았습니다. 정적
+  회귀와 파서 검증으로 대체했으며, 서명 빌드는 인증서 준비 후 실행해야 합니다.
+
+### 게시 상태
+
+커밋·태그·Release·버전 변경 없음. `docs/IMPROVEMENT-ROADMAP.md`의 상태도
+부모 에이전트가 갱신합니다.
+
+---
+
+## 2026-11-27 개선 1 — 실 PC 파일럿 + 50대 부하 리허설 자동화
+
+### 범위
+
+`docs/IMPROVEMENT-ROADMAP.md`의 개선 1만 구현했습니다. 제품 버전, 게시 상태,
+기존 인스톨러/서비스/에이전트 코드는 변경하지 않았습니다. 아래 작업은 로컬
+검증만 수행했으며 커밋·태그·Release·게시를 하지 않았습니다.
+
+### 변경 사항
+
+- `scripts/load-rehearsal.ps1` (신규): 실제 LabManager에 대해 기본 50개 가상
+  에이전트의 `POST /api/agents/checkin`을 실제 `X-Agent-Token` 헤더와 camelCase
+  DTO로 전송합니다. 토큰 **파일 경로만** 받아 첫 줄만 읽고, 플레이스홀더·빈 값·
+  짧은 값·동일한 관리자/에이전트 토큰은 즉시 중단합니다. 동시성 상한, 취소,
+  요청/하드 타임아웃, 정리, 상태·지연·복구 지표, 토큰을 제외한 UTF-8(JSON)
+  보고서와 SHA-256을 제공합니다. 관리자 토큰이 있으면 소수 합성 작업
+  시작/취소와 SSE 재연결도 확인합니다.
+- `docs/PILOT.md`: 실 PC 파일럿 전 교사 PC 체크리스트(설치, 토큰 교체, ACL,
+  방화벽 그룹, 양쪽 `/api/health`, 설치 로그 보관)를 추가했습니다. 합성
+  리허설이 실 PC 증적을 대체하지 않는다는 점을 명시했습니다.
+- `docs/DEPLOYMENT.md`: 50대 부하 리허설 런북(명령, 보고서 필드, 종료 코드별
+  합격 기준, `SkipPreflight`/관리자 확인의 한계)을 추가했습니다.
+- `tests/UpdateAgent.Tests/Improvement01LoadRehearsalTests.cs` (신규): 스크립트
+  계약·보안·시간 제한·보고서·문서 정합성에 대한 정적 회귀 테스트를 추가했습니다.
+
+### 코드로 입증되어 수정한 결함 6건
+
+1. Windows PowerShell 5.1에는 `CancellationTokenSource(int, CancellationToken)`
+   생성자 오버로드가 없습니다. 실제 실행에서 `ArgumentException`이 발생해
+   요청별 제한이 동작하지 않았습니다. `New-RequestCts`에서 명시적으로 부모
+   토큰을 등록하고 `Dispose-RequestCts`에서 등록을 먼저 해제하도록 수정했습니다.
+2. Windows PowerShell 5.1에서 `@($genericList)`는 `Argument types do not match`
+   오류를 냅니다. 대기 중 요청 목록과 실패 기록을 `.ToArray()`로 복사하도록
+   수정해 취소 경로와 보고서 기록이 정상 동작하게 했습니다.
+3. `truncatedFailureCount`가 저장된 실패건까지 모두 증가시켜, 15건 저장 시
+   "생략 15건"으로 잘못 보고했습니다. 50건 상한을 넘어 실제로 생략된 건만
+   세도록 수정했습니다.
+4. URL 검증 실패 시 보고서의 `labManagerUrl`가 저장소 루트 경로로 기록됐습니다.
+   검증 전에는 빈 문자열을 유지하도록 수정했습니다.
+5. 실행마다 임의 ID를 만들어 서버의 200대 등록 상한에 5번째 리허설부터 429가
+   발생했습니다. `rehearsal-pc-000`~`049` 같은 안정 ID를 사용하도록 수정하고
+   병렬 실행 금지를 문서화했습니다.
+6. PowerShell 기본 Ctrl+C는 파이프라인을 중단해 `finally` 뒤의 보고서 기록을
+   건너뜁니다(재현 완료). `ConsoleCancelEventHandler`에서 `Cancel=true`로 취소
+   요청으로 바꾸고, 취소 시 미완료 요청 수와 하드 타임아웃 여부를 보고서에
+   기록했습니다. 취소가 정상 완료 루프에서 발생해도 `passed`로 보고되던 문제를
+   추가 재현해 `cancelled`/종료 코드 1로 fail-closed 하도록 수정했습니다.
+
+### 10회 자아성찰
+
+요구사항 → API/DTO → 동시성·취소·타임아웃·정리 → 비밀값 → fail-closed →
+Windows PowerShell 파서 → 보고서 무결성 → 한국어 문서/영어 스크립트 →
+회귀 범위 → 최종 빌드·테스트·파서·JS·YAML·BOM·`git diff --check` 순서로
+10회를 수행했습니다. 각 회차에서 발견된 위 두 결함만 수정하고 근거 없는
+변경은 반영하지 않았습니다.
+
+### 검증
+
+- `dotnet build UpdateAgent.sln -c Release --no-restore`: 경고 0, 오류 0
+- `dotnet test tests/UpdateAgent.Tests/UpdateAgent.Tests.csproj -c Release`:
+  **411개 통과, 0 실패, 0 건너뜀**(신규 16건 포함)
+- PowerShell 19개 파일 파서 오류 0, `app.js`/`monitor.js`/`main.js`/`vite.config.js`
+  구문 검사 0, `.github/workflows/release.yml` YAML 파싱 성공
+- 두 `.iss` 파일 UTF-8 BOM 유지, 샘플 `agent-install.ini` 무-BOM 유지,
+  신규 스크립트/테스트 무-BOM
+- `git diff --check` 오류 0, 변경 파일 후행 공백 0
+- 모의 LabManager 실제 실행: 정상 0, HTTP 5xx 2, 401 4, 전송 실패 3,
+  토큰/URL 오류 1, Ctrl+C 취소 1(보고서 생성 확인). 생성된 JSON에 토큰 원문 없음.
+
+### 게시 상태
+
+커밋·태그·Release·버전 변경 없음. `docs/IMPROVEMENT-ROADMAP.md`의 상태도
+`예정`으로 유지했습니다.
+
+---
+
 ## 2026-11-27 자아성찰·심층 감사 50회, 3차 (고유 결함 13건 수정, v0.1.44 예정)
 
 ### 방법
@@ -2014,6 +2687,10 @@ v0.1.24~v0.1.26 배포·검증 후 설치 관리자, 배포 스크립트/CI, 에
 - `npm install`, `npm run build` 성공.
 - `cargo check` 성공(Tauri 2.12, Windows WebView2).
 - `UpdateAgent.sln`, 인스톨러, 릴리스 산출물에는 영향 없음.
+
+> 이 항목은 2026-11-17 당시 이력입니다. 해당 스캐폴드는 개선 9(2026-11-28)에서
+> 제거되었으므로 위 명령은 현재 빌드·실행 절차가 아닙니다. 실제 절차는 `README.md`와
+> `docs/DEPLOYMENT.md`의 시스템 Edge/Chrome `--app=` 안내를 따르세요.
 
 ---
 

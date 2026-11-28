@@ -15,6 +15,7 @@ public sealed class TokenAuditLog
     public const int MaxFileBytes = 256 * 1024;
 
     public const string Changed = "changed";
+    public const string Rotated = "token-rotated";
     public const string RolledBack = "rolled-back";
     public const string Loaded = "loaded";
     public const string Rejected = "rejected";

@@ -21,6 +21,27 @@ Updates ignore these embedded files and keep the existing configuration.
 
 Run from a normal PowerShell prompt. Inno Setup 6 must be installed.
 
+.PARAMETER Sign
+Optional Authenticode signing. With -Sign, staged UpdateAgent assemblies are
+signed before ISCC runs, the final setup EXEs are signed after ISCC, and every
+signed file is verified with "signtool verify /pa /all". Without -Sign the
+build is unsigned and does not require signtool.exe.
+
+.PARAMETER CertificateThumbprint
+SHA-1 thumbprint of the code signing certificate. When omitted, the helper
+reads UPDATEAGENT_SIGN_THUMBPRINT from the environment. No thumbprint is
+stored in the repository.
+
+.PARAMETER TimestampUrl
+Optional RFC 3161 timestamp URL passed to signtool.
+
+.PARAMETER FrameworkDependent
+Opt in to packaging the smaller framework-dependent publish output. The default
+stays self-contained. When this script has to publish, the switch is forwarded
+to publish.ps1. Existing publish folders and staged files are validated against
+the requested mode; ambiguity fails closed. Framework-dependent packages require
+the matching Microsoft .NET Desktop Runtime (win-x64) on every target PC.
+
 .EXAMPLE
 .\scripts\publish.ps1
 .\scripts\build-inno.ps1
@@ -30,6 +51,10 @@ Run from a normal PowerShell prompt. Inno Setup 6 must be installed.
 
 .EXAMPLE
 .\scripts\build-inno.ps1 -NoPublish -SkipValidation
+
+.EXAMPLE
+$env:UPDATEAGENT_SIGN_THUMBPRINT = '<thumbprint-from-secret-store>'
+.\scripts\build-inno.ps1 -Sign -TimestampUrl "http://timestamp.digicert.com"
 
 .EXAMPLE
 .\scripts\build-inno.ps1 -IsccPath "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
@@ -44,11 +69,18 @@ param(
     [switch]$NoPublish,
     [switch]$AgentOnly,
     [switch]$KeepStaging,
-    [switch]$SkipValidation
+    [switch]$SkipValidation,
+    [switch]$FrameworkDependent,
+    [switch]$Sign,
+    [string]$CertificateThumbprint,
+    [string]$TimestampUrl
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+# Shared runtime-layout checks; no tokens, URLs or config secrets are inspected.
+. (Join-Path $PSScriptRoot "package-layout.ps1")
 
 if ([string]::IsNullOrWhiteSpace($PublishRoot)) { $PublishRoot = Join-Path $repoRoot "publish" }
 if ([string]::IsNullOrWhiteSpace($OutputRoot))  { $OutputRoot  = Join-Path $repoRoot "artifacts\inno" }
@@ -57,6 +89,12 @@ if ([string]::IsNullOrWhiteSpace($StagingRoot)) { $StagingRoot = Join-Path $repo
 $PublishRoot = [IO.Path]::GetFullPath($PublishRoot)
 $OutputRoot  = [IO.Path]::GetFullPath($OutputRoot)
 $StagingRoot = [IO.Path]::GetFullPath($StagingRoot)
+
+$signingContext = $null
+if ($Sign) {
+    . (Join-Path $PSScriptRoot "sign-artifacts.ps1")
+    $signingContext = New-SigningContext -Sign -CertificateThumbprint $CertificateThumbprint -TimestampUrl $TimestampUrl
+}
 
 # Any terminating failure removes the staging tree so embedded token files never
 # remain on disk. -KeepStaging explicitly opts out for debugging.
@@ -110,7 +148,10 @@ function Get-FirstLine {
     if ($null -eq $Value) { return '' }
     $lines = @($Value -split '[\r\n]+')
     if ($lines.Count -eq 0) { return '' }
-    return $lines[0].Trim()
+    # TokenGuard.Normalize in the server trims whitespace and a leading BOM in
+    # that order. PowerShell 7 (the release runner) does not treat U+FEFF as
+    # whitespace, so strip it explicitly before checking placeholders/length.
+    return ([string]$lines[0]).Trim().TrimStart([char]0xFEFF).Trim()
 }
 
 function Assert-BundledTokenValue {
@@ -124,6 +165,11 @@ function Assert-BundledTokenValue {
     if ($lower.StartsWith('change-me-') -or
         ($lower.StartsWith('sample-') -and $lower.EndsWith('-replace-before-pilot'))) {
         throw "$Name is still a placeholder. Set a real token before building a release installer."
+    }
+    # 8 mirrors TokenGuard.MinimumLength; the server rejects shorter tokens.
+    $minimumTokenLength = 8
+    if ($token.Length -lt $minimumTokenLength) {
+        throw "$Name is too short (minimum $minimumTokenLength characters). Set a real token before building a release installer."
     }
     return $token
 }
@@ -323,11 +369,10 @@ if (-not $NoPublish) {
         # $LASTEXITCODE is only set by native commands; clear the value left by
         # the earlier ISCC probe before invoking a PowerShell script.
         $global:LASTEXITCODE = 0
-        if ($AgentOnly) {
-            & (Join-Path $PSScriptRoot "publish.ps1") -AgentOnly
-        } else {
-            & (Join-Path $PSScriptRoot "publish.ps1")
-        }
+        $publishArgs = @()
+        if ($AgentOnly) { $publishArgs += '-AgentOnly' }
+        if ($FrameworkDependent) { $publishArgs += '-FrameworkDependent' }
+        & (Join-Path $PSScriptRoot "publish.ps1") @publishArgs
         if (-not $? -or $LASTEXITCODE -ne 0) {
             throw "publish.ps1 failed (exit code $LASTEXITCODE)."
         }
@@ -346,6 +391,12 @@ if (-not $AgentOnly) {
     Assert-PublishFolder $labManagerSource "UpdateAgent.LabManager.Desktop.exe"
 }
 
+$runtimeMode = if ($FrameworkDependent) { "framework-dependent" } else { "self-contained" }
+foreach ($source in $requiredSources) {
+    Assert-PackageLayout -Path $source `
+        -ExpectFrameworkDependent:$FrameworkDependent -Label $source | Out-Null
+}
+
 $buildTarget = if ($AgentOnly) { "agent" } else { "agent+labmanager" }
 
 Write-Host "Product version : $ProductVersion"
@@ -353,6 +404,10 @@ Write-Host "Build target    : $buildTarget"
 Write-Host "Publish root    : $PublishRoot"
 Write-Host "Staging root    : $StagingRoot"
 Write-Host "Output root     : $OutputRoot"
+Write-Host "Runtime mode    : $runtimeMode"
+if ($FrameworkDependent) {
+    Write-Host "Prerequisite    : matching Microsoft .NET Desktop Runtime (win-x64) on every target PC" -ForegroundColor Yellow
+}
 Write-Host "Inno compiler   : $iscc"
 Write-Host ""
 
@@ -397,6 +452,13 @@ if ($removed.Count -gt 0) {
     foreach ($item in $removed) { Write-Verbose "  removed: $item" }
 }
 
+if ($FrameworkDependent) {
+    Assert-FrameworkDependentRuntimeFiles -Root $agentStage -Label "Agent" | Out-Null
+    if (-not $AgentOnly) {
+        Assert-FrameworkDependentRuntimeFiles -Root $labManagerStage -Label "LabManager" | Out-Null
+    }
+}
+
 # 첫 설치 전용 토큰 파일은 정리 이후에 스테이징한다(.txt는 기본 제외 대상).
 # ISCC가 항상 같은 파일 목록을 컴파일하도록 값이 없어도 빈 파일을 넣는다.
 # 첫 설치 인스톨러는 빈/플레이스홀더 토큰을 만나면 fail-closed로 중단한다.
@@ -434,6 +496,11 @@ if (-not $AgentOnly) {
     if ($hasAdminToken) {
         $adminToken = Assert-BundledTokenValue -Value $adminTokenFromEnv -Name 'UPDATEAGENT_LABMANAGER_ADMIN_TOKEN'
         $labAgentToken = Assert-BundledTokenValue -Value $labAgentTokenFromEnv -Name 'UPDATEAGENT_LABMANAGER_AGENT_TOKEN'
+        # The server and the LabManager installer reject equal admin/agent tokens.
+        # Fail at build time instead of shipping an installer that cannot start.
+        if ($adminToken -ceq $labAgentToken) {
+            throw 'UPDATEAGENT_LABMANAGER_ADMIN_TOKEN and UPDATEAGENT_LABMANAGER_AGENT_TOKEN must be different values.'
+        }
     }
 }
 
@@ -479,6 +546,12 @@ if (-not $SkipValidation) {
     }
 }
 
+# Sign the payload while it is still in staging, before ISCC embeds it in the
+# setup EXEs. Verification runs per file so a failed signature stops the build.
+if ($Sign) {
+    Invoke-StagedAssemblySigning -Context $signingContext -StagingRoot $StagingRoot | Out-Null
+}
+
 $agentStageArg = [IO.Path]::GetFullPath($agentStage)
 $labManagerStageArg = [IO.Path]::GetFullPath($labManagerStage)
 $outputArg = [IO.Path]::GetFullPath($OutputRoot)
@@ -505,6 +578,13 @@ $setupFiles = @(
 )
 if (-not $AgentOnly) {
     $setupFiles += [pscustomobject]@{ Name = "UpdateAgent.LabManager-Setup-$ProductVersion-x64.exe"; Product = "UpdateAgent LabManager" }
+}
+
+# ISCC has produced the final EXEs. Sign and verify them before hashing so the
+# SHA-256 sidecars describe the exact bytes that will be published.
+if ($Sign) {
+    $setupPaths = @($setupFiles | ForEach-Object { Join-Path $OutputRoot $_.Name })
+    Invoke-InstallerSigning -Context $signingContext -FilePaths $setupPaths
 }
 
 $results = New-Object System.Collections.Generic.List[object]
@@ -546,17 +626,30 @@ finally {
 }
 $innoVersion = ("$innoVersionText" -replace '^Inno Setup\s+', '' -replace '\s+Command-Line Compiler.*$', '')
 
+$selfContained = -not $FrameworkDependent
+$runtimePrerequisite = if ($FrameworkDependent) {
+    "Microsoft .NET Desktop Runtime (win-x64) must be preinstalled on target PCs"
+} else {
+    "none (runtime bundled)"
+}
+
 $buildInfo = [pscustomobject]@{
-    productVersion  = $ProductVersion
-    target          = $buildTarget
-    platform        = "x64"
-    selfContained   = $true
-    unpackedInstall = $true
-    innoVersion     = $innoVersion
-    gitCommit       = "$gitCommit".Trim()
-    builtAtUtc      = (Get-Date).ToUniversalTime().ToString("o")
-    setupFiles      = $results
-    containsSecrets = [bool]$containsSecrets
+    productVersion      = $ProductVersion
+    target              = $buildTarget
+    platform            = "x64"
+    selfContained       = $selfContained
+    runtimeMode         = $runtimeMode
+    runtimePrerequisite = $runtimePrerequisite
+    unpackedInstall     = $true
+    innoVersion         = $innoVersion
+    gitCommit           = "$gitCommit".Trim()
+    builtAtUtc          = (Get-Date).ToUniversalTime().ToString("o")
+    setupFiles          = $results
+    containsSecrets     = [bool]$containsSecrets
+}
+if ($Sign) {
+    $buildInfo | Add-Member -NotePropertyName signed -NotePropertyValue $true
+    $buildInfo | Add-Member -NotePropertyName signatureVerification -NotePropertyValue 'signtool verify /pa /all'
 }
 
 $buildInfoPath = Join-Path $OutputRoot "build-info.json"
@@ -572,7 +665,11 @@ foreach ($result in $results) {
     Write-Host ("  {0} ({1:N1} MB)" -f (Join-Path $OutputRoot $result.setupFile), ($result.sizeBytes / 1MB))
     Write-Host ("    SHA-256: {0}" -f $result.sha256)
 }
+if ($Sign) {
+    Write-Host "  Signed: yes (staged assemblies and setup EXEs; verified with signtool verify /pa /all)" -ForegroundColor Green
+}
 Write-Host "  Build info: $buildInfoPath"
+Write-Host "  Runtime mode: $runtimeMode"
 Write-Host ""
 Write-Host "Next steps:"
 Write-Host "  1) Agent (student PC): UpdateAgent.Agent-Setup-$ProductVersion-x64.exe"

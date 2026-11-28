@@ -14,6 +14,7 @@ let openJobId = null;
 let lastError = '';
 let pendingJobId = null;
 let osFilter = 'all';
+let osFilterUnknown = false;
 let agentPolicies = {};
 let startCapability = null;
 let agentPolicyCapability = null;
@@ -28,6 +29,12 @@ const OS_GROUPS = [
   { id: 'server-core', label: 'Server Core', tone: 'gray' },
   { id: 'unknown', label: '미확인 OS', tone: 'gray' },
 ];
+
+// 필터 URL에는 허용 목록의 식별자만 실을 수 있다. 토큰/비밀 키와 값은 어떤 경로로도 포함하지 않는다.
+const FILTER_VALUE_MAX = 64;
+const SENSITIVE_KEY_PATTERN = /(?:token|secret|password|passwd|pwd|api[-_]?key|auth|credential|session)/i;
+const DASHBOARD_OS_IDS = new Set(['all', ...OS_GROUPS.map((group) => group.id)]);
+const UNKNOWN_FILTER_NOTICE = '필터 값 확인 불가: 알 수 없는 값은 무시하고 전체로 표시합니다.';
 
 const POLICY_PRESETS = {
   custom: {
@@ -185,6 +192,18 @@ function chip(label, tone) {
   return `<span class="chip chip-${tone}">${escapeHtml(label)}</span>`;
 }
 
+// 서버가 판정을 보내지 않은 필드는 true/false로 추측하지 않고 확인 불가로 표시한다.
+function integrityChips(record) {
+  const state = record?.integrity || {};
+  const chips = [];
+  if (state.integrityUnavailable !== false) chips.push(chip('무결성 확인 불가', 'gray'));
+  if (state.configChanged === true) chips.push(chip('설정 변경', 'red'));
+  if (state.versionMismatch === true) chips.push(chip('버전 불일치', 'red'));
+  else if (state.versionUnknown !== false) chips.push(chip('버전 확인 불가', 'gray'));
+  if (state.departed === true) chips.push(chip('이탈', 'red'));
+  return chips.join(' ');
+}
+
 function isActiveJobState(state) {
   return !['completed', 'failed', 'cancelled'].includes(String(state || '').toLowerCase());
 }
@@ -226,11 +245,85 @@ function renderOsFilter() {
   ).join('');
   host.querySelectorAll('button').forEach((button) => {
     button.addEventListener('click', () => {
-      osFilter = button.dataset.osFilter;
+      osFilter = normalizeOsFilterValue(button.dataset.osFilter);
+      osFilterUnknown = false;
+      writeDashboardUrl();
       renderOsFilter();
       renderAgents();
     });
   });
+  updateDashboardFilterNotice(host);
+}
+
+function updateDashboardFilterNotice(host) {
+  let note = $('#os-filter-note');
+  if (!osFilterUnknown) {
+    if (note) note.textContent = '';
+    return;
+  }
+  if (!note) {
+    note = el('div', 'muted small', UNKNOWN_FILTER_NOTICE);
+    note.id = 'os-filter-note';
+    host.insertAdjacentElement('afterend', note);
+  }
+  note.textContent = UNKNOWN_FILTER_NOTICE;
+}
+
+// ---------------- 필터 URL 상태 ----------------
+
+function normalizeOsFilterValue(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (!text || text.length > FILTER_VALUE_MAX || !DASHBOARD_OS_IDS.has(text)) return 'all';
+  return text;
+}
+
+function readDashboardFilters(search = location.search) {
+  const params = new URLSearchParams(search);
+  const values = params.getAll('os');
+  const allowed = values.map(normalizeOsFilterValue).find((value) => value !== 'all');
+  const os = values.length === 0 ? 'all' : (allowed || 'all');
+  const unknown = values.some((value) => {
+    const text = String(value ?? '').trim().toLowerCase();
+    // 빈 값은 '없음'으로 보고 경고하지 않는다. 값이 있을 때만 허용 목록을 검사한다.
+    return text !== '' && !DASHBOARD_OS_IDS.has(text);
+  });
+  return { os, unknown };
+}
+
+// 알 수 없는 파라미터는 보존하되, 토큰/비밀 키와 토큰 같은 값은 절대 직렬화하지 않는다.
+function safeFilterParams(search) {
+  const source = new URLSearchParams(search || '');
+  const safe = new URLSearchParams();
+  for (const [key, value] of source.entries()) {
+    if (SENSITIVE_KEY_PATTERN.test(key)) continue;
+    if (SENSITIVE_KEY_PATTERN.test(value)) continue;
+    if (value.length > FILTER_VALUE_MAX * 4) continue;
+    if (adminToken && value === adminToken) continue;
+    safe.append(key, value);
+  }
+  return safe;
+}
+
+function dashboardFilterUrl(search = location.search) {
+  const params = safeFilterParams(search);
+  params.delete('os');
+  if (osFilter !== 'all') params.set('os', osFilter);
+  const query = params.size ? `?${params.toString()}` : '';
+  return `${location.pathname}${query}${location.hash || ''}`;
+}
+
+function writeDashboardUrl() {
+  try {
+    history.replaceState(history.state, '', dashboardFilterUrl());
+  } catch {}
+}
+
+function applyDashboardFilters(parsed, options = {}) {
+  osFilter = normalizeOsFilterValue(parsed?.os);
+  osFilterUnknown = parsed?.unknown === true;
+  if (options.writeUrl) writeDashboardUrl();
+  renderOsFilter();
+  renderAgents();
 }
 
 function capabilitiesFor(records) {
@@ -536,7 +629,8 @@ function renderAgents() {
       : probeFailed ? ` ${chip('WU 확인 실패', 'red')}`
         : telemetry.wuBusy ? ` ${chip('WU 사용 중', 'red')}` : '';
     stateCell.innerHTML = chip(label, tone) +
-      (telemetry.userLoggedOn ? ` ${chip('사용자 로그온', 'amber')}` : '') + wuChip;
+      (telemetry.userLoggedOn ? ` ${chip('사용자 로그온', 'amber')}` : '') + wuChip +
+      `<div class="small">${integrityChips(record)}</div>`;
     tr.appendChild(stateCell);
 
     const jobCell = el('td');
@@ -575,9 +669,13 @@ function renderAgents() {
     tr.appendChild(freeCell);
 
     const seenCell = el('td');
-    const stale = isStale(record.lastSeen, overview.snapshotAt || Date.now())
-      ? ` ${chip('오래됨', 'amber')}` : '';
+    const departed = record.integrity?.departed === true ||
+      isStale(record.lastSeen, overview.snapshotAt || Date.now());
+    const stale = departed ? ` ${chip('이탈', 'red')}` : '';
+    const reason = departed
+      ? `<div class="muted small">${escapeHtml(record.integrity?.departureReason || '체크인 없음')}</div>` : '';
     seenCell.innerHTML = `<div class="small">${online ? '온라인' : '오프라인'}${stale}</div>
+      ${reason}
       <div class="muted small">${escapeHtml(timeText(record.lastSeen))} · ${escapeHtml(agoText(record.lastSeen))}</div>`;
     tr.appendChild(seenCell);
 
@@ -999,6 +1097,7 @@ function renderJobDetail(data) {
     <div class="detail-row"><span>메시지</span><span>${escapeHtml(valueText(job.message))}</span></div>
     <div class="detail-row"><span>시작</span><span>${escapeHtml(timeText(job.startedAt))}</span></div>
     <div class="detail-row"><span>갱신</span><span>${escapeHtml(timeText(job.updatedAt))}</span></div>
+    <div class="detail-row"><span>상관관계 ID</span><span>${escapeHtml(valueText(data.correlationId))}</span></div>
     ${job.lastError ? `<div class="alert-inline">${escapeHtml(job.lastError)}</div>` : ''}
   `;
 
@@ -1035,6 +1134,25 @@ function renderJobDetail(data) {
   }
 
   renderMaestro(data);
+  renderTimeline(data);
+}
+
+function renderTimeline(data) {
+  const host = $('#detail-timeline');
+  const timeline = Array.isArray(data.timeline) ? data.timeline : [];
+  if (timeline.length === 0) {
+    host.innerHTML = `<div class="empty">타임라인 기록이 ${ABSENT}.</div>`;
+    return;
+  }
+
+  const actorLabels = { teacher: '교사', agent: '에이전트', system: '시스템' };
+  host.innerHTML = timeline.map((entry) => {
+    const stateText = `${valueText(entry.fromState)} → ${valueText(entry.toState)}`;
+    const actorText = valueText(actorLabels[entry.actor] || entry.actor);
+    return `<div class="detail-row"><span>${escapeHtml(timeText(entry.timestamp))}</span>`
+      + `<span>${escapeHtml(actorText)} · ${escapeHtml(valueText(entry.event))} · ${escapeHtml(stateText)}</span></div>`
+      + `<div class="muted small">${escapeHtml(valueText(entry.phase))} ${escapeHtml(valueText(entry.message))}</div>`;
+  }).join('');
 }
 
 function renderMaestro(data) {
@@ -1263,20 +1381,32 @@ function setupTokenDialog() {
   const status = $('#token-status');
 
   // 인증된 경우에만 서버 토큰 상태를 조회한다. 실제 토큰 값은 응답에 포함하지 않는다.
+  // 값이 없는 필드는 없음/확인 불가로 표시하고 정상으로 추정하지 않는다.
   const loadStatus = async () => {
     if (!adminToken || dialog.classList.contains('hidden')) return;
     try {
       const info = await api('/api/admin/token');
       status.classList.remove('hidden');
-      if (info.isPlaceholder) {
-        status.className = 'token-status warning';
-        status.textContent = '현재 기본(샘플) 토큰 사용 중 - 실제 토큰으로 변경해야 서버가 시작됩니다';
-      } else {
-        status.className = 'token-status ok';
-        status.textContent = info.hasRuntimeOverride
+      const rotation = info.rotationEnabled === true
+        ? '사용'
+        : info.rotationEnabled === false ? '사용 안 함' : UNKNOWN;
+      const changed = info.lastChangedAt ? (formatTime(info.lastChangedAt) || UNKNOWN) : ABSENT;
+      const due = !info.lastChangedAt ? UNKNOWN
+        : info.rotationDue === true ? '필요'
+        : info.rotationDue === false ? '필요 없음'
+        : UNKNOWN;
+      const summary = info.isPlaceholder
+        ? '현재 기본(샘플) 토큰 사용 중 - 실제 토큰으로 변경해야 서버가 시작됩니다'
+        : info.hasRuntimeOverride
           ? '사용자 지정 토큰 사용 중 (대시보드에서 변경됨).'
           : '사용자 지정 토큰 사용 중.';
-      }
+      status.className = `token-status ${info.isPlaceholder ? 'warning' : 'ok'}`;
+      status.textContent = [
+        summary,
+        `자동 회전: ${rotation}`,
+        `마지막 변경: ${changed}`,
+        `회전 필요: ${due}`,
+      ].join('\n');
     } catch {
       status.classList.add('hidden');
     }
@@ -1330,11 +1460,36 @@ function setupTokenDialog() {
     }
   };
 
+  // 회전 응답에는 새 토큰이 없다. 이전 값을 계속 쓰지 않도록 지우고 재입력을 요구한다.
+  const rotateServerToken = async () => {
+    if (!adminToken) {
+      toast('먼저 현재 토큰을 저장하세요.', 'error');
+      return;
+    }
+    try {
+      await api('/api/admin/token/rotate', { method: 'POST' });
+      adminToken = '';
+      localStorage.removeItem(STORAGE_KEY);
+      input.value = '';
+      newInput.value = '';
+      confirmInput.value = '';
+      status.classList.add('hidden');
+      dialog.classList.remove('hidden');
+      input.focus();
+      toast(
+        '서버 관리자 토큰이 회전되었습니다. 새 토큰은 교사 PC 설정 파일에서 확인 후 다시 입력해야 합니다.',
+        'success');
+    } catch (error) {
+      toast(`토큰 회전 실패: ${error.message}`, 'error');
+    }
+  };
+
   $('#token-save').addEventListener('click', save);
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') save();
   });
   $('#token-change').addEventListener('click', changeServerToken);
+  $('#token-rotate').addEventListener('click', rotateServerToken);
   $('#token-cancel').addEventListener('click', () => dialog.classList.add('hidden'));
   $('#token-button').addEventListener('click', () => {
     input.value = adminToken;
@@ -1351,6 +1506,9 @@ function setupTokenDialog() {
 
 function wireEvents() {
   $('#refresh-button').addEventListener('click', () => refresh());
+  window.addEventListener('popstate', () => {
+    applyDashboardFilters(readDashboardFilters(location.search), { writeUrl: false });
+  });
   $('#select-all').addEventListener('change', (event) => {
     if (event.target.checked) {
       for (const record of visibleAgents()) selected.add(record.agent.agentId);
@@ -1386,6 +1544,7 @@ wirePolicyForm('p-');
 wirePolicyForm('ap-');
 wireEvents();
 setupUpdateDialog();
+applyDashboardFilters(readDashboardFilters(location.search), { writeUrl: false });
 pendingJobId = new URLSearchParams(location.search).get('job');
 refresh();
 consumeDeepLink();

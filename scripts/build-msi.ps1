@@ -9,7 +9,30 @@ ICE validation and writes the MSI plus SHA-256/build-info.json to artifacts\msi.
 
 The MSI never contains LabManager URL, agent token or any other secret.
 
+Signing shares scripts\sign-artifacts.ps1 with build-inno.ps1: staged assemblies
+are signed before WiX builds the MSI, the final MSI is signed after validation,
+and every signed file is verified with "signtool verify /pa /all".
+
 Run from a normal PowerShell prompt. WiX 5.0.2 is restored from NuGet.
+
+.PARAMETER Sign
+Optional Authenticode signing. Without -Sign the build is unsigned and does
+not require signtool.exe.
+
+.PARAMETER CertificateThumbprint
+SHA-1 thumbprint of the code signing certificate. When omitted, the helper
+reads UPDATEAGENT_SIGN_THUMBPRINT from the environment. No thumbprint is
+stored in the repository.
+
+.PARAMETER TimestampUrl
+Optional RFC 3161 timestamp URL passed to signtool.
+
+.PARAMETER FrameworkDependent
+Opt in to packaging the smaller framework-dependent publish output. The default
+stays self-contained. Publish folders are validated before staging, and the
+staged files must keep their runtimeconfig.json/deps.json files. Ambiguity fails
+closed. Framework-dependent packages require the matching Microsoft .NET Desktop
+Runtime (win-x64) on every target PC.
 
 .EXAMPLE
 .\scripts\publish.ps1
@@ -19,7 +42,12 @@ Run from a normal PowerShell prompt. WiX 5.0.2 is restored from NuGet.
 .\scripts\build-msi.ps1 -ProductVersion <version> -SkipValidate
 
 .EXAMPLE
-.\scripts\build-msi.ps1 -Sign -CertificateThumbprint "ABC123..." -TimestampUrl "http://timestamp.digicert.com"
+.\scripts\publish.ps1 -FrameworkDependent
+.\scripts\build-msi.ps1 -FrameworkDependent
+
+.EXAMPLE
+$env:UPDATEAGENT_SIGN_THUMBPRINT = '<thumbprint-from-secret-store>'
+.\scripts\build-msi.ps1 -Sign -TimestampUrl "http://timestamp.digicert.com"
 #>
 [CmdletBinding()]
 param(
@@ -30,6 +58,7 @@ param(
     [string]$StagingRoot,
     [switch]$KeepStaging,
     [switch]$SkipValidate,
+    [switch]$FrameworkDependent,
     [switch]$Sign,
     [string]$CertificateThumbprint,
     [string]$TimestampUrl
@@ -37,6 +66,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+# Shared runtime-layout checks; no tokens, URLs or config secrets are inspected.
+. (Join-Path $PSScriptRoot "package-layout.ps1")
 
 if ([string]::IsNullOrWhiteSpace($PublishRoot)) { $PublishRoot = Join-Path $repoRoot "publish" }
 if ([string]::IsNullOrWhiteSpace($OutputRoot))  { $OutputRoot  = Join-Path $repoRoot "artifacts\msi" }
@@ -143,28 +175,12 @@ function Remove-UnwantedStagedFiles {
     return $removed
 }
 
-function Invoke-SignTool {
-    param([string]$FilePath)
-
-    $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
-    if (-not $signtool) {
-        throw "signtool.exe was not found on PATH. Install the Windows SDK or omit -Sign."
-    }
-
-    $arguments = @("sign", "/sha1", $CertificateThumbprint, "/fd", "SHA256")
-    if (-not [string]::IsNullOrWhiteSpace($TimestampUrl)) {
-        $arguments += @("/tr", $TimestampUrl, "/td", "SHA256")
-    }
-    $arguments += $FilePath
-
-    & $signtool.Source @arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "signtool failed for $FilePath (exit code $LASTEXITCODE)."
-    }
-}
-
-if ($Sign -and [string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
-    throw "-Sign requires -CertificateThumbprint."
+# Fail closed before staging when signing is requested but its prerequisites
+# are missing. Unsigned builds never load the helper or look up signtool.exe.
+$signingContext = $null
+if ($Sign) {
+    . (Join-Path $PSScriptRoot "sign-artifacts.ps1")
+    $signingContext = New-SigningContext -Sign -CertificateThumbprint $CertificateThumbprint -TimestampUrl $TimestampUrl
 }
 
 if ([string]::IsNullOrWhiteSpace($ProductVersion)) {
@@ -184,6 +200,12 @@ Assert-PublishFolder $cliSource "UpdateAgent.Cli.exe"
 # 공통 Guard DLL도 게시 폴더에 있어야 MSI 페이로드에 포함된다.
 Assert-PublishFolder $serviceSource "UpdateAgent.Guards.dll"
 
+$runtimeMode = if ($FrameworkDependent) { "framework-dependent" } else { "self-contained" }
+foreach ($source in @($serviceSource, $sessionHelperSource, $agentDesktopSource, $cliSource)) {
+    Assert-PackageLayout -Path $source `
+        -ExpectFrameworkDependent:$FrameworkDependent -Label $source | Out-Null
+}
+
 if (-not (Test-Path -LiteralPath $payloadAppSettings)) {
     throw "Sanitized appsettings template not found: $payloadAppSettings"
 }
@@ -196,6 +218,10 @@ Write-Host "Product version : $ProductVersion"
 Write-Host "Publish root    : $PublishRoot"
 Write-Host "Staging root    : $StagingRoot"
 Write-Host "Output root     : $OutputRoot"
+Write-Host "Runtime mode    : $runtimeMode"
+if ($FrameworkDependent) {
+    Write-Host "Prerequisite    : matching Microsoft .NET Desktop Runtime (win-x64) on every target PC" -ForegroundColor Yellow
+}
 Write-Host ""
 
 if (Test-Path -LiteralPath $StagingRoot) {
@@ -236,15 +262,12 @@ if ($removedFiles.Count -gt 0) {
     }
 }
 
-if ($Sign) {
-    $assemblies = Get-ChildItem -LiteralPath $StagingRoot -Recurse -File |
-        Where-Object { $_.Name -like "UpdateAgent.*.exe" -or $_.Name -like "UpdateAgent.*.dll" }
+if ($FrameworkDependent) {
+    Assert-FrameworkDependentRuntimeFiles -Root $StagingRoot -Label "MSI" | Out-Null
+}
 
-    Write-Host ""
-    Write-Host "Signing $($assemblies.Count) UpdateAgent assemblies..."
-    foreach ($assembly in $assemblies) {
-        Invoke-SignTool $assembly.FullName
-    }
+if ($Sign) {
+    Invoke-StagedAssemblySigning -Context $signingContext -StagingRoot $StagingRoot | Out-Null
 }
 
 $stagedFiles = (Get-ChildItem -LiteralPath $StagingRoot -Recurse -File).Count
@@ -305,8 +328,7 @@ $destinationMsi = Join-Path $OutputRoot $msiName
 Copy-Item -LiteralPath $builtMsi -Destination $destinationMsi -Force
 
 if ($Sign) {
-    Write-Host "Signing MSI..."
-    Invoke-SignTool $destinationMsi
+    Invoke-InstallerSigning -Context $signingContext -FilePaths @($destinationMsi)
 }
 
 $hash = (Get-FileHash -LiteralPath $destinationMsi -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -325,21 +347,32 @@ catch {
 }
 
 $msiSize = (Get-Item -LiteralPath $destinationMsi).Length
+$selfContained = -not $FrameworkDependent
+$runtimePrerequisite = if ($FrameworkDependent) {
+    "Microsoft .NET Desktop Runtime (win-x64) must be preinstalled on target PCs"
+} else {
+    "none (runtime bundled)"
+}
 $buildInfo = [pscustomobject]@{
-    product           = "UpdateAgent Agent"
-    productVersion    = $ProductVersion
-    configuration     = $Configuration
-    platform          = "x64"
-    selfContained     = $true
-    msiFile           = $msiName
-    msiSizeBytes      = $msiSize
-    sha256            = $hash
-    stagedFiles       = $stagedFiles
-    wixVersion        = "$wixVersion".Trim()
-    gitCommit         = "$gitCommit".Trim()
-    builtAtUtc        = (Get-Date).ToUniversalTime().ToString("o")
+    product             = "UpdateAgent Agent"
+    productVersion      = $ProductVersion
+    configuration       = $Configuration
+    platform            = "x64"
+    selfContained       = $selfContained
+    runtimeMode         = $runtimeMode
+    runtimePrerequisite = $runtimePrerequisite
+    msiFile             = $msiName
+    msiSizeBytes        = $msiSize
+    sha256              = $hash
+    stagedFiles         = $stagedFiles
+    wixVersion          = "$wixVersion".Trim()
+    gitCommit           = "$gitCommit".Trim()
+    builtAtUtc          = (Get-Date).ToUniversalTime().ToString("o")
     signed            = [bool]$Sign
-    containsSecrets   = $false
+    containsSecrets     = $false
+}
+if ($Sign) {
+    $buildInfo | Add-Member -NotePropertyName signatureVerification -NotePropertyValue 'signtool verify /pa /all'
 }
 
 $buildInfoPath = Join-Path $OutputRoot "build-info.json"
@@ -354,6 +387,7 @@ Write-Host ""
 Write-Host ("MSI built: {0} ({1:N1} MB)" -f $destinationMsi, ($msiSize / 1MB)) -ForegroundColor Green
 Write-Host "  SHA-256     : $hash"
 Write-Host "  Build info  : $buildInfoPath"
+Write-Host "  Runtime mode: $runtimeMode"
 if ($Sign) {
     Write-Host "  Signed      : yes" -ForegroundColor Green
 }

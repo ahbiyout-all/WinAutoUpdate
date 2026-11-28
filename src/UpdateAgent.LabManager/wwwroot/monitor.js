@@ -15,6 +15,28 @@ let reconnectAttempts = 0;
 let lastSuccessAt = null;
 const MAX_BACKOFF_MS = 30000;
 
+// 필터는 URL/클립보드/창 간 메시지에만 실을 수 있다. 토큰·비밀 값은 어디에도 직렬화하지 않는다.
+const FILTER_VALUE_MAX = 64;
+const FILTER_PAYLOAD_MAX = 512;
+const FILTER_DEBOUNCE_MS = 250;
+const FILTER_MESSAGE_SKEW_MS = 60000;
+const MONITOR_FILTER_CHANNEL = 'updateagent-monitor-filters';
+const MONITOR_FILTER_STORAGE_KEY = 'ua_monitor_filters';
+const MONITOR_STATE_IDS = ['all', 'busy', 'attention', 'offline'];
+const SENSITIVE_KEY_PATTERN = /(?:token|secret|password|passwd|pwd|api[-_]?key|auth|credential|session)/i;
+const UNKNOWN_FILTER_NOTICE = '필터 값 확인 불가: 알 수 없는 값은 무시하고 없음/전체로 표시합니다.';
+const FILTER_SOURCE_ID = (() => {
+  try {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  } catch {}
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+})();
+
+let filterBroadcast = null;
+let filterTextTimer = null;
+let pendingFilterText = null;
+let monitorFilterUnknown = false;
+
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, text) => {
   const node = document.createElement(tag);
@@ -64,6 +86,17 @@ function jobStateInfo(state) {
 
 function chip(label, tone) {
   return `<span class="chip chip-${tone}">${escapeHtml(label)}</span>`;
+}
+
+// 무결성/이탈 상태는 플래그가 없으면(true/false로 추측하지 않고) 확인 불가로 표시한다.
+function integrityChips(agent) {
+  const chips = [];
+  if (agent.integrityUnavailable !== false) chips.push(chip('무결성 확인 불가', 'gray'));
+  if (agent.configChanged === true) chips.push(chip('설정 변경', 'red'));
+  if (agent.versionMismatch === true) chips.push(chip('버전 불일치', 'red'));
+  else if (agent.versionUnknown !== false) chips.push(chip('버전 확인 불가', 'gray'));
+  if (agent.departed === true) chips.push(chip('이탈', 'red'));
+  return chips.join(' ');
 }
 
 function formatTime(value) {
@@ -137,7 +170,7 @@ function ensureMonitorControls() {
 
   const filterInput = $('#filter-input');
   if (filterInput && !$('#state-filter')) {
-    const wrap = el('span', 'filter-state');
+    const wrap = el('span', 'filter-state filter-share');
     const label = el('label', 'muted small', '상태 ');
     label.htmlFor = 'state-filter';
     const select = document.createElement('select');
@@ -152,12 +185,36 @@ function ensureMonitorControls() {
       option.textContent = text;
       select.appendChild(option);
     }
+    const copy = el('button', 'btn btn-ghost', '필터 링크 복사');
+    copy.type = 'button';
+    copy.id = 'filter-link-copy';
+    copy.addEventListener('click', copyFilterLink);
+    const status = el('span', 'muted small', '');
+    status.id = 'filter-link-status';
+    const notice = el('div', 'muted small', '');
+    notice.id = 'filter-notice';
     wrap.appendChild(label);
     wrap.appendChild(select);
+    wrap.appendChild(copy);
+    wrap.appendChild(status);
     filterInput.insertAdjacentElement('afterend', wrap);
+    wrap.insertAdjacentElement('afterend', notice);
   }
   updateConnectionMeta();
+  updateFilterNotice();
 }
+
+function updateFilterNotice() {
+  const notice = $('#filter-notice');
+  if (notice) notice.textContent = monitorFilterUnknown ? UNKNOWN_FILTER_NOTICE : '';
+}
+
+function setFilterLinkStatus(message, isError) {
+  const status = $('#filter-link-status');
+  if (status) status.textContent = message || '';
+  if (isError) setError(message);
+}
+
 
 function isTerminal(state) {
   return ['completed', 'failed', 'cancelled'].includes(String(state).toLowerCase());
@@ -177,8 +234,9 @@ function matchesStateFilter(record, kind) {
       : state === 'needsattention' || state === 'error' || record?.maestroDetectionFailed === true;
   }
   if (stateFilter === 'offline') {
-    // 오프라인은 PC 상태 필터다. 작업에는 오프라인 상태가 없으므로 표시하지 않는다.
-    return kind === 'agent' && (record?.online === false || isStale(record?.lastSeen, snapshotNow()));
+    // 오프라인은 PC 상태 필터다. 이탈(오래된 체크인)도 같은 필터에 포함한다.
+    return kind === 'agent' && (record?.online === false || record?.departed === true ||
+      isStale(record?.lastSeen, snapshotNow()));
   }
   return true;
 }
@@ -213,6 +271,191 @@ function showTokenBanner(show) {
 function matchesFilter(value) {
   if (!filterText) return true;
   return String(value ?? '').toLowerCase().includes(filterText);
+}
+
+// ---------------- 필터 URL / 창 간 동기화 ----------------
+
+function normalizeMonitorText(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (!text || text.length > FILTER_VALUE_MAX) return '';
+  // 검색어는 PC 이름/작업 ID 수준의 문자만 허용하고 토큰 같은 문자열은 거부한다.
+  if (!/^[\p{L}\p{N} ._-]+$/u.test(text) || SENSITIVE_KEY_PATTERN.test(text)) return '';
+  return text;
+}
+
+function normalizeMonitorState(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  return MONITOR_STATE_IDS.includes(text) ? text : 'all';
+}
+
+function readMonitorFilters(search = location.search) {
+  const params = new URLSearchParams(search);
+  const texts = params.getAll('q');
+  const states = params.getAll('state');
+  const q = texts.map(normalizeMonitorText).find((value) => value !== '') || '';
+  const state = states.map(normalizeMonitorState).find((value) => value !== 'all') || 'all';
+  const unknown = texts.some((value) => {
+    const text = String(value ?? '').trim().toLowerCase();
+    return text !== '' && normalizeMonitorText(text) !== text;
+  }) || states.some((value) => {
+    const text = String(value ?? '').trim().toLowerCase();
+    // 빈 값은 '없음'으로 보고 경고하지 않는다. 값이 있을 때만 허용 목록을 검사한다.
+    return text !== '' && !MONITOR_STATE_IDS.includes(text);
+  });
+  return { q, state, unknown };
+}
+
+// job= 등 알 수 없는 파라미터는 보존하지만 토큰/비밀 키와 토큰 같은 값은 제거한다.
+function safeFilterParams(search) {
+  const source = new URLSearchParams(search || '');
+  const safe = new URLSearchParams();
+  for (const [key, value] of source.entries()) {
+    if (SENSITIVE_KEY_PATTERN.test(key)) continue;
+    if (SENSITIVE_KEY_PATTERN.test(value)) continue;
+    if (value.length > FILTER_VALUE_MAX * 4) continue;
+    if (adminToken && value === adminToken) continue;
+    safe.append(key, value);
+  }
+  return safe;
+}
+
+function monitorFilterUrl(search = location.search) {
+  const params = safeFilterParams(search);
+  params.delete('q');
+  params.delete('state');
+  if (filterText) params.set('q', filterText);
+  if (stateFilter !== 'all') params.set('state', stateFilter);
+  const query = params.size ? `?${params.toString()}` : '';
+  return `${location.pathname}${query}${location.hash || ''}`;
+}
+
+function writeMonitorUrl() {
+  try {
+    history.replaceState(history.state, '', monitorFilterUrl());
+  } catch {}
+}
+
+function renderMonitorTables() {
+  if (!snapshot) return;
+  renderActiveJobs(snapshot.jobs || []);
+  renderAgents(snapshot.agents || []);
+}
+
+function syncFilterControls() {
+  const input = $('#filter-input');
+  if (input && input.value !== filterText) input.value = filterText;
+  const select = $('#state-filter');
+  if (select && select.value !== stateFilter) select.value = stateFilter;
+}
+
+function buildFilterMessage() {
+  return {
+    type: 'filters',
+    sourceId: FILTER_SOURCE_ID,
+    at: Date.now(),
+    q: filterText,
+    state: stateFilter,
+  };
+}
+
+function broadcastFilters() {
+  if (!filterBroadcast) return;
+  try {
+    filterBroadcast.postMessage(buildFilterMessage());
+  } catch {}
+}
+
+function saveFilterState() {
+  try {
+    const payload = {
+      sourceId: FILTER_SOURCE_ID,
+      at: Date.now(),
+      q: filterText,
+      state: stateFilter,
+    };
+    if (JSON.stringify(payload).length <= FILTER_PAYLOAD_MAX) {
+      localStorage.setItem(MONITOR_FILTER_STORAGE_KEY, JSON.stringify(payload));
+    }
+  } catch {}
+}
+
+function applyMonitorFilters(parsed, options = {}) {
+  // 원격/뒤로 가기 적용 중에는 로컬 디바운스 타이머가 낡은 값을 되살리지 못하게 한다.
+  if (filterTextTimer) {
+    clearTimeout(filterTextTimer);
+    filterTextTimer = null;
+  }
+  pendingFilterText = null;
+  filterText = normalizeMonitorText(parsed?.q);
+  stateFilter = normalizeMonitorState(parsed?.state);
+  monitorFilterUnknown = parsed?.unknown === true;
+  syncFilterControls();
+  updateFilterNotice();
+  renderMonitorTables();
+  if (options.writeUrl) writeMonitorUrl();
+  if (options.broadcast) {
+    saveFilterState();
+    broadcastFilters();
+  }
+}
+
+function applyRemoteFilterMessage(message) {
+  if (!message || typeof message !== 'object' || message.type !== 'filters') return;
+  let serialized;
+  try { serialized = JSON.stringify(message); } catch { return; }
+  if (typeof serialized !== 'string' || serialized.length > FILTER_PAYLOAD_MAX) return;
+  // 같은 탭의 메시지는 되돌려 받아도 다시 적용/전파하지 않는다(에코 방지).
+  if (!message.sourceId || message.sourceId === FILTER_SOURCE_ID) return;
+  if (typeof message.at !== 'number' || !Number.isFinite(message.at) || message.at < 0 ||
+      message.at > Date.now() + FILTER_MESSAGE_SKEW_MS) return;
+  applyMonitorFilters(
+    { q: message.q, state: message.state, unknown: false },
+    { writeUrl: true, broadcast: false });
+}
+
+function initFilterSync() {
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      filterBroadcast = new BroadcastChannel(MONITOR_FILTER_CHANNEL);
+      filterBroadcast.onmessage = (event) => applyRemoteFilterMessage(event?.data);
+    } catch {
+      filterBroadcast = null;
+    }
+  }
+  window.addEventListener('storage', (event) => {
+    // BroadcastChannel을 쓸 수 있는 환경에서는 중복 적용을 막는다.
+    if (filterBroadcast || !event || event.key !== MONITOR_FILTER_STORAGE_KEY || !event.newValue) return;
+    if (event.newValue.length > FILTER_PAYLOAD_MAX) return;
+    let payload;
+    try { payload = JSON.parse(event.newValue); } catch { return; }
+    applyRemoteFilterMessage(payload);
+  });
+}
+
+async function copyFilterLink() {
+  // 입력 직후 복사하면 디바운스 전 낡은 URL이 복사되지 않도록 보류 중인 검색어를 먼저 반영한다.
+  if (filterTextTimer) {
+    const pending = pendingFilterText;
+    clearTimeout(filterTextTimer);
+    filterTextTimer = null;
+    pendingFilterText = null;
+    applyMonitorFilters(
+      { q: pending, state: stateFilter, unknown: false },
+      { writeUrl: true, broadcast: true });
+  }
+  const url = monitorFilterUrl();
+  const status = $('#filter-link-status');
+  if (!navigator.clipboard?.writeText) {
+    const guidance = '링크 복사 확인 불가: 클립보드를 사용할 수 없습니다. 주소창 URL을 직접 복사하세요.';
+    setFilterLinkStatus(guidance, true);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    setFilterLinkStatus('필터 링크를 복사했습니다.', false);
+  } catch {
+    setFilterLinkStatus('링크 복사 확인 불가: 브라우저가 복사를 거부했습니다. 주소창 URL을 직접 복사하세요.', true);
+  }
 }
 
 // ---------------- 렌더링 ----------------
@@ -332,18 +575,27 @@ function renderAgents(agents) {
     const rebootFlag = unknownFlag(agent.rebootPending);
     const reboot = rebootFlag === true ? '<div class="muted small amber-text">재부팅 대기</div>'
       : rebootFlag === UNKNOWN ? `<div class="muted small">재부팅 ${UNKNOWN}</div>` : '';
-    const stale = isStale(agent.lastSeen, snapshotNow()) ? chip('오래됨', 'amber') : '';
+    const departed = agent.departed === true;
+    const stale = departed ? chip('이탈', 'red')
+      : isStale(agent.lastSeen, snapshotNow()) ? chip('오래됨', 'amber') : '';
+    const departure = departed
+      ? `<div class="muted small">${escapeHtml(agent.departureReason || '체크인 없음')}</div>` : '';
     const tr = el('tr');
     tr.innerHTML = `
       <td>
         <div class="strong">${escapeHtml(valueText(agent.machineName))}</div>
         <div class="muted small mono">${escapeHtml(valueText(agent.agentId))}</div>
       </td>
-      <td>${chip(label, tone)}</td>
+      <td>
+        ${chip(label, tone)}
+        <div class="small">${integrityChips(agent)}</div>
+        <button class="btn btn-mini" data-baseline-agent-id="${escapeHtml(valueText(agent.agentId))}">기준 재설정</button>
+      </td>
       <td>${current}</td>
       <td>${maestro}${reboot}</td>
       <td>
         <div class="small">${escapeHtml(timeText(agent.lastSeen))} ${stale}</div>
+        ${departure}
         <div class="muted small">${escapeHtml(agoText(agent.lastSeen))}</div>
       </td>`;
     tbody.appendChild(tr);
@@ -474,18 +726,44 @@ function wireEvents() {
   $('#dashboard-button').addEventListener('click', () => openDashboard());
   $('#reconnect-button').addEventListener('click', () => connect());
   $('#filter-input').addEventListener('input', (event) => {
-    filterText = event.target.value.trim().toLowerCase();
-    if (snapshot) {
-      renderActiveJobs(snapshot.jobs || []);
-      renderAgents(snapshot.agents || []);
-    }
+    if (filterTextTimer) clearTimeout(filterTextTimer);
+    const value = event.target.value;
+    pendingFilterText = value;
+    filterTextTimer = setTimeout(() => {
+      filterTextTimer = null;
+      pendingFilterText = null;
+      applyMonitorFilters(
+        { q: value, state: stateFilter, unknown: false },
+        { writeUrl: true, broadcast: true });
+    }, FILTER_DEBOUNCE_MS);
   });
   // 텍스트 검색과 상태 선택은 작업 표와 에이전트 표에 함께 적용된다.
   $('#state-filter')?.addEventListener('change', (event) => {
-    stateFilter = event.target.value;
-    if (snapshot) {
-      renderActiveJobs(snapshot.jobs || []);
-      renderAgents(snapshot.agents || []);
+    applyMonitorFilters(
+      { q: filterText, state: event.target.value, unknown: false },
+      { writeUrl: true, broadcast: true });
+  });
+  window.addEventListener('popstate', () => {
+    applyMonitorFilters(readMonitorFilters(location.search), { writeUrl: false, broadcast: true });
+  });
+  $('#agents-body').addEventListener('click', async (event) => {
+    const button = event.target.closest?.('button[data-baseline-agent-id]');
+    if (!button) return;
+    try {
+      const response = await fetch(
+        `/api/admin/agents/${encodeURIComponent(button.dataset.baselineAgentId)}/integrity/baseline`,
+        { method: 'POST', headers: { 'X-Admin-Token': adminToken } });
+      if (response.status === 401) {
+        setConnectionState('disconnected', '인증 실패');
+        setError('관리자 토큰이 올바르지 않습니다. 아래에서 토큰을 다시 저장하세요.');
+        showTokenBanner(true);
+        return;
+      }
+      if (!response.ok) throw new Error(`기준 재설정 실패 (${response.status})`);
+      setError('');
+      connect();
+    } catch (error) {
+      setError(`기준 재설정 오류: ${error.message}`);
     }
   });
   $('#token-save').addEventListener('click', () => {
@@ -508,4 +786,6 @@ function wireEvents() {
 
 ensureMonitorControls();
 wireEvents();
+initFilterSync();
+applyMonitorFilters(readMonitorFilters(location.search), { writeUrl: false, broadcast: false });
 connect();

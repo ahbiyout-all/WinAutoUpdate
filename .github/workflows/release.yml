@@ -181,18 +181,32 @@ jobs:
               throw "$label build-info productVersion '$($info.productVersion)' does not match $version."
             }
           }
-          $hasAgentToken = -not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_AGENT_TOKEN)
-          $hasLabAgentToken = -not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_LABMANAGER_AGENT_TOKEN)
-          $hasAdminToken = -not [string]::IsNullOrWhiteSpace($env:UPDATEAGENT_LABMANAGER_ADMIN_TOKEN)
+          # build-inno.ps1 embeds only the first line of each secret, after
+          # trimming whitespace and a leading BOM. Compare the same normalized
+          # values here so CI agrees with what is actually inside the setup EXEs.
+          function Get-SecretFirstLine {
+            param([string]$Value)
+            if ($null -eq $Value) { return '' }
+            $lines = @($Value -split '[\r\n]+')
+            if ($lines.Count -eq 0) { return '' }
+            return ([string]$lines[0]).Trim().TrimStart([char]0xFEFF).Trim()
+          }
+          $agentToken = Get-SecretFirstLine $env:UPDATEAGENT_AGENT_TOKEN
+          $labAgentToken = Get-SecretFirstLine $env:UPDATEAGENT_LABMANAGER_AGENT_TOKEN
+          $adminToken = Get-SecretFirstLine $env:UPDATEAGENT_LABMANAGER_ADMIN_TOKEN
+          $hasAgentToken = $agentToken -ne ''
+          $hasLabAgentToken = $labAgentToken -ne ''
+          $hasAdminToken = $adminToken -ne ''
           if ($hasAdminToken -ne $hasLabAgentToken) {
             throw 'UPDATEAGENT_LABMANAGER_ADMIN_TOKEN and UPDATEAGENT_LABMANAGER_AGENT_TOKEN must be set together or left unset together.'
           }
           if ($hasAgentToken -and $hasLabAgentToken) {
-            $normalizedAgentToken = $env:UPDATEAGENT_AGENT_TOKEN.TrimStart([char]0xFEFF).Trim()
-            $normalizedLabAgentToken = $env:UPDATEAGENT_LABMANAGER_AGENT_TOKEN.TrimStart([char]0xFEFF).Trim()
-            if ($normalizedAgentToken -cne $normalizedLabAgentToken) {
+            if ($agentToken -cne $labAgentToken) {
               throw 'Configured agent token values do not match; refusing to publish an inconsistent release.'
             }
+          }
+          if ($hasAdminToken -and ($adminToken -ceq $labAgentToken)) {
+            throw 'LabManager admin and agent tokens must be different values; refusing to publish an inconsistent release.'
           }
           $expectedSecrets = $hasAgentToken -or $hasAdminToken
           if ([bool]$innoInfo.containsSecrets -ne [bool]$expectedSecrets) {

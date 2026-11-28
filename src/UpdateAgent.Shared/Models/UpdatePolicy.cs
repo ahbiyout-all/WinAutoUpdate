@@ -75,6 +75,27 @@ public sealed record UpdatePolicy
     public int MaxItemFailureCount { get; init; } = 2;
 
     /// <summary>
+    /// 한 번에 시작할 PC 수. 0이면 모든 대상을 즉시 시작한다(기본 동작).
+    /// 0보다 크면 해당 수만큼 묶어 순차적으로 시작한다.
+    /// </summary>
+    public int RolloutBatchSize { get; init; }
+
+    /// <summary>
+    /// 배치 사이 대기 시간(초). 0이면 추가 대기 없이 예약된 배치를 바로 전송한다.
+    /// </summary>
+    public int RolloutIntervalSeconds { get; init; }
+
+    /// <summary>
+    /// 유지보수 창 시작 시각(로컬 HH:mm). 종료 시각과 반드시 함께 지정한다. null이면 시간 제한 없음.
+    /// </summary>
+    public string? MaintenanceWindowStart { get; init; }
+
+    /// <summary>
+    /// 유지보수 창 종료 시각(로컬 HH:mm). 시작 시각과 반드시 함께 지정한다. null이면 시간 제한 없음.
+    /// </summary>
+    public string? MaintenanceWindowEnd { get; init; }
+
+    /// <summary>
     /// 기능 업데이트 2차 승인 워크플로가 구현되기 전까지 서버/에이전트 어느 경로에서도
     /// 기능 업데이트가 선택되지 않도록 강제한다. API가 직접 정책을 보내도 적용된다.
     /// </summary>

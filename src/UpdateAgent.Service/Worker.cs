@@ -10,6 +10,7 @@ using UpdateAgent.Core.Windows.Update;
 using UpdateAgent.Service.Commands;
 using UpdateAgent.Service.Comms;
 using UpdateAgent.Service.Configuration;
+using UpdateAgent.Service.Integrity;
 using UpdateAgent.Service.Overlay;
 using UpdateAgent.Service.Sessions;
 using UpdateAgent.Shared;
@@ -310,6 +311,8 @@ public sealed class Worker : BackgroundService
         var options = _options.CurrentValue;
         var os = _runner.Os ?? WindowsOsInfoProvider.GetCurrent();
         var hardware = HardwareInfo.GetSnapshot();
+        var agentId = AgentIdentity.GetAgentId();
+        var fingerprint = ConfigFingerprint.Compute(UpdateAgentConstants.ConfigFilePath, agentId, options);
         var sessionProbe = _sessions.Probe();
         var rebootProbe = _reboot.ProbeRebootPending();
 
@@ -341,7 +344,7 @@ public sealed class Worker : BackgroundService
 
         var agent = new AgentInfo
         {
-            AgentId = AgentIdentity.GetAgentId(),
+            AgentId = agentId,
             MachineName = AgentIdentity.GetMachineName(),
             AgentVersion = UpdateAgentConstants.AgentVersion,
             IpAddress = AgentIdentity.GetIpAddress(),
@@ -356,6 +359,11 @@ public sealed class Worker : BackgroundService
             LaptopDetectionFailed = hardware.LaptopDetectionFailed,
             HasBattery = hardware.HasBattery,
             FreeDiskMb = hardware.FreeDiskMb,
+            ConfigFingerprint = fingerprint.Fingerprint,
+            ConfigFingerprintUnavailable = fingerprint.Unavailable,
+            // 이 값은 체크인을 실제로 보내는 실행 중 서비스의 관점이다.
+            // 서비스가 멈추면 체크인 자체가 없으므로 서버가 오래됨으로 판단한다.
+            ServiceAlive = true,
         };
 
         var telemetry = new AgentTelemetry

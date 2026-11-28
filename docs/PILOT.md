@@ -6,6 +6,70 @@ DRY RUN으로 확인할 수 없는 **실제 설치, 재부팅/재개, 오버레�
 > 범위: 보안/품질 업데이트만. 드라이버와 기능 업데이트(OS 업그레이드)는 제외됩니다.
 > 예상 소요: 1~2시간 (업데이트 다운로드/설치/재부팅 횟수에 따라 달라짐)
 
+## 0-A. 실 PC 현장 체크리스트 (교사 PC 설치 검증)
+
+아래 항목은 1대 파일럿을 시작하기 **전에** 교사 PC에서 확인합니다.
+토큰 원문은 화면에 출력하지 않고, 토큰 파일 경로만 명령에 사용합니다.
+`50대 부하 리허설`은 [`DEPLOYMENT.md`](DEPLOYMENT.md)의 런북을 따르며,
+이 체크리스트를 대신하지 않습니다(합성 트래픽이므로 실 PC 증적이 아님).
+
+- [ ] **설치 관리자 실행**: `UpdateAgent.LabManager-Setup-<버전>-x64.exe`를 관리자 권한으로 설치했다.
+- [ ] **토큰 교체**: 기본값/샘플 토큰이 남아 있지 않다. 실제 토큰은 파일의 첫 줄에만 두고 경로로 전달했다.
+
+  ```powershell
+  .\scripts\configure-labmanager.ps1 `
+    -AdminTokenFile "<admin-token.txt 경로>" `
+    -AgentTokenFile "<agent-token.txt 경로>" `
+    -ListenUrl "http://0.0.0.0:5080"
+
+  # 토큰 값은 출력하지 않고 플레이스홀더만 검사한다.
+  Select-String -LiteralPath 'C:\Program Files\UpdateAgent\LabManager\appsettings.json' `
+    -Pattern 'change-me-|sample-.*-replace-before-pilot'
+  # 기대 결과: 출력 없음
+  ```
+
+- [ ] **ACL 제한**: 실제 토큰이 들어 있는 `appsettings.json`은 Administrators, SYSTEM, 설치를 실행한 교사 계정만 읽을 수 있다.
+
+  ```powershell
+  icacls 'C:\Program Files\UpdateAgent\LabManager\appsettings.json'
+  # 기대 결과: Administrators/(F), NT AUTHORITY\SYSTEM/(F), 설치 계정/(F)
+  # 상속 사용(@S-1-5-...:(I))이나 Users/Everyone 항목이 있으면 실패
+  ```
+
+- [ ] **방화벽 그룹/규칙**: 교사 PC에 `UpdateAgent LabManager` 그룹 규칙이 있고 Domain/Private에서만 TCP 5080을 허용한다. 학생 PC에는 인바운드 규칙을 만들지 않는다.
+
+  ```powershell
+  Get-NetFirewallRule -Group 'UpdateAgent LabManager' |
+    Select-Object DisplayName, Enabled, Profile, Direction, Action
+  Get-NetFirewallRule -Group 'UpdateAgent LabManager' |
+    Get-NetFirewallPortFilter |
+    Select-Object Protocol, LocalPort
+  # 기대 결과: 기본 규칙 + 버전 규칙, Inbound/Allow/TCP/5080, Domain/Private만
+  ```
+
+- [ ] **헬스 체크**: 교사 PC 로컬과 학생 PC에서 각각 `/api/health`가 2xx를 반환한다.
+
+  ```powershell
+  # 교사 PC
+  Invoke-WebRequest 'http://127.0.0.1:5080/api/health' -UseBasicParsing |
+    Select-Object -ExpandProperty StatusCode
+
+  # 학생 PC (교사 PC IP로 대체)
+  Invoke-WebRequest 'http://<교사-PC-IP>:5080/api/health' -UseBasicParsing |
+    Select-Object -ExpandProperty StatusCode
+  # 기대 결과: 둘 다 200
+  ```
+
+- [ ] **설치 실패 증적 확보**: Inno Setup은 `SetupLogging=yes`이므로 `%TEMP%\Setup Log <날짜>.txt`에 설치 로그를 남긴다. 중단/실패 화면이 나오면 최신 로그를 `C:\labmanager-setup.log`로 복사해 보관한다. 로그에는 토큰 값이 없어야 하며, 값이 보이면 공유하기 전에 제거한다.
+
+  ```powershell
+  $latest = Get-ChildItem -LiteralPath $env:TEMP -Filter 'Setup Log *.txt' -File |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  if ($null -eq $latest) { throw 'Inno Setup log was not found.' }
+  Copy-Item -LiteralPath $latest.FullName -Destination 'C:\labmanager-setup.log' -Force
+  Get-Item -LiteralPath 'C:\labmanager-setup.log' | Select-Object FullName, Length, LastWriteTime
+  ```
+
 ## 준비물
 
 | 항목 | 설명 |
@@ -71,7 +135,30 @@ publish\cli
 ```
 
 기본값은 self-contained(`win-x64`)이므로 학생 PC에 .NET 런타임이 없어도 실행됩니다.
-런타임이 이미 설치되어 있고 크기를 줄이려면 `.\scripts\publish.ps1 -FrameworkDependent`를 사용합니다.
+
+### 2-A. 경량(프레임워크 종속) 패키지 — 선택
+
+모든 대상 PC에 Microsoft .NET Desktop Runtime(win-x64, `*.runtimeconfig.json`이
+지정한 버전 이상)이 설치되어 있을 때만 용량 절감을 위해 사용합니다.
+런타임 여부를 확인할 수 없으면 `확인 불가`로 기록하고, 게시물 모드가 다르면
+빌드/배포가 중단됩니다.
+
+```powershell
+.\scripts\publish.ps1 -AgentOnly -FrameworkDependent
+.\scripts\build-inno.ps1 -AgentOnly -FrameworkDependent -NoPublish
+
+# 또는 MSI 경로
+.\scripts\publish.ps1 -FrameworkDependent
+.\scripts\build-msi.ps1 -FrameworkDependent
+
+# 배포 시에도 같은 스위치를 전달합니다.
+.\scripts\deploy-agents.ps1 -InventoryCsv .\inventory.csv -UseEmbeddedToken -FrameworkDependent
+```
+
+확인: `artifacts\inno\build-info.json` 또는 `artifacts\msi\build-info.json`의
+`selfContained:false`와 `runtimeMode`, 실측 크기, `deployment-report.json`의
+`RuntimeMode`를 확인합니다. 런타임이 패키지에 없고, 토큰·URL·설정 파일 처리와
+방화벽 규칙은 바뀌지 않습니다. 스위치 없이 경량 게시물을 쓰면 중단됩니다.
 
 > **주의:** `publish.ps1`을 다시 실행하면 `publish\labmanager\appsettings.json`과
 > `publish\agent\service\appsettings.json`이 기본값으로 돌아갑니다.

@@ -14,7 +14,7 @@
 버전은 **`Directory.Build.props`의 `<Version>` 하나**만 사용합니다.
 
 ```xml
-<Version>0.1.44</Version>
+<Version>0.1.45</Version>
 ```
 
 이 값이 다음 위치에 그대로 반영됩니다.
@@ -38,7 +38,7 @@
 | `installer\InnoSetup\UpdateAgent.LabManager.iss` | `#define AppVersion` |
 | `installer\UpdateAgent.Agent.Installer\UpdateAgent.Agent.Installer.wixproj` | `ProductVersion` |
 
-버전은 `Major.Minor.Build` 형식의 숫자 3자리만 사용합니다(예: `0.1.44`).
+버전은 `Major.Minor.Build` 형식의 숫자 3자리만 사용합니다(예: `0.1.45`).
 `0.1.0-beta` 같은 접두/접미사는 릴리스 파일 이름과 Inno `VersionInfoVersion`을 깨뜨리므로 사용하지 않습니다.
 
 ## 2. 릴리스 흐름
@@ -76,19 +76,27 @@ LabManager는 30분마다(강제 확인 시 즉시) GitHub Releases API를 조�
   `UPDATEAGENT_LABMANAGER_AGENT_TOKEN`을 등록합니다.
   - LabManager 두 값(`ADMIN`, `AGENT`)은 **반드시 함께** 등록합니다. LabManager Inno 첫 설치에는
     외부 토큰 파일 옵션이 없으므로, 값이 없으면 설치가 중단됩니다.
-  - `UPDATEAGENT_AGENT_TOKEN`과 `UPDATEAGENT_LABMANAGER_AGENT_TOKEN`은 **같은 값**이어야 합니다.
-    두 값이 모두 설정되면 워크플로가 일치 여부를 자동 검증하고, 다르면 릴리스를 중단합니다.
+  - `UPDATEAGENT_AGENT_TOKEN`과 `UPDATEAGENT_LABMANAGER_AGENT_TOKEN`은 **첫 줄이 같은 값**이어야 합니다.
+    두 값이 모두 설정되면 워크플로가 첫 줄(공백/앞의 BOM 제거) 일치 여부를 자동 검증하고,
+    다르면 릴리스를 중단합니다.
   - LabManager의 `UPDATEAGENT_LABMANAGER_ADMIN_TOKEN`과 `UPDATEAGENT_LABMANAGER_AGENT_TOKEN`은
-    **서로 다른 값**이어야 합니다. 같으면 서버가 시작을 거부하므로 워크플로와 서버가 이를 검증합니다.
+    **서로 다른 값**이어야 합니다. 같으면 서버가 시작을 거부하므로 빌드·워크플로·서버가 이를 검증합니다.
+  - 각 시크릿의 **첫 줄만** 설치 exe에 내장됩니다. 비어 있거나 `change-me-*`,
+    `sample-*-replace-before-pilot`, 8자 미만이면 빌드가 중단됩니다(fail-closed).
   - 시크릿을 등록하지 않으면 Agent는 배포 시 외부 `AgentTokenFile`을 지정할 수 있지만,
     LabManager는 게시(publish) 후 `configure-labmanager.ps1`로 설정하거나 시크릿을 넣어 다시 빌드해야 합니다.
+- 서명 빌드는 인증서를 **CI secret 또는 로컬 인증서 저장소에서만** 가져옵니다.
+  지문은 `UPDATEAGENT_SIGN_THUMBPRINT`(또는 `-CertificateThumbprint`)로,
+  비밀번호는 CI secret/로컬 저장소로 전달하며 **저장소·스크립트·릴리스 노트에
+  절대 기록하지 않습니다.** `-Sign`은 선택 사항이며 인증서가 없는 파일럿은
+  미서명으로 진행할 수 있습니다.
 - 저장소 원격(`origin`)은 스크립트가 없으면 자동 추가합니다.
   `https://github.com/ahbiyout-all/WinAutoUpdate.git`
 
 ### 사용법
 
 ```powershell
-# 패치 버전 올림: 0.1.43 -> 0.1.44 (항상 +1)
+# 패치 버전 올림: 0.1.44 -> 0.1.45 (항상 +1)
 .\scripts\github-push.ps1 -Bump patch -Message "Fix firewall rule cleanup"
 
 # 마이너/메이저
@@ -194,7 +202,7 @@ UpdateAgent.Agent-<버전>-x64.msi        (대안)
 
 ## 6. 태그와 릴리스 규칙
 
-- 태그 형식: `v<Major.Minor.Build>` (예: `v0.1.44`)
+- 태그 형식: `v<Major.Minor.Build>` (예: `v0.1.45`)
 - 태그와 `Directory.Build.props` 버전은 **반드시 같아야** 합니다.
 - 같은 버전으로 다시 릴리스하지 않습니다. 수정은 Build 번호를 올립니다.
 - 릴리스 노트에는 최소한 아래를 포함합니다.
@@ -257,13 +265,18 @@ UpdateAgent.Agent-<버전>-x64.msi        (대안)
 - [ ] `Directory.Build.props` 버전이 의도한 값인가
 - [ ] `dotnet build UpdateAgent.sln -c Release` 경고 0/오류 0
 - [ ] `dotnet test` 전체 통과
+- [ ] 서명 빌드였다면 스테이징 어셈블리와 최종 설치 파일 모두에 대해
+      `signtool verify /pa /all` 검증이 통과했는가 (빌드가 자동 검증하고 실패 시 중단)
+- [ ] 인증서/비밀번호가 CI secret 또는 로컬 인증서 저장소에서만 공급되었는가
+      (저장소·로그·릴리스 노트에 지문/비밀번호 없음)
 - [ ] `scripts\build-inno.ps1`로 두 설치 파일 생성
 - [ ] `scripts\build-msi.ps1`로 MSI 생성(필요 시)
 - [ ] `artifacts\inno\build-info.json`의 `containsSecrets`가 의도와 일치하는가
       (시크릿 미설정 시 `false`, 위 3개 시크릿을 설정한 파일럿 빌드는 `true`이며 expected secrets 3개만 포함)
-- [ ] 두 에이전트 토큰 시크릿(`UPDATEAGENT_AGENT_TOKEN`, `UPDATEAGENT_LABMANAGER_AGENT_TOKEN`)이 모두 설정된 경우 값이 같은가
+- [ ] 두 에이전트 토큰 시크릿(`UPDATEAGENT_AGENT_TOKEN`, `UPDATEAGENT_LABMANAGER_AGENT_TOKEN`)이 모두 설정된 경우 첫 줄이 같은가
       (다르면 워크플로가 중단해야 함)
-- [ ] LabManager 관리자/에이전트 토큰이 서로 다른가 (같으면 서버 시작이 거부되어야 함)
+- [ ] LabManager 관리자/에이전트 토큰이 서로 다른가 (같으면 빌드/워크플로/서버가 거부해야 함)
+- [ ] 내장 토큰 첫 줄이 8자 이상이고 기본값/샘플이 아니며, 시크릿 값이 로그·리포트·명령줄에 없는가
 - [ ] 명시한 토큰 파일이 비어 있을 때 환경 변수로 폴백하지 않고 설치/배포가 중단되는가
 - [ ] `-DryRun`이 git config를 포함한 git 설정을 변경하지 않는가
 - [ ] 릴리스 노트가 이전 태그 이후 커밋을 기준으로 생성되었는가 (고정 문구 아님)
