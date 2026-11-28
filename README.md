@@ -269,10 +269,12 @@ dotnet run --project src/UpdateAgent.Service
 학생 PC 배포는 설치 파일과 **같은 폴더**에 `agent-install.ini`를 두는 방식을 권장합니다.
 토큰 값은 쓰지 않고 토큰 파일 경로만 기록합니다.
 복사용 샘플은 [`scripts/agent-install.sample.ini`](scripts/agent-install.sample.ini)를 사용하세요.
+주소는 교사 PC의 IP를 권장합니다. `scripts\deploy-agents.ps1`이 `-LabManagerUrl` 또는
+`-DiscoverLabManager`로 이 파일을 자동 생성합니다.
 
 ```ini
 [Agent]
-LabManagerUrl=http://labmanager:5080
+LabManagerUrl=http://<교사-PC-IP>:5080
 AgentTokenFile=agent-token.txt
 ```
 

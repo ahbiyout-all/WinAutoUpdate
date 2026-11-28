@@ -236,7 +236,8 @@ public sealed class Audit50Round3ScriptsTests
         Assert.False(bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF);
 
         var text = Encoding.UTF8.GetString(bytes);
-        Assert.Contains("LabManagerUrl=http://labmanager:5080", text);
+        Assert.Contains("LabManagerUrl=http://<교사-PC-IP>:5080", text);
+        Assert.Contains("-DiscoverLabManager (TCP 5080 health check)", text);
         Assert.Contains("AgentTokenFile=agent-token.txt", text);
         Assert.Contains("Never put the token value here", text);
         Assert.Contains("first line is the shared agent token", text);
