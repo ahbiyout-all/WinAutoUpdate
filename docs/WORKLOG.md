@@ -11,12 +11,18 @@
 각 개선마다 자아성찰 10회를 마쳤습니다. 게시 전 최종 검증을 통과한 뒤
 **사용자 명시 승인을 받아 커밋·태그·푸시·Release·게시를 완료했습니다.**
 
-- 게시 결과: 커밋 `53a9d88`, 태그 `v0.1.45`, CI 실행 `46118328743`(`success`, 5분 42초),
+- 게시 결과: 커밋 `53a9d88`, 태그 `v0.1.45`, 최초 CI `46118328743`(`success`),
+  공유 토큰 내장 재빌드 CI `46120663675`(`success`, 5분 47초),
   Release <https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.45>
-- Release 자산 3개(인스톨러 EXE 2개 + MSI 1개)와 SHA-256:
-  - `UpdateAgent.Agent-Setup-0.1.45-x64.exe`: `780d6de6adcf2bd87ee2b3617406c7c9316a67ae58f9d1f0fd5109f9c26ce33d`
-  - `UpdateAgent.LabManager-Setup-0.1.45-x64.exe`: `02da437fbeed4891c889618cc34e220919dacc0daa38854519af2c573787a4f0`
-  - `UpdateAgent.Agent-0.1.45-x64.msi`: `7205b24a71676775841e3acbb2df9be6fd962694cbe8038c5e0055be6118a2dc`
+- 공유 에이전트 토큰을 새로 생성해 `UPDATEAGENT_AGENT_TOKEN`과
+  `UPDATEAGENT_LABMANAGER_AGENT_TOKEN`에 같은 값으로 등록하고, 관리자 토큰은 별도 값으로
+  `UPDATEAGENT_LABMANAGER_ADMIN_TOKEN`에 등록했습니다. 두 설치 프로그램의 첫 설치용 토큰으로
+  내장되었으며, 값은 저장소·로그·리포트·명령줄에 기록하지 않았습니다. 교사 PC 설정 파일은
+  `%LOCALAPPDATA%\UpdateAgent\secrets`에만 보관합니다.
+- Release 자산 3개(인스톨러 EXE 2개 + MSI 1개)와 SHA-256(재빌드 후 최종값):
+  - `UpdateAgent.Agent-Setup-0.1.45-x64.exe`: `cbcca6660daf596148c6e007547348a2f826d17b35ebc8d7243b662f91cf951b`
+  - `UpdateAgent.LabManager-Setup-0.1.45-x64.exe`: `c44f140f0c2612f3a164dba8e3f254f319e73e068cc35309dd8cdf4c0b132a32`
+  - `UpdateAgent.Agent-0.1.45-x64.msi`: `787227aab6cfcc068c57a1a25fca4c397346c0248cb163a3f5b9d9cffe20cce2`
 - 개선 1~10 누적 신규 회귀 테스트: 411 → 425 → 451 → 464 → 475 → 493 → 514 → 523 → 532 → 546
 - 버전 단일 소스(`Directory.Build.props`)와 Inno/MSI 폴백 버전, 문서 예제를 `0.1.45`로 갱신했습니다.
 - 이미 게시된 `v0.1.44`(커밋 `c88b65f`, 태그, Release, 산출물 SHA-256)는 변경하지 않았습니다.
