@@ -283,7 +283,7 @@
         <div class="section-label">대시보드 연결</div>
         <p class="muted small">appsettings.json의 <code>LabManager:AdminToken</code> 값과 같아야 합니다.</p>
         <input type="text" id="token-input" class="text-input" placeholder="관리자 토큰" autocomplete="off" aria-label="관리자 토큰" />
-        <p class="muted small">sample-*-replace-before-pilot 값은 배포용 토큰이 아닙니다. 설치/서버 시작 전에 실제 토큰으로 교체하세요.</p>
+        <p class="muted small">첫 설치 시 실제 관리자 토큰이 서버 설정에 자동으로 기록됩니다. 값은 <code>C:\Program Files\UpdateAgent\LabManager\appsettings.json</code>의 <code>LabManager:AdminToken</code> 또는 설치 시 보관한 토큰 파일 첫 줄에서 확인하세요. 샘플/예시 토큰은 입력하지 마세요.</p>
         <div id="token-status" class="token-status hidden"></div>
         <div class="modal-foot">
           <button id="token-save" class="btn btn-primary">저장</button>
