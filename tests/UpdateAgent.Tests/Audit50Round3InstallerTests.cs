@@ -150,10 +150,10 @@ public sealed class Audit50Round3InstallerTests
     [Fact]
     public void InstallerVersionFallbacksMatchPublishedTag()
     {
-        Assert.Contains("#define AppVersion \"0.1.46\"", Read("installer/InnoSetup/UpdateAgent.Agent.iss"));
-        Assert.Contains("#define AppVersion \"0.1.46\"", Read("installer/InnoSetup/UpdateAgent.LabManager.iss"));
+        Assert.Contains("#define AppVersion \"0.1.47\"", Read("installer/InnoSetup/UpdateAgent.Agent.iss"));
+        Assert.Contains("#define AppVersion \"0.1.47\"", Read("installer/InnoSetup/UpdateAgent.LabManager.iss"));
         Assert.Contains(
-            "<ProductVersion Condition=\"'$(ProductVersion)' == ''\">0.1.46</ProductVersion>",
+            "<ProductVersion Condition=\"'$(ProductVersion)' == ''\">0.1.47</ProductVersion>",
             Read("installer/UpdateAgent.Agent.Installer/UpdateAgent.Agent.Installer.wixproj"));
     }
 

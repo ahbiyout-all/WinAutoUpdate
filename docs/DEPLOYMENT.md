@@ -108,17 +108,20 @@ Ctrl+C로 취소할 수 있고, 취소 신호를 정상 취소로 변환해 보�
 
 | 항목 | 값 |
 |---|---|
-| 이름 | 교사 PC를 `labmanager` 이름으로 확인 (없으면 IP 직접 사용) |
-| 주소 | `http://labmanager:5080` 또는 `http://<교사-PC-IP>:5080` |
+| 이름 | DNS 별칭 `labmanager`는 선택 사항 (기본 배포는 IP 사용) |
+| 주소 | `http://<교사-PC-IP>:5080` (권장) 또는 `http://labmanager:5080` |
 | 교사 PC IP | 고정 IP 또는 DHCP 예약 (예: `192.168.0.10`) |
 | 포트 | TCP 5080 |
 | 폴링 주기 | 30초 (최소 15초), 온라인 판정 90초 |
 | 에이전트 토큰 | 모든 학생 PC에 **동일**하게 배포 |
 | 관리자 토큰 | 교사 PC에만 보관 (대시보드/API 로그인) |
 
-> 위 표의 첫 항목은 DNS 별칭을 뜻합니다. 내부 DNS가 없으면 라우터에서 `labmanager`를
-> 교사 PC IP로 매핑하거나, 각 학생 PC의 hosts 파일에 같은 항목을 추가하세요.
-> DNS를 쓰기 어렵다면 `-LabManagerUrl http://<교사-PC-IP>:5080`로 IP를 직접 지정하면 됩니다.
+> 기본 배포는 IP 방식입니다. `-LabManagerUrl http://<교사-PC-IP>:5080`으로 명시하거나
+> `-DiscoverLabManager`로 같은 서브넷에서 TCP 5080 헬스체크에 응답하는 교사 PC를 찾으면
+> `agent-install.ini`에 `http://<검색된-IP>:5080`이 자동으로 기록됩니다.
+> 검색 대상이 0대거나 2대 이상이면 수동 지정을 요구하고 패키지를 만들지 않습니다.
+> DNS 별칭 `labmanager`를 쓰려면 `-LabManagerUrl http://labmanager:5080`을 명시하세요.
+> 명시한 URL은 항상 자동 검색보다 우선합니다.
 
 ## 1. 사전 확인
 
@@ -223,13 +226,23 @@ Runtime(win-x64)이 설치되어 있다는 전제에서만 경량 패키지를 �
 패키지를 생성합니다.
 
 ```powershell
+# IP 방식: 교사 PC 주소를 명시해 기본 agent-install.ini에 기록
+.\scripts\deploy-agents.ps1 `
+  -InventoryCsv ".\inventory.csv" `
+  -UseEmbeddedToken `
+  -LabManagerUrl "http://192.168.0.10:5080"
+
+# IP 자동 검색: 같은 서브넷의 TCP 5080 헬스체크로 교사 PC를 찾아 INI에 기록
+.\scripts\deploy-agents.ps1 `
+  -InventoryCsv ".\inventory.csv" `
+  -UseEmbeddedToken `
+  -DiscoverLabManager
+
+# 외부 토큰 파일을 쓰는 경우
 .\scripts\deploy-agents.ps1 `
   -InventoryCsv ".\inventory.csv" `
   -AgentTokenFile "$env:TEMP\updateagent-lab\agent-token.txt" `
-  -LabManagerUrl "http://labmanager:5080"
-
-# 릴리스 설치 exe에 첫 설치용 토큰이 내장되어 있다면 토큰 파일 없이 생성
-.\scripts\deploy-agents.ps1 -InventoryCsv ".\inventory.csv" -UseEmbeddedToken
+  -LabManagerUrl "http://192.168.0.10:5080"
 ```
 
 `-UseEmbeddedToken`을 쓰면 패키지에 `agent-token.txt`가 없고 `agent-install.ini`에는 주소만 들어갑니다.
@@ -262,7 +275,7 @@ deploy\agents\
 
 ```ini
 [Agent]
-LabManagerUrl=http://labmanager:5080
+LabManagerUrl=http://192.168.0.10:5080
 AgentTokenFile=agent-token.txt
 ```
 
@@ -285,8 +298,9 @@ INI는 BOM 없이 저장하세요. 값 뒤의 `; 주석`은 설치 프로그램�
 패키지 생성을 중단합니다. 설치 전 검증(URL, 토큰, INI)은 기존 설치 제거 전에 수행되므로 실패 시 PC를 변경하지 않습니다.
 설치 실패 시 오류 원인은 `%TEMP%\Setup Log <날짜>.txt`에서 확인하세요.
 
-`deployment-report.json`에는 생성 시각(UTC), 설치 파일 이름·버전·SHA-256, LabManager 주소, 사전 점검 결과,
-PC 수와 각 패키지의 설치 파일/INI/토큰 파일 SHA-256이 들어갑니다. **토큰 원문은 기록하지 않습니다.**
+`deployment-report.json`에는 생성 시각(UTC), 설치 파일 이름·버전·SHA-256, LabManager 주소, 주소 출처
+(`DiscoveryMode`: `explicit`/`discovered`/`default`), 사전 점검 결과, PC 수와 각 패키지의 설치 파일/INI/토큰 파일
+SHA-256이 들어갑니다. **토큰 원문은 기록하지 않습니다.**
 패키지를 복사한 뒤에는 다음 명령으로 파일이 변조되지 않았는지 검증할 수 있습니다. 이 모드는 파일을 쓰지 않습니다.
 
 ```powershell
@@ -299,7 +313,9 @@ PC 수와 각 패키지의 설치 파일/INI/토큰 파일 SHA-256이 들어갑�
 이 모드는 토큰 파일 검사를 건너뛰고, 기존 설치가 감지되면 `agent.json`을 유지합니다.
 또는 `deploy-agents.ps1`로 새 토큰 파일이 포함된 패키지를 다시 생성하는 방법을 권장합니다.
 
-DNS 별칭이 없다면 `-LabManagerUrl "http://192.168.0.10:5080"`로 IP를 지정하세요.
+IP는 `-LabManagerUrl "http://192.168.0.10:5080"`으로 지정하거나 `-DiscoverLabManager`로 자동 검색하세요.
+교사 PC가 여러 개/0개 검색되면 `-LabManagerUrl`을 명시해야 합니다. 네트워크가 서브넷 간 라우팅으로
+분리돼 있으면 자동 검색할 대상이 없으므로 명시적 IP가 필요합니다.
 다른 설치 파일을 쓰면 `-InstallerPath`로 경로를 넘깁니다.
 
 ## 6. 실제 설치 실행

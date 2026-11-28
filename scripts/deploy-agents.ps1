@@ -11,8 +11,11 @@ For each ComputerName in the CSV, creates <OutputDir>\<ComputerName>\ containing
 
 The installer reads agent-install.ini from its own folder, so no settings are
 passed on the command line. No token is ever placed on a command line.
-With -UseEmbeddedToken the token file is not copied and the INI contains only
-the LabManager URL; the installer uses its embedded first-install token.
+The INI always carries an IP-based LabManager URL (http://<teacher-IP>:5080).
+Use -DiscoverLabManager to find the teacher PC on the local subnet, or pass
+-LabManagerUrl explicitly. With -UseEmbeddedToken the token file is not copied
+and the INI contains only the LabManager URL; the installer uses its embedded
+first-install token.
 Generation is the default and performs
 no remote action apart from a preflight check of LabManager /api/health.
 Packages can be copied to each PC (USB/RDP) or wrapped by PsExec/WinRM.
@@ -35,6 +38,12 @@ the Korean output and is never treated as verified self-contained.
 Require a framework-dependent Agent installer and record that prerequisite in
 README.txt and deployment-report.json. This is strictly opt-in.
 
+.PARAMETER DiscoverLabManager
+When -LabManagerUrl is not supplied, scan the local IPv4 subnet for a LabManager
+listening on TCP 5080 whose /api/health returns product "UpdateAgent". Exactly
+one match is written to agent-install.ini as http://<IP>:5080. Zero or multiple
+matches fail closed. An explicit -LabManagerUrl always wins and skips discovery.
+
 .EXAMPLE
 .\scripts\deploy-agents.ps1 -InventoryCsv .\scripts\agents.sample.csv -AgentTokenFile .\secure\agent-token.txt
 
@@ -43,6 +52,9 @@ README.txt and deployment-report.json. This is strictly opt-in.
 
 # Use the embedded first-install token when the setup exe was built with secrets.
 .\scripts\deploy-agents.ps1 -InventoryCsv .\inventory.csv -UseEmbeddedToken
+
+# Find the teacher PC by TCP 5080 health check and write its IP into agent-install.ini.
+.\scripts\deploy-agents.ps1 -InventoryCsv .\inventory.csv -UseEmbeddedToken -DiscoverLabManager
 
 # Skip the remote health check for an offline staging run.
 .\scripts\deploy-agents.ps1 -InventoryCsv .\inventory.csv -AgentTokenFile .\secure\agent-token.txt -SkipPreflight
@@ -64,6 +76,9 @@ param(
 
     # Skips the LabManager /api/health check only; token validation still runs.
     [switch]$SkipPreflight,
+
+    # Find the LabManager IP from the local subnet when -LabManagerUrl is omitted.
+    [switch]$DiscoverLabManager,
 
     # Checks the deployment report and files without generating or modifying anything.
     [switch]$Verify,
@@ -220,6 +235,92 @@ function Invoke-LabManagerHealthCheck {
     }
 }
 
+function Get-SubnetScanAddresses {
+    $interfaces = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop | Where-Object {
+        $_.IPAddress -notlike '127.*' -and
+        $_.IPAddress -notlike '169.254.*' -and
+        $_.PrefixLength -ge 16 -and $_.PrefixLength -le 30
+    })
+    if ($interfaces.Count -eq 0) {
+        throw 'LabManager discovery needs an IPv4 interface with a /16-/30 prefix. Pass -LabManagerUrl instead.'
+    }
+
+    $own = @($interfaces | ForEach-Object { $_.IPAddress })
+    $seen = @{}
+    $addresses = @()
+    foreach ($interface in $interfaces) {
+        $hostBits = 32 - [int]$interface.PrefixLength
+        $size = [uint64]1 -shl $hostBits
+        if ($size -gt 4096) {
+            throw "Subnet $($interface.IPAddress)/$($interface.PrefixLength) is too large to scan; pass -LabManagerUrl instead."
+        }
+        $bytes = [System.Net.IPAddress]::Parse($interface.IPAddress).GetAddressBytes()
+        [Array]::Reverse($bytes)
+        $value = [uint64][BitConverter]::ToUInt32($bytes, 0)
+        $hostMask = (([uint64]1 -shl $hostBits) - 1)
+        $network = $value -band ([uint64]0xFFFFFFFF -bxor $hostMask)
+        for ($offset = 1; $offset -lt ($size - 1); $offset++) {
+            $candidateBytes = [BitConverter]::GetBytes([uint32]($network + $offset))
+            [Array]::Reverse($candidateBytes)
+            $ip = [System.Net.IPAddress]::new($candidateBytes).ToString()
+            if ($own -contains $ip -or $seen.ContainsKey($ip)) { continue }
+            $seen[$ip] = $true
+            $addresses += $ip
+        }
+    }
+    return $addresses
+}
+
+function Test-TcpPortOpen {
+    param([string[]]$Addresses, [int]$Port, [int]$TimeoutMs)
+
+    $open = @()
+    for ($start = 0; $start -lt $Addresses.Count; $start += 32) {
+        $batch = @($Addresses | Select-Object -Skip $start -First 32)
+        $pending = @()
+        foreach ($address in $batch) {
+            $client = New-Object System.Net.Sockets.TcpClient
+            try {
+                $async = $client.BeginConnect($address, $Port, $null, $null)
+                $pending += [pscustomobject]@{ Address = $address; Client = $client; Async = $async }
+            }
+            catch { $client.Close() }
+        }
+        foreach ($entry in $pending) {
+            try {
+                if ($entry.Async.AsyncWaitHandle.WaitOne($TimeoutMs, $false) -and $entry.Client.Connected) {
+                    $open += $entry.Address
+                }
+            }
+            catch { }
+            finally { $entry.Client.Close() }
+        }
+    }
+    return $open
+}
+
+function Find-LabManagerAddresses {
+    $addresses = @(Get-SubnetScanAddresses)
+    $openPorts = @(Test-TcpPortOpen -Addresses $addresses -Port 5080 -TimeoutMs 400)
+    $matches = @()
+    foreach ($address in $openPorts) {
+        try {
+            $health = Invoke-RestMethod -Uri "http://${address}:5080/api/health" -TimeoutSec 3 -ErrorAction Stop
+            $statusProperty = $health.PSObject.Properties['status']
+            $productProperty = $health.PSObject.Properties['product']
+            $versionProperty = $health.PSObject.Properties['version']
+            if ($null -ne $statusProperty -and $null -ne $productProperty -and $null -ne $versionProperty -and
+                [string]$statusProperty.Value -eq 'ok' -and
+                [string]$productProperty.Value -eq 'UpdateAgent' -and
+                -not [string]::IsNullOrWhiteSpace([string]$versionProperty.Value)) {
+                $matches += $address
+            }
+        }
+        catch { }
+    }
+    return $matches
+}
+
 function Get-RequiredReportValue {
     param([object]$Object, [string]$Name, [string]$Context)
 
@@ -374,6 +475,10 @@ function Invoke-DeploymentVerification {
     Write-Host "  Installer: $reportInstallerName (version $versionText)"
     Write-Host "  Runtime: $runtimeModeText"
     Write-Host "  LabManager: $reportLabManagerUrl"
+    $discoveryProperty = $report.PSObject.Properties['DiscoveryMode']
+    if ($null -ne $discoveryProperty -and $null -ne $discoveryProperty.Value) {
+        Write-Host "  Discovery: $($discoveryProperty.Value)"
+    }
 }
 
 if ($Verify) {
@@ -392,6 +497,29 @@ if ((-not $UseEmbeddedToken) -and [string]::IsNullOrWhiteSpace($AgentTokenFile))
 }
 
 if ($ExecuteLocal) { Assert-Administrator }
+
+$discoveryMode = 'explicit'
+if ($DiscoverLabManager -and -not $PSBoundParameters.ContainsKey('LabManagerUrl')) {
+    $discoveryMode = 'discovered'
+    Write-Host 'Discovering LabManager on TCP 5080 in the local subnet...' -ForegroundColor Cyan
+    $found = @(Find-LabManagerAddresses)
+    if ($found.Count -eq 0) {
+        throw 'LabManager discovery found no matching host on TCP 5080. Pass -LabManagerUrl http://<IP>:5080 explicitly.'
+    }
+    if ($found.Count -gt 1) {
+        throw ("LabManager discovery found {0} candidates ({1}). Pass -LabManagerUrl http://<IP>:5080 explicitly." -f
+            $found.Count, ($found -join ', '))
+    }
+    $LabManagerUrl = "http://$($found[0]):5080"
+    Write-Host "  Found LabManager: $LabManagerUrl" -ForegroundColor Green
+}
+elseif ($DiscoverLabManager) {
+    $discoveryMode = 'explicit (discovery skipped)'
+    Write-Host 'Explicit -LabManagerUrl supplied; skipping discovery.' -ForegroundColor Yellow
+}
+elseif (-not $PSBoundParameters.ContainsKey('LabManagerUrl')) {
+    $discoveryMode = 'default'
+}
 
 $LabManagerUrl = $LabManagerUrl.Trim().TrimEnd('/')
 $uri = $null
@@ -689,6 +817,9 @@ __PACKAGE_TOKEN__  install-agent.cmd                          elevated silent in
 Run install-agent.cmd on the matching student PC from an elevated prompt.
 The installer reads agent-install.ini from its own folder, so no settings are
 passed on the command line. __TOKEN_NOTE__
+agent-install.ini uses an IP-based LabManager URL (http://<teacher-IP>:5080).
+Generate with -DiscoverLabManager to find the teacher PC automatically, or
+pass -LabManagerUrl explicitly when automatic detection is unavailable.
 
 For an upgrade that needs no token file, run:
   install-agent.cmd /Upgrade
@@ -722,6 +853,7 @@ $deploymentReport = [ordered]@{
     RuntimeMode         = $installerRuntimeMode
     RuntimeRequirement  = $runtimeRequirement
     LabManagerUrl       = $safeLabManagerUrl
+    DiscoveryMode       = $discoveryMode
     Preflight           = $preflightPerformed
     PackageCount        = $packages.Count
     Packages            = @($reportPackages)
