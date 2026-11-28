@@ -28,10 +28,17 @@
 - 기존 토큰 값과 GitHub secrets는 변경하지 않았습니다. 토큰 원문은 저장소·로그·리포트·명령줄에
   기록하지 않았습니다.
 
-### 검증
+### 검증과 게시 결과
 
+- 커밋 `aa5954d`, 태그 `v0.1.46`, CI 실행 `46123432928`(`success`, 5분 34초),
+  Release <https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.46>
+- CI 로그에 첫 설치용 에이전트 토큰·LabManager 토큰 파일 내장(값 숨김)이 기록됐습니다.
+  두 에이전트 토큰의 동일성과 관리자/에이전트 토큰의 별개성 검증도 통과했습니다.
 - 전체 테스트 546/546 통과, `git diff --check` 공백 오류 0.
-- 게시 결과와 최종 산출물 해시는 아래 게시 완료 항목에 기록합니다.
+- Release 자산 3개(인스톨러 EXE 2개 + MSI 1개)와 SHA-256:
+  - `UpdateAgent.Agent-Setup-0.1.46-x64.exe`: `7a9c781ef7f1096ef21e8f062fcc0da80827f24df1a091a1e8df36d4e3a3572e`
+  - `UpdateAgent.LabManager-Setup-0.1.46-x64.exe`: `26dc4d7408f87661e1979939e722bec4fede7f685d76f13fdfc205e6754698f9`
+  - `UpdateAgent.Agent-0.1.46-x64.msi`: `a52e3965fbc7bca13d169963effcad180f5618f0e4bf1e63273e2284565cb1ed`
 
 ---
 
