@@ -37,12 +37,21 @@
 - `docs/INSTALLER.md`, `docs/PILOT.md`에 DNS 기본값 중심 설명이 남아 있어 IP 방식·자동 검색·고정 토큰
   교체 권고를 반영했습니다. `docs/DEPLOYMENT.md`에 자동 검색 문제 해결 절차를 추가했습니다.
 
-### 검증
+### 검증과 게시 결과
 
 - 서브넷 재검산: `192.168.0.10/24` → `192.168.0.1`~`192.168.0.254`,
   `10.0.0.5/30` → `10.0.0.6`, `172.16.5.9/16` → `172.16.0.1`~`172.16.255.254`.
-- 전체 테스트와 빌드·비밀 스캔 결과는 게시 완료 항목에 기록합니다.
-- 게시 결과와 최종 산출물 해시는 게시 후 아래 항목에 기록합니다.
+  `Get-SubnetScanAddresses`를 목 IP로 실제 실행해 253개 주소와 자기 IP 제외를 확인했습니다.
+- 커밋 `50ab7cf`, 태그 `v0.1.48`, CI 실행 `46138061537`(`success`, 4분 28초),
+  Release <https://github.com/ahbiyout-all/WinAutoUpdate/releases/tag/v0.1.48>
+- CI 로그에 첫 설치용 에이전트 토큰·LabManager 토큰 파일 내장(값 숨김)이 기록됐습니다.
+  토큰 값은 변경하지 않았고 CI 로그·저장소에서 원문 검색 결과 0건입니다.
+- 전체 테스트 553/553 통과, 빌드 경고 0/오류 0, PowerShell 파서 오류 0, 비밀 스캔 통과,
+  `git diff --check` 오류 0, `.iss` BOM 유지.
+- Release 자산 3개(인스톨러 EXE 2개 + MSI 1개)와 SHA-256:
+  - `UpdateAgent.Agent-Setup-0.1.48-x64.exe`: `59349e9e88fe39c459dc93aba8261f11de2b19f70db278543685c1e251797482`
+  - `UpdateAgent.LabManager-Setup-0.1.48-x64.exe`: `1aa360d6697b0670e0bfeca560510dc8bd5149e7f9ceb561bafe4a8ded017cd3`
+  - `UpdateAgent.Agent-0.1.48-x64.msi`: `c4cea5d8e121ee1166301dad96b1a7b35ce211443e2bbea9949ccddbf717d952`
 
 ---
 
